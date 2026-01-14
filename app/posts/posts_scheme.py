@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator # 422에러 자동해결해줌
+from typing import Optional #없어도 되는값 처리
 
 #게시글 작성 요청
 class PostCreateRequest(BaseModel):
