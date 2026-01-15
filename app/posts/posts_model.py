@@ -1,5 +1,7 @@
+# app/models/posts_model.py
 from typing import Optional, Dict, List
 from datetime import datetime
+import threading
 
 class PostsModel:
     """인메모리 JSON 저장소를 사용한 Posts 모델"""
@@ -7,18 +9,25 @@ class PostsModel:
     # 인메모리 데이터 저장소
     _posts: Dict[int, dict] = {}
     _post_id_counter: int = 1
+    _post_id_lock = threading.Lock()  # 동시성 제어용 락
+    
     _file_id_counter: int = 1
+    _file_id_lock = threading.Lock()  # 동시성 제어용 락
 
     #게시글 생성, 자동으로 postId와 fileId 할당
     @classmethod
     def create_post(cls, user_id: int, title: str, content: str, file_url: str = "") -> dict:
-        post_id = cls._post_id_counter
-        cls._post_id_counter += 1
+        # 동시성 제어: post_id 할당 시 락 사용
+        with cls._post_id_lock:
+            post_id = cls._post_id_counter
+            cls._post_id_counter += 1
 
         file_info = None
         if file_url:
-            file_id = cls._file_id_counter
-            cls._file_id_counter += 1
+            # 동시성 제어: file_id 할당 시 락 사용
+            with cls._file_id_lock:
+                file_id = cls._file_id_counter
+                cls._file_id_counter += 1
             file_info = {
                 "fileId": file_id,
                 "fileUrl": file_url
@@ -71,8 +80,10 @@ class PostsModel:
                 if post["file"]:
                     post["file"]["fileUrl"] = file_url
                 else:
-                    file_id = cls._file_id_counter
-                    cls._file_id_counter += 1
+                    # 동시성 제어: file_id 할당 시 락 사용
+                    with cls._file_id_lock:
+                        file_id = cls._file_id_counter
+                        cls._file_id_counter += 1
                     post["file"] = {
                         "fileId": file_id,
                         "fileUrl": file_url
@@ -145,5 +156,7 @@ class PostsModel:
     @classmethod
     def clear_all_data(cls):
         cls._posts.clear()
-        cls._post_id_counter = 1
-        cls._file_id_counter = 1
+        with cls._post_id_lock:
+            cls._post_id_counter = 1
+        with cls._file_id_lock:
+            cls._file_id_counter = 1
