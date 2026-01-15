@@ -110,7 +110,7 @@ class AuthController:
         
         # 프로필 이미지 URL 형식 검증
         if not AuthController.validate_profile_image_url(profile_image_url):
-            raise HTTPException(status_code=400, detail={"code": "INVALID_PROFILEIAMGEURL", "data": None})
+            raise HTTPException(status_code=400, detail={"code": "INVALID_PROFILEIMAGEURL", "data": None})
         
         #status code 409번
         # 이메일 중복 확인
@@ -155,12 +155,12 @@ class AuthController:
         if not user:
             raise HTTPException(status_code=401, detail={"code": "INVALID_CREDENTIALS", "data": None})
         
-        # 비밀번호 확인
-        if user["password"] != password:
+        # 비밀번호 확인 (해시화된 비밀번호와 비교)
+        if not AuthModel.verify_password(user["userId"], password):
             raise HTTPException(status_code=401, detail={"code": "INVALID_CREDENTIALS", "data": None})
         
         # 세션 ID 생성 (쿠키-세션 방식)
-        auth_token = AuthModel.create_token(user["userId"])
+        session_id = AuthModel.create_token(user["userId"])
         
         # status code 200번(로그인 성공)
         return {
@@ -169,40 +169,40 @@ class AuthController:
                 "userId": user["userId"],
                 "email": user["email"],
                 "nickname": user["nickname"],
-                "authToken": auth_token,  # API 명세서에 따라 authToken 포함 (실제 인증은 쿠키의 session_id 사용)
+                "authToken": session_id,  # API 명세서에 따라 authToken 포함 (실제 인증은 쿠키의 session_id 사용)
                 "profileImage": user["profileImageUrl"]
             }
         }
     
     @staticmethod
-    def logout(token: Optional[str]):
-        """로그아웃 처리"""
+    def logout(session_id: Optional[str]):
+        """로그아웃 처리 (쿠키-세션 방식)"""
         # status code 401번
         # 인증 정보 없음
-        if not token:
+        if not session_id:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
         
-        # 토큰 검증 실패
-        user_id = AuthModel.verify_token(token)
+        # 세션 ID 검증 실패
+        user_id = AuthModel.verify_token(session_id)
         if not user_id:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
         
-        # 토큰 삭제
-        AuthModel.revoke_token(token)
+        # 세션 ID 삭제
+        AuthModel.revoke_token(session_id)
         
         # status code 200번(로그아웃 성공)
         return {"code": "LOGOUT_SUCCESS", "data": None}
     
     @staticmethod
-    def get_me(token: Optional[str]):
-        """현재 로그인한 사용자 정보 조회"""
+    def get_me(session_id: Optional[str]):
+        """현재 로그인한 사용자 정보 조회 (쿠키-세션 방식)"""
         # status code 401번
         # 인증 정보 없음
-        if not token:
+        if not session_id:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
         
-        # 토큰 검증 실패
-        user_id = AuthModel.verify_token(token)
+        # 세션 ID 검증 실패
+        user_id = AuthModel.verify_token(session_id)
         if not user_id:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
         
@@ -224,14 +224,14 @@ class AuthController:
     
     @staticmethod
     def verify_token(authorization: Optional[str]) -> int:
-        """Authorization 헤더에서 토큰 검증 및 사용자 ID 반환"""
+        """Authorization 헤더에서 세션 ID 검증 및 사용자 ID 반환"""
         if not authorization:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
         
         # "Bearer " 접두사 제거
-        token = authorization.replace("Bearer ", "").strip() if authorization else None
+        session_id = authorization.replace("Bearer ", "").strip() if authorization else None
         
-        user_id = AuthModel.verify_token(token)
+        user_id = AuthModel.verify_token(session_id)
         if not user_id:
             raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
         

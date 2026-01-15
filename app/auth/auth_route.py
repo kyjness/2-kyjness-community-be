@@ -165,11 +165,8 @@ async def login(request: Request, response: Response, login_data: Optional[Login
 async def logout(response: Response, session_id: Optional[str] = Cookie(None)):
     """로그아웃 API (쿠키-세션 방식)"""
     try:
-        # 쿠키에서 세션 ID 추출
-        token = session_id
-        
         # Controller 호출
-        result = AuthController.logout(token)
+        result = AuthController.logout(session_id)
         
         # 쿠키 삭제
         response.delete_cookie(key="session_id")
@@ -195,12 +192,9 @@ async def logout(response: Response, session_id: Optional[str] = Cookie(None)):
 async def get_me(session_id: Optional[str] = Cookie(None)):
     """로그인 상태 체크 API (쿠키-세션 방식)"""
     try:
-        # 쿠키에서 세션 ID 추출
-        token = session_id
-        
         # Controller 호출
         # status code 200번(로그인 상태 체크 성공)
-        return AuthController.get_me(token)
+        return AuthController.get_me(session_id)
     except HTTPException as e:
         # status code: Controller에서 발생한 에러 코드 (401 등)
         # HTTPException의 detail이 dict인 경우 그대로 반환
