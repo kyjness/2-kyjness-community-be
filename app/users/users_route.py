@@ -1,4 +1,4 @@
-# app/routes/users_route.py
+# app/users/users_route.py
 from fastapi import APIRouter, HTTPException, Body, Cookie, Query, Path, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
@@ -18,56 +18,18 @@ async def upload_profile_image(
 ):
     """프로필 이미지 업로드 API"""
     try:
-        # status code 401번
-        # 인증 정보 없음
-        if not session_id:
-            return JSONResponse(
-                status_code=401,
-                content={"code": "UNAUTHORIZED", "data": None}
-            )
-        
-        # 세션 ID 검증
-        from app.models.auth_model import AuthModel
-        authenticated_user_id = AuthModel.verify_token(session_id)
-        if not authenticated_user_id:
-            return JSONResponse(
-                status_code=401,
-                content={"code": "UNAUTHORIZED", "data": None}
-            )
-        
-        # status code 403번
-        # 다른 사용자 프로필 이미지 업로드 시도
-        if authenticated_user_id != user_id:
-            return JSONResponse(
-                status_code=403,
-                content={"code": "FORBIDDEN", "data": None}
-            )
-        
-        # status code 400번
-        # user_id 형식 검증
-        if not isinstance(user_id, int) or user_id <= 0:
-            return JSONResponse(
-                status_code=400,
-                content={"code": "INVALID_USERID_FORMAT", "data": None}
-            )
-        
-        # status code 400번
-        # 파일 없음
-        if not profileImage:
-            return JSONResponse(
-                status_code=400,
-                content={"code": "MISSING_REQUIRED_FIELD", "data": None}
-            )
-        
-        # TODO: 파일 업로드 기능 구현 필요
-        # - 파일 형식 검증 (.jpg만 허용)
-        # - 파일 크기 검증
-        # - 이미지 파일 검증 (깨진 파일 체크)
-        # - 파일 저장 및 URL 생성
-        return JSONResponse(
-            status_code=501,
-            content={"code": "NOT_IMPLEMENTED", "data": None}
+        # Controller 호출
+        return await UsersController.upload_profile_image(
+            user_id=user_id,
+            session_id=session_id,
+            profile_image=profileImage
         )
+    except HTTPException as e:
+        # status code: Controller에서 발생한 에러 코드 (400, 401, 403, 404 등)
+        # HTTPException의 detail이 dict인 경우 그대로 반환
+        if isinstance(e.detail, dict):
+            return JSONResponse(status_code=e.status_code, content=e.detail)
+        raise
     except Exception as e:
         # status code 500번
         # 예상치 못한 모든 에러

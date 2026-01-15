@@ -1,4 +1,4 @@
-# app/models/auth_model.py
+# app/auth/auth_model.py
 from typing import Optional, Dict
 import secrets  # 암호학적으로 안전한 랜덤 세션 ID 생성용
 import time

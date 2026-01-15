@@ -1,8 +1,8 @@
-# app/controllers/auth_controller.py
+# app/auth/auth_controller.py
 from fastapi import HTTPException
 from typing import Optional
 import re
-from app.models.auth_model import AuthModel
+from app.auth.auth_model import AuthModel
 
 class AuthController:
     """인증 관련 비즈니스 로직 처리"""

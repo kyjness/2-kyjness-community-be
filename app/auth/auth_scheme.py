@@ -1,4 +1,4 @@
-# app/schemas/auth.py
+# app/auth/auth_scheme.py
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Dict, Any
 

@@ -1,4 +1,4 @@
-# app/routes/posts_route.py
+# app/posts/posts_route.py
 from fastapi import APIRouter, HTTPException, Body, Cookie, Query, Path, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
@@ -6,7 +6,7 @@ from typing import Optional
 from pydantic import ValidationError
 from app.posts.posts_scheme import PostCreateRequest, PostUpdateRequest
 from app.posts.posts_controller import PostsController
-from app.models.auth_model import AuthModel
+from app.auth.auth_model import AuthModel
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 

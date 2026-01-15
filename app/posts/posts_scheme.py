@@ -1,4 +1,4 @@
-# app/schemas/posts.py
+# app/posts/posts_scheme.py
 from pydantic import BaseModel, Field
 from typing import Optional
 

@@ -1,8 +1,8 @@
-# app/controllers/posts_controller.py
+# app/posts/posts_controller.py
 from fastapi import HTTPException, UploadFile
 from typing import Optional
 from app.posts.posts_model import PostsModel
-from app.models.auth_model import AuthModel
+from app.auth.auth_model import AuthModel
 
 class PostsController:
     """Posts 비즈니스 로직 처리"""

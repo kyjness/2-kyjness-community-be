@@ -1,9 +1,9 @@
-# app/controllers/users_controller.py
-from fastapi import HTTPException
+# app/users/users_controller.py
+from fastapi import HTTPException, UploadFile
 from typing import Optional
 import re
-from app.models.users_model import UsersModel
-from app.models.auth_model import AuthModel
+from app.users.users_model import UsersModel
+from app.auth.auth_model import AuthModel
 
 class UsersController:
     """사용자 정보 수정 관련 비즈니스 로직 처리"""
@@ -17,6 +17,10 @@ class UsersController:
     
     # URL 형식 검증
     URL_PATTERN = re.compile(r'^(http://|https://|\{BE-API-URL\})')
+    
+    # 프로필 이미지 업로드 관련 상수
+    ALLOWED_PROFILE_IMAGE_TYPES = ["image/jpeg", "image/jpg"]  # .jpg만 허용
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
     
     @staticmethod
     def validate_password_format(password: str) -> bool:
@@ -53,6 +57,87 @@ class UsersController:
         if not url.strip():
             return True  # 빈 문자열도 허용 (기본 이미지 사용)
         return bool(UsersController.URL_PATTERN.match(url))
+    
+    @staticmethod
+    def _is_valid_jpeg_image(file_content: bytes) -> bool:
+        """JPEG 이미지 파일 유효성 검증 (매직 넘버 체크)"""
+        if not file_content or len(file_content) < 2:
+            return False
+        # JPEG 매직 넘버 체크: FF D8로 시작해야 함
+        return file_content[:2] == b'\xff\xd8'
+    
+    @staticmethod
+    async def upload_profile_image(user_id: int, session_id: Optional[str], profile_image: UploadFile):
+        """프로필 이미지 업로드 처리"""
+        # status code 401번
+        # 인증 정보 없음
+        if not session_id:
+            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
+        
+        # 세션 ID 검증
+        authenticated_user_id = AuthModel.verify_token(session_id)
+        if not authenticated_user_id:
+            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
+        
+        # status code 403번
+        # 다른 사용자 프로필 이미지 업로드 시도
+        if authenticated_user_id != user_id:
+            raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "data": None})
+        
+        # status code 400번
+        # user_id 형식 검증
+        if not isinstance(user_id, int) or user_id <= 0:
+            raise HTTPException(status_code=400, detail={"code": "INVALID_USERID_FORMAT", "data": None})
+        
+        # status code 400번
+        # 파일 없음
+        if not profile_image:
+            raise HTTPException(status_code=400, detail={"code": "MISSING_REQUIRED_FIELD", "data": None})
+        
+        # status code 400번
+        # 파일 타입 검증 (.jpg만 허용)
+        if profile_image.content_type not in UsersController.ALLOWED_PROFILE_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail={"code": "INVALID_FILE_TYPE", "data": None})
+        
+        # 파일 읽기
+        file_content = await profile_image.read()
+        
+        # status code 400번
+        # 파일이 비어있는지 확인
+        if not file_content:
+            raise HTTPException(status_code=400, detail={"code": "INVALID_IMAGE_FILE", "data": None})
+        
+        # status code 400번
+        # 파일 크기 검증
+        if len(file_content) > UsersController.MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail={"code": "FILE_SIZE_EXCEEDED", "data": None})
+        
+        # status code 400번
+        # 이미지 형식 검증 (JPEG 매직 넘버 체크)
+        if not UsersController._is_valid_jpeg_image(file_content):
+            raise HTTPException(status_code=400, detail={"code": "UNSUPPORTED_IMAGE_FORMAT", "data": None})
+        
+        # 사용자 존재 확인
+        user = UsersModel.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "data": None})
+        
+        # 파일 저장 및 URL 생성 (실제로는 파일을 저장하고 URL을 반환해야 하지만, 여기서는 Mock URL 반환)
+        # 파일명은 사용자 ID를 기반으로 생성하여 중복 방지
+        file_extension = "jpg"
+        profile_image_url = f"{{BE-API-URL}}/public/image/profile/{user_id}.{file_extension}"
+        
+        # 프로필 이미지 URL 업데이트
+        if not UsersModel.update_profile_image_url(user_id, profile_image_url):
+            raise HTTPException(status_code=500, detail={"code": "INTERNAL_SERVER_ERROR", "data": None})
+        
+        # status code 201번(업로드 성공)
+        return {
+            "code": "PROFILE_IMAGE_UPLOADED",
+            "data": {
+                "profileImageUrl": profile_image_url
+            }
+        }
     
     @staticmethod
     def check_email(email: Optional[str]):

@@ -1,4 +1,4 @@
-# app/models/posts_model.py
+# app/posts/posts_model.py
 from typing import Optional, Dict, List
 from datetime import datetime
 import threading

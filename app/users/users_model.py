@@ -1,6 +1,6 @@
-# app/models/users_model.py
+# app/users/users_model.py
 from typing import Optional
-from app.models.auth_model import AuthModel
+from app.auth.auth_model import AuthModel
 
 class UsersModel:
     """사용자 정보 수정 관련 데이터 모델"""

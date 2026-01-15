@@ -1,4 +1,4 @@
-# app/routes/auth_route.py
+# app/auth/auth_route.py
 from fastapi import APIRouter, HTTPException, Request, Body, Response, Cookie
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
