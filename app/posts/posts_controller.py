@@ -3,6 +3,7 @@ from fastapi import HTTPException, UploadFile
 from typing import Optional
 from app.posts.posts_model import PostsModel
 from app.auth.auth_model import AuthModel
+from config import settings
 
 class PostsController:
     """Posts 비즈니스 로직 처리"""
@@ -11,8 +12,8 @@ class PostsController:
     MAX_TITLE_LENGTH = 26
     
     # 이미지 파일 관련 상수
-    ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/jpg", "image/png"]
-    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    ALLOWED_IMAGE_TYPES = settings.ALLOWED_IMAGE_TYPES
+    MAX_FILE_SIZE = settings.MAX_FILE_SIZE
 
     @staticmethod
     def create_post(user_id: int, title: str, content: str, file_url: str = ""):
@@ -31,7 +32,7 @@ class PostsController:
         
         # status code 400번
         # 파일 URL 형식 검증
-        if file_url and not (file_url.startswith("http://") or file_url.startswith("https://") or file_url.startswith("{BE-API-URL}")):
+        if file_url and not (file_url.startswith("http://") or file_url.startswith("https://") or file_url.startswith(settings.BE_API_URL)):
             raise HTTPException(status_code=400, detail={"code": "INVALID_FILEURL", "data": None})
 
         # 게시글 생성
@@ -92,7 +93,7 @@ class PostsController:
             raise HTTPException(status_code=400, detail={"code": "UNSUPPORTED_IMAGE_FORMAT", "data": None})
 
         # 파일 저장 및 URL 생성 (실제로는 파일을 저장하고 URL을 반환해야 하지만, 여기서는 Mock URL 반환)
-        file_url = f"{{BE-API-URL}}/public/image/post/{post_id}_{file.filename}"
+        file_url = f"{settings.BE_API_URL}/public/image/post/{post_id}_{file.filename}"
 
         # 게시글의 file_url 업데이트 (기능서 요구사항: 기존 이미지 파일로 저장되어 보여줌)
         PostsModel.update_post(post_id, title=None, content=None, file_url=file_url)
@@ -239,7 +240,7 @@ class PostsController:
             if not isinstance(content, str) or not content.strip():
                 raise HTTPException(status_code=400, detail={"code": "INVALID_CONTENT_FORMAT", "data": None})
         
-        if file_url is not None and file_url and not (file_url.startswith("http://") or file_url.startswith("https://") or file_url.startswith("{BE-API-URL}")):
+        if file_url is not None and file_url and not (file_url.startswith("http://") or file_url.startswith("https://") or file_url.startswith(settings.BE_API_URL)):
             raise HTTPException(status_code=400, detail={"code": "INVALID_FILEURL", "data": None})
 
         # 게시글 수정

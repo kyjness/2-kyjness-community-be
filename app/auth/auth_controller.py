@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from typing import Optional
 import re
 from app.auth.auth_model import AuthModel
+from config import settings
 
 class AuthController:
     """인증 관련 비즈니스 로직 처리"""
@@ -18,7 +19,11 @@ class AuthController:
     NICKNAME_PATTERN = re.compile(r'^[가-힣a-zA-Z0-9]{1,10}$')
     
     # URL 형식 검증
-    URL_PATTERN = re.compile(r'^(http://|https://|\{BE-API-URL\})')
+    @staticmethod
+    def _get_url_pattern():
+        """URL 패턴 생성 (config에서 BE_API_URL 가져오기)"""
+        be_api_url_escaped = re.escape(settings.BE_API_URL)
+        return re.compile(rf'^(http://|https://|{be_api_url_escaped})')
     
     @staticmethod
     def validate_email_format(email: str) -> bool:
@@ -61,7 +66,7 @@ class AuthController:
             return False
         if not url.strip():
             return True  # 빈 문자열도 허용 (기본 이미지 사용)
-        return bool(AuthController.URL_PATTERN.match(url))
+        return bool(AuthController._get_url_pattern().match(url))
     
     @staticmethod
     def check_rate_limit(identifier: str):

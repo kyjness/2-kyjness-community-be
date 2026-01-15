@@ -4,6 +4,7 @@ from typing import Optional
 import re
 from app.users.users_model import UsersModel
 from app.auth.auth_model import AuthModel
+from config import settings
 
 class UsersController:
     """사용자 정보 수정 관련 비즈니스 로직 처리"""
@@ -16,7 +17,11 @@ class UsersController:
     NICKNAME_PATTERN = re.compile(r'^[가-힣a-zA-Z0-9]{1,10}$')
     
     # URL 형식 검증
-    URL_PATTERN = re.compile(r'^(http://|https://|\{BE-API-URL\})')
+    @staticmethod
+    def _get_url_pattern():
+        """URL 패턴 생성 (config에서 BE_API_URL 가져오기)"""
+        be_api_url_escaped = re.escape(settings.BE_API_URL)
+        return re.compile(rf'^(http://|https://|{be_api_url_escaped})')
     
     # 프로필 이미지 업로드 관련 상수
     ALLOWED_PROFILE_IMAGE_TYPES = ["image/jpeg", "image/jpg"]  # .jpg만 허용
@@ -56,7 +61,7 @@ class UsersController:
             return False
         if not url.strip():
             return True  # 빈 문자열도 허용 (기본 이미지 사용)
-        return bool(UsersController.URL_PATTERN.match(url))
+        return bool(UsersController._get_url_pattern().match(url))
     
     @staticmethod
     def _is_valid_jpeg_image(file_content: bytes) -> bool:
@@ -125,7 +130,7 @@ class UsersController:
         # 파일 저장 및 URL 생성 (실제로는 파일을 저장하고 URL을 반환해야 하지만, 여기서는 Mock URL 반환)
         # 파일명은 사용자 ID를 기반으로 생성하여 중복 방지
         file_extension = "jpg"
-        profile_image_url = f"{{BE-API-URL}}/public/image/profile/{user_id}.{file_extension}"
+        profile_image_url = f"{settings.BE_API_URL}/public/image/profile/{user_id}.{file_extension}"
         
         # 프로필 이미지 URL 업데이트
         if not UsersModel.update_profile_image_url(user_id, profile_image_url):

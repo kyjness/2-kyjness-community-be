@@ -5,6 +5,7 @@ import time
 import hashlib
 import threading
 from datetime import datetime
+from config import settings
 
 class AuthModel:
     """인증 관련 데이터 모델 (JSON 기반, DB 사용하지 않음)"""
@@ -26,9 +27,9 @@ class AuthModel:
     # Rate limiting 저장소 (IP -> 요청 정보)
     _rate_limits: Dict[str, dict] = {}
     
-    RATE_LIMIT_WINDOW = 60  # 60초 윈도우
-    RATE_LIMIT_MAX_REQUESTS = 10  # 최대 10회 요청
-    SESSION_EXPIRY_TIME = 86400  # 세션 만료 시간 (24시간, 초 단위)
+    RATE_LIMIT_WINDOW = settings.RATE_LIMIT_WINDOW  # 60초 윈도우
+    RATE_LIMIT_MAX_REQUESTS = settings.RATE_LIMIT_MAX_REQUESTS  # 최대 10회 요청
+    SESSION_EXPIRY_TIME = settings.SESSION_EXPIRY_TIME  # 세션 만료 시간 (24시간, 초 단위)
     
     @staticmethod
     def _hash_password(password: str) -> str:
@@ -49,7 +50,7 @@ class AuthModel:
             user_id = cls._next_user_id
             cls._next_user_id += 1
         
-        default_profile = profile_image_url or "{BE-API-URL}/public/image/profile/default.png"
+        default_profile = profile_image_url or f"{settings.BE_API_URL}/public/image/profile/default.png"
         
         # 비밀번호 해시화
         hashed_password = cls._hash_password(password)
