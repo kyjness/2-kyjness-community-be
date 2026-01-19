@@ -3,7 +3,7 @@ from fastapi import APIRouter, Query, Depends, Path
 from fastapi.responses import Response
 from app.comments.comments_scheme import CommentCreateRequest, CommentUpdateRequest
 from app.comments import comments_controller
-from app.auth.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
 

@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from typing import Optional
 from app.posts.posts_scheme import PostCreateRequest, PostUpdateRequest
 from app.posts import posts_controller
-from app.auth.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 

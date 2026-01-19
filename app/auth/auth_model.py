@@ -5,7 +5,7 @@ import time
 import bcrypt
 import threading
 from datetime import datetime
-from config import settings
+from app.core.config import settings
 
 class AuthModel:
     """인증 관련 데이터 모델 (JSON 기반, DB 사용하지 않음)"""
@@ -33,14 +33,14 @@ class AuthModel:
     
     @staticmethod
     def _hash_password(password: str) -> str:
-        """비밀번호 해시화 (bcrypt 사용, 현업 표준)."""
+        """비밀번호 해시화 (bcrypt 사용)"""
         salt = bcrypt.gensalt()
         hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
         return hashed.decode('utf-8')
     
     @staticmethod
     def _verify_password(password: str, hashed_password: str) -> bool:
-        """비밀번호 검증 (bcrypt 사용)."""
+        """비밀번호 검증 (bcrypt 사용)"""
         try:
             return bcrypt.checkpw(
                 password.encode('utf-8'),
@@ -147,7 +147,7 @@ class AuthModel:
         if not user:
             return False
         
-        # 비밀번호 해시화하여 저장
+        # 새 비밀번호 해시화하여 저장
         user["password"] = cls._hash_password(new_password)
         return True
     

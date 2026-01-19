@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from typing import Optional
 import re
 from app.auth.auth_model import AuthModel
-from config import settings
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,17 @@ def validate_profile_image_url(url: Optional[str]) -> bool:
     return bool(_get_url_pattern().match(url))
 
 
+# 헬퍼 함수: 반복되는 코드 제거
+def _raise_error(status_code: int, error_code: str) -> None:
+    """에러 응답 생성 헬퍼 함수."""
+    raise HTTPException(status_code=status_code, detail={"code": error_code, "data": None})
+
+
+def _success_response(code: str, data=None):
+    """성공 응답 생성 헬퍼 함수."""
+    return {"code": code, "data": data}
+
+
 def signup(
     email: str,
     password: str,
@@ -82,71 +93,63 @@ def signup(
     profile_image_url: Optional[str] = None,
 ):
     """회원가입 처리."""
-    # 비밀번호 형식 검증 (비즈니스 로직: 대문자/소문자/숫자/특수문자 각각 최소 1개)
+    # 비밀번호 형식 검증
     if not validate_password_format(password):
-        raise HTTPException(status_code=400, detail={"code": "INVALID_PASSWORD_FORMAT", "data": None})
+        _raise_error(400, "INVALID_PASSWORD_FORMAT")
 
-    # 비밀번호 확인 일치 검증 (비즈니스 로직)
+    # 비밀번호 확인 일치 검증
     if password != password_confirm:
-        raise HTTPException(status_code=400, detail={"code": "PASSWORD_MISMATCH", "data": None})
+        _raise_error(400, "PASSWORD_MISMATCH")
 
-    # 닉네임 형식 검증 (비즈니스 로직: 공백 체크, 한글/영문/숫자만)
-    if ' ' in nickname:
-        raise HTTPException(status_code=400, detail={"code": "INVALID_NICKNAME_FORMAT", "data": None})
-    if not validate_nickname_format(nickname):
-        raise HTTPException(status_code=400, detail={"code": "INVALID_NICKNAME_FORMAT", "data": None})
+    # 닉네임 형식 검증
+    if ' ' in nickname or not validate_nickname_format(nickname):
+        _raise_error(400, "INVALID_NICKNAME_FORMAT")
 
-    # 프로필 이미지 URL 형식 검증 (비즈니스 로직)
+    # 프로필 이미지 URL 형식 검증
     if not validate_profile_image_url(profile_image_url):
-        raise HTTPException(status_code=400, detail={"code": "INVALID_PROFILEIMAGEURL", "data": None})
+        _raise_error(400, "INVALID_PROFILEIMAGEURL")
 
-    # status code 409번
-    # 이메일 중복 확인 (비즈니스 로직)
+    # 이메일 중복 확인
     if AuthModel.email_exists(email):
-        raise HTTPException(status_code=409, detail={"code": "EMAIL_ALREADY_EXISTS", "data": None})
+        _raise_error(409, "EMAIL_ALREADY_EXISTS")
 
-    # 닉네임 중복 확인 (비즈니스 로직)
+    # 닉네임 중복 확인
     if AuthModel.nickname_exists(nickname):
-        raise HTTPException(status_code=409, detail={"code": "NICKNAME_ALREADY_EXISTS", "data": None})
+        _raise_error(409, "NICKNAME_ALREADY_EXISTS")
 
     # 사용자 생성
     AuthModel.create_user(email, password, nickname, profile_image_url)
 
-    # status code 201번(회원가입 성공)
-    return {"code": "SIGNUP_SUCCESS", "data": None}
+    return _success_response("SIGNUP_SUCCESS")
 
 
 def login(email: str, password: str):
     """로그인 처리."""
-    # 비밀번호 형식 검증 (비즈니스 로직: 대문자/소문자/숫자/특수문자 각각 최소 1개)
+    # 비밀번호 형식 검증
     if not validate_password_format(password):
-        raise HTTPException(status_code=400, detail={"code": "INVALID_PASSWORD_FORMAT", "data": None})
+        _raise_error(400, "INVALID_PASSWORD_FORMAT")
 
     # 사용자 찾기
     user = AuthModel.find_user_by_email(email)
     if not user:
         logger.warning(f"Login failed: User not found (email provided)")
-        raise HTTPException(status_code=401, detail={"code": "INVALID_CREDENTIALS", "data": None})
+        _raise_error(401, "INVALID_CREDENTIALS")
 
-    # 비밀번호 확인 (해시화된 비밀번호와 비교)
+    # 비밀번호 확인
     if not AuthModel.verify_password(user["userId"], password):
         logger.warning(f"Login failed: Invalid password (user_id={user['userId']})")
-        raise HTTPException(status_code=401, detail={"code": "INVALID_CREDENTIALS", "data": None})
+        _raise_error(401, "INVALID_CREDENTIALS")
 
-    # 세션 ID 생성 (쿠키-세션 방식)
+    # 세션 ID 생성
     session_id = AuthModel.create_token(user["userId"])
 
-    # status code 200번(로그인 성공)
-    return {
-        "code": "LOGIN_SUCCESS",
-        "data": {
-            "userId": user["userId"],
-            "email": user["email"],
-            "nickname": user["nickname"],
-            "authToken": session_id,  # API 명세서에 따라 authToken 포함 (실제 인증은 쿠키의 session_id 사용)
-            "profileImage": user["profileImageUrl"],
-        },
-    }
+    return _success_response("LOGIN_SUCCESS", {
+        "userId": user["userId"],
+        "email": user["email"],
+        "nickname": user["nickname"],
+        "authToken": session_id,  # API 명세서에 따라 authToken 포함 (실제 인증은 쿠키의 session_id 사용)
+        "profileImage": user["profileImageUrl"],
+    })
 
 
 def logout(session_id: Optional[str]):
@@ -154,24 +157,18 @@ def logout(session_id: Optional[str]):
     # 세션 ID 삭제 (인증은 Dependency에서 이미 검증됨)
     AuthModel.revoke_token(session_id)
 
-    # status code 200번(로그아웃 성공)
-    return {"code": "LOGOUT_SUCCESS", "data": None}
+    return _success_response("LOGOUT_SUCCESS")
 
 
 def get_me(user_id: int):
     """현재 로그인한 사용자 정보 조회 (쿠키-세션 방식)."""
-    # 사용자 정보 조회 실패
     user = AuthModel.find_user_by_id(user_id)
     if not user:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
+        _raise_error(401, "UNAUTHORIZED")
 
-    # status code 200번(로그인 상태 체크 성공)
-    return {
-        "code": "AUTH_SUCCESS",
-        "data": {
-            "userId": user["userId"],
-            "email": user["email"],
-            "nickname": user["nickname"],
-            "profileImageUrl": user["profileImageUrl"],
-        },
-    }
+    return _success_response("AUTH_SUCCESS", {
+        "userId": user["userId"],
+        "email": user["email"],
+        "nickname": user["nickname"],
+        "profileImageUrl": user["profileImageUrl"],
+    })

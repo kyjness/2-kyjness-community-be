@@ -4,7 +4,7 @@ from typing import Optional
 import re
 from app.users.users_model import UsersModel
 from app.auth.auth_model import AuthModel
-from config import settings
+from app.core.config import settings
 
 """사용자 관련 비즈니스 로직 처리 (함수형 컨트롤러)."""
 
@@ -18,6 +18,17 @@ NICKNAME_PATTERN = re.compile(r'^[가-힣a-zA-Z0-9]{1,10}$')
 # 프로필 이미지 업로드 관련 상수
 ALLOWED_PROFILE_IMAGE_TYPES = ["image/jpeg", "image/jpg"]  # .jpg만 허용
 MAX_FILE_SIZE = settings.MAX_FILE_SIZE  # config에서 가져옴
+
+
+# 헬퍼 함수: 반복되는 코드 제거
+def _raise_error(status_code: int, error_code: str) -> None:
+    """에러 응답 생성 헬퍼 함수."""
+    raise HTTPException(status_code=status_code, detail={"code": error_code, "data": None})
+
+
+def _success_response(code: str, data=None):
+    """성공 응답 생성 헬퍼 함수."""
+    return {"code": code, "data": data}
 
 
 def _get_url_pattern():
@@ -76,43 +87,37 @@ async def upload_profile_image(
     profile_image: Optional[UploadFile],
 ):
     """프로필 이미지 업로드 처리."""
-    # status code 403번
     # 다른 사용자 프로필 이미지 업로드 시도
     if authenticated_user_id != user_id:
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "data": None})
+        _raise_error(403, "FORBIDDEN")
 
-    # status code 400번
     # 파일 없음
     if not profile_image:
-        raise HTTPException(status_code=400, detail={"code": "MISSING_REQUIRED_FIELD", "data": None})
+        _raise_error(400, "MISSING_REQUIRED_FIELD")
 
-    # status code 400번
     # 파일 타입 검증 (.jpg만 허용)
     if profile_image.content_type not in ALLOWED_PROFILE_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail={"code": "INVALID_FILE_TYPE", "data": None})
+        _raise_error(400, "INVALID_FILE_TYPE")
 
     # 파일 읽기
     file_content = await profile_image.read()
 
-    # status code 400번
     # 파일이 비어있는지 확인
     if not file_content:
-        raise HTTPException(status_code=400, detail={"code": "INVALID_IMAGE_FILE", "data": None})
+        _raise_error(400, "INVALID_IMAGE_FILE")
 
-    # status code 400번
     # 파일 크기 검증
     if len(file_content) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail={"code": "FILE_SIZE_EXCEEDED", "data": None})
+        _raise_error(400, "FILE_SIZE_EXCEEDED")
 
-    # status code 400번
     # 이미지 형식 검증 (JPEG 매직 넘버 체크)
     if not _is_valid_jpeg_image(file_content):
-        raise HTTPException(status_code=400, detail={"code": "UNSUPPORTED_IMAGE_FORMAT", "data": None})
+        _raise_error(400, "UNSUPPORTED_IMAGE_FORMAT")
 
     # 사용자 존재 확인
     user = UsersModel.get_user_by_id(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "data": None})
+        _raise_error(404, "USER_NOT_FOUND")
 
     # 파일 저장 및 URL 생성 (실제로는 파일을 저장하고 URL을 반환해야 하지만, 여기서는 Mock URL 반환)
     # 파일명은 사용자 ID를 기반으로 생성하여 중복 방지
@@ -121,59 +126,52 @@ async def upload_profile_image(
 
     # 프로필 이미지 URL 업데이트
     if not UsersModel.update_profile_image_url(user_id, profile_image_url):
-        raise HTTPException(status_code=500, detail={"code": "INTERNAL_SERVER_ERROR", "data": None})
+        _raise_error(500, "INTERNAL_SERVER_ERROR")
 
-    # status code 201번(업로드 성공)
-    return {"code": "PROFILE_IMAGE_UPLOADED", "data": {"profileImageUrl": profile_image_url}}
+    return _success_response("PROFILE_IMAGE_UPLOADED", {"profileImageUrl": profile_image_url})
 
 
 def check_email(email: Optional[str]):
     """이메일 중복 체크."""
-    # status code 400번
     # 이메일 입력 안했을 시
     if not email or not isinstance(email, str) or not email.strip():
-        raise HTTPException(status_code=400, detail={"code": "MISSING_REQUIRED_FIELD", "data": None})
+        _raise_error(400, "MISSING_REQUIRED_FIELD")
 
     # 이메일 중복 확인
     is_available = not AuthModel.email_exists(email)
 
-    # status code 200번
-    return {"code": "EMAIL_AVAILABLE", "data": {"available": is_available}}
+    return _success_response("EMAIL_AVAILABLE", {"available": is_available})
 
 
 def check_nickname(nickname: Optional[str]):
     """닉네임 중복 체크."""
-    # status code 400번
     # 닉네임 입력 안했을 시
     if not nickname or not isinstance(nickname, str) or not nickname.strip():
-        raise HTTPException(status_code=400, detail={"code": "MISSING_REQUIRED_FIELD", "data": None})
+        _raise_error(400, "MISSING_REQUIRED_FIELD")
 
     # 닉네임 형식 검증
     if not validate_nickname_format(nickname):
-        raise HTTPException(status_code=400, detail={"code": "INVALID_NICKNAME_FORMAT", "data": None})
+        _raise_error(400, "INVALID_NICKNAME_FORMAT")
 
     # 닉네임 중복 확인
     if AuthModel.nickname_exists(nickname):
-        raise HTTPException(status_code=409, detail={"code": "NICKNAME_ALREADY_EXISTS", "data": None})
+        _raise_error(409, "NICKNAME_ALREADY_EXISTS")
 
-    # status code 200번
-    return {"code": "NICKNAME_AVAILABLE", "data": {"available": True}}
+    return _success_response("NICKNAME_AVAILABLE", {"available": True})
 
 
 def get_user(user_id: int, authenticated_user_id: int):
     """내 정보 조회 처리."""
-    # status code 403번
     # 다른 사용자 정보 조회 시도
     if authenticated_user_id != user_id:
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "data": None})
+        _raise_error(403, "FORBIDDEN")
 
     # 사용자 정보 조회
     user = UsersModel.get_user_by_id(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "data": None})
+        _raise_error(404, "USER_NOT_FOUND")
 
-    # status code 200번(조회 성공)
-    return {"code": "USER_RETRIEVED", "data": user}
+    return _success_response("USER_RETRIEVED", user)
 
 
 def update_user(
@@ -183,49 +181,47 @@ def update_user(
     profile_image_url: Optional[str] = None,
 ):
     """내 정보 수정 처리."""
-    # status code 403번
     # 다른 사용자 정보 수정 시도
     if authenticated_user_id != user_id:
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "data": None})
+        _raise_error(403, "FORBIDDEN")
 
     # 닉네임과 프로필 이미지 URL 둘 다 없으면 에러
     if nickname is None and profile_image_url is None:
-        raise HTTPException(status_code=400, detail={"code": "MISSING_REQUIRED_FIELD", "data": None})
+        _raise_error(400, "MISSING_REQUIRED_FIELD")
 
     # 닉네임 검증 및 수정
     if nickname is not None:
         # 공백 체크 (비즈니스 로직)
         if ' ' in nickname:
-            raise HTTPException(status_code=400, detail={"code": "INVALID_NICKNAME_FORMAT", "data": None})
+            _raise_error(400, "INVALID_NICKNAME_FORMAT")
 
         # 닉네임 형식 검증 (비즈니스 로직: 한글/영문/숫자만)
         if not validate_nickname_format(nickname):
-            raise HTTPException(status_code=400, detail={"code": "INVALID_NICKNAME_FORMAT", "data": None})
+            _raise_error(400, "INVALID_NICKNAME_FORMAT")
 
         # 현재 사용자 정보 조회
         current_user = UsersModel.get_user_by_id(user_id)
         if not current_user:
-            raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "data": None})
+            _raise_error(404, "USER_NOT_FOUND")
 
         # 현재 닉네임과 다르면 중복 확인
         if current_user["nickname"] != nickname:
             if AuthModel.nickname_exists(nickname):
-                raise HTTPException(status_code=409, detail={"code": "NICKNAME_ALREADY_EXISTS", "data": None})
+                _raise_error(409, "NICKNAME_ALREADY_EXISTS")
 
             # 닉네임 수정
             if not UsersModel.update_nickname(user_id, nickname):
-                raise HTTPException(status_code=500, detail={"code": "INTERNAL_SERVER_ERROR", "data": None})
+                _raise_error(500, "INTERNAL_SERVER_ERROR")
 
     # 프로필 이미지 URL 검증 및 수정
     if profile_image_url is not None:
         if not validate_profile_image_url(profile_image_url):
-            raise HTTPException(status_code=400, detail={"code": "INVALID_PROFILEIMAGEURL", "data": None})
+            _raise_error(400, "INVALID_PROFILEIMAGEURL")
 
         if not UsersModel.update_profile_image_url(user_id, profile_image_url):
-            raise HTTPException(status_code=500, detail={"code": "INTERNAL_SERVER_ERROR", "data": None})
+            _raise_error(500, "INTERNAL_SERVER_ERROR")
 
-    # status code 200번(수정 성공)
-    return {"code": "USER_UPDATED", "data": None}
+    return _success_response("USER_UPDATED")
 
 
 def update_password(
@@ -235,51 +231,47 @@ def update_password(
     new_password: str,
 ):
     """비밀번호 변경 처리."""
-    # status code 403번
     # 다른 사용자 비밀번호 변경 시도
     if authenticated_user_id != user_id:
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "data": None})
+        _raise_error(403, "FORBIDDEN")
 
     # 현재 비밀번호 형식 검증 (비즈니스 로직: 대문자/소문자/숫자/특수문자 각각 최소 1개)
     if not validate_password_format(current_password):
-        raise HTTPException(status_code=400, detail={"code": "INVALID_CURRENTPASSWORD_FORMAT", "data": None})
+        _raise_error(400, "INVALID_CURRENTPASSWORD_FORMAT")
 
     # 새 비밀번호 형식 검증
     if not validate_password_format(new_password):
-        raise HTTPException(status_code=400, detail={"code": "INVALID_NEWPASSWORD_FORMAT", "data": None})
+        _raise_error(400, "INVALID_NEWPASSWORD_FORMAT")
 
     # 사용자 존재 확인
     user = UsersModel.get_user_by_id(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "data": None})
+        _raise_error(404, "USER_NOT_FOUND")
 
     # 현재 비밀번호 확인 (해시화된 비밀번호와 비교)
     if not AuthModel.verify_password(user_id, current_password):
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "data": None})
+        _raise_error(401, "UNAUTHORIZED")
 
     # 비밀번호 수정
     if not UsersModel.update_password(user_id, new_password):
-        raise HTTPException(status_code=500, detail={"code": "INTERNAL_SERVER_ERROR", "data": None})
+        _raise_error(500, "INTERNAL_SERVER_ERROR")
 
-    # status code 200번(변경 성공)
-    return {"code": "PASSWORD_UPDATED", "data": None}
+    return _success_response("PASSWORD_UPDATED")
 
 
 def withdraw_user(user_id: int, authenticated_user_id: int):
     """회원 탈퇴 처리."""
-    # status code 403번
     # 다른 사용자 탈퇴 시도
     if authenticated_user_id != user_id:
-        raise HTTPException(status_code=403, detail={"code": "FORBIDDEN", "data": None})
+        _raise_error(403, "FORBIDDEN")
 
     # 사용자 존재 확인
     user = UsersModel.get_user_by_id(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail={"code": "USER_NOT_FOUND", "data": None})
+        _raise_error(404, "USER_NOT_FOUND")
 
     # 회원 탈퇴
     if not UsersModel.delete_user(user_id):
-        raise HTTPException(status_code=500, detail={"code": "INTERNAL_SERVER_ERROR", "data": None})
+        _raise_error(500, "INTERNAL_SERVER_ERROR")
 
-    # status code 204번(탈퇴 성공) - 응답 본문 없음
     return None

@@ -7,13 +7,18 @@ FastAPI 기반의 커뮤니티 백엔드 API 서버입니다.
 ```
 .
 ├── app/                    # 애플리케이션 코드
+│   ├── core/              # 공통 모듈 (설정, 의존성)
+│   │   ├── config.py      # 설정 관리
+│   │   └── dependencies.py # 공통 의존성 (인증 등)
 │   ├── auth/              # 인증 모듈
 │   ├── users/             # 사용자 모듈
 │   ├── posts/             # 게시글 모듈
 │   ├── comments/          # 댓글 모듈
 │   └── likes/             # 좋아요 모듈
+├── tests/                 # 테스트 코드
+│   ├── test_auth.py       # 인증 테스트
+│   └── test_posts.py      # 게시글 테스트
 ├── main.py                # FastAPI 애플리케이션 진입점
-├── config.py              # 설정 관리
 ├── pyproject.toml         # Python 프로젝트 설정 및 의존성
 ├── .env.example          # 환경 변수 예시 파일
 └── README.md             # 프로젝트 문서
@@ -37,7 +42,7 @@ source venv/bin/activate
 
 ```bash
 # pip를 사용하는 경우
-pip install -e .
+pip install -e ".[dev]"
 
 # 또는 Poetry를 사용하는 경우 (선택사항)
 poetry install
@@ -74,13 +79,31 @@ uvicorn main:app --host ${HOST} --port ${PORT}
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+### 6. 테스트 실행
+
+```bash
+# 모든 테스트 실행
+pytest
+
+# 특정 테스트 파일 실행
+pytest tests/test_auth.py
+
+# 상세 출력과 함께 실행
+pytest -v
+
+# 커버리지 포함 실행
+pytest --cov=app
+```
+
 ## 주요 기능
 
-- **인증 (Auth)**: 회원가입, 로그인, 로그아웃, 세션 관리
+- **인증 (Auth)**: 회원가입, 로그인, 로그아웃, 세션 관리 (bcrypt 비밀번호 해싱)
 - **사용자 (Users)**: 프로필 조회/수정, 비밀번호 변경, 프로필 이미지 업로드
 - **게시글 (Posts)**: 게시글 작성/조회/수정/삭제, 이미지 업로드
 - **댓글 (Comments)**: 댓글 작성/조회/수정/삭제
 - **좋아요 (Likes)**: 좋아요 추가/취소
+- **보안 기능**: Rate Limiting, 전역 예외 핸들러, CORS 설정
+- **로깅**: 에러 추적 및 보안 이벤트 모니터링
 
 ## 기술 스택
 
@@ -88,6 +111,9 @@ uvicorn main:app --host ${HOST} --port ${PORT}
 - **Pydantic**: 데이터 검증 및 설정 관리
 - **Uvicorn**: ASGI 서버
 - **Python-dotenv**: 환경 변수 관리
+- **bcrypt**: 비밀번호 해싱 (보안)
+- **Python logging**: 로깅 시스템 (에러 추적 및 모니터링)
+- **pytest**: 테스트 프레임워크
 
 ## 환경 변수
 

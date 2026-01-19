@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, Path
 from fastapi.responses import Response
 from app.likes import likes_controller
-from app.auth.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/posts/{post_id}/likes", tags=["likes"])
 

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Response, Cookie, Depends
 from typing import Optional
 from app.auth.auth_scheme import SignUpRequest, LoginRequest
 from app.auth import auth_controller
-from app.auth.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

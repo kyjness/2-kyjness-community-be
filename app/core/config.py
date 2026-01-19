@@ -1,4 +1,4 @@
-# config.py
+# app/core/config.py
 import os
 from typing import List
 from dotenv import load_dotenv
@@ -21,6 +21,7 @@ class Settings:
     SESSION_EXPIRY_TIME: int = int(os.getenv("SESSION_EXPIRY_TIME", "86400"))  # 24시간
     
     # Rate Limiting 설정
+    # 어떤 사용자가 60초 안에 API 요청을 11번째로 보내면 차단( 429 에러 발생)
     RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # 60초
     RATE_LIMIT_MAX_REQUESTS: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "10"))  # 최대 10회
     

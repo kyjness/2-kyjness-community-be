@@ -1,4 +1,4 @@
-# app/auth/dependencies.py
+# app/core/dependencies.py
 import logging
 from fastapi import HTTPException, Cookie
 from typing import Optional

@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from typing import Optional
 from app.users.users_scheme import UpdateUserRequest, UpdatePasswordRequest
 from app.users import users_controller
-from app.auth.dependencies import get_current_user
+from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/users", tags=["users"])
 
