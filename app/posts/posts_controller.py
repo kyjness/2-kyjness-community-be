@@ -7,9 +7,6 @@ from config import settings
 
 """게시글 관련 비즈니스 로직 처리 (함수형 컨트롤러)."""
 
-# 제목 최대 길이 (기능서 요구사항: 최대 26자)
-MAX_TITLE_LENGTH = 26
-
 # 이미지 파일 관련 상수
 ALLOWED_IMAGE_TYPES = settings.ALLOWED_IMAGE_TYPES
 MAX_FILE_SIZE = settings.MAX_FILE_SIZE

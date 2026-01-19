@@ -1,5 +1,6 @@
 # main.py
 import time
+import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,6 +11,14 @@ from app.posts.posts_route import router as posts_router
 from app.comments.comments_route import router as comments_router
 from app.likes.likes_route import router as likes_router
 from config import settings
+
+# 로깅 설정 (현업 필수)
+logging.basicConfig(
+    level=logging.INFO if settings.DEBUG else logging.WARNING,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="PuppyTalk API",
@@ -39,6 +48,7 @@ async def global_policy_middleware(request: Request, call_next):
         from app.auth.auth_model import AuthModel  # 순환 import 방지용 지연 import
 
         if not AuthModel.check_rate_limit(client_ip):
+            logger.warning(f"Rate limit exceeded: IP={client_ip}, Path={path}")
             response = JSONResponse(
                 status_code=429,
                 content={"code": "RATE_LIMIT_EXCEEDED", "data": None},
@@ -63,6 +73,7 @@ app.add_middleware(
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """요청 검증 오류 처리"""
+    logger.warning(f"Validation error: Path={request.url.path}, Errors={exc.errors()}")
     return JSONResponse(
         status_code=400,
         content={"code": "INVALID_REQUEST_BODY", "data": None}
@@ -71,6 +82,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """HTTP 예외 처리"""
+    # 보안 관련 에러는 WARNING 레벨로 로깅 (인증 실패, 권한 오류 등)
+    if exc.status_code in (401, 403):
+        logger.warning(f"Security error: Status={exc.status_code}, Path={request.url.path}, Detail={exc.detail}")
+    # 4xx 에러는 INFO 레벨로 로깅
+    elif 400 <= exc.status_code < 500:
+        logger.info(f"Client error: Status={exc.status_code}, Path={request.url.path}, Detail={exc.detail}")
+    
     # HTTP 상태 코드는 그대로 유지하면서, 응답 포맷만 통일
     if isinstance(exc.detail, dict):
         return JSONResponse(status_code=exc.status_code, content=exc.detail)
@@ -83,6 +101,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """일반 예외 처리"""
+    logger.error(f"Unhandled exception: Path={request.url.path}, Exception={type(exc).__name__}: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"code": "INTERNAL_SERVER_ERROR", "data": None}

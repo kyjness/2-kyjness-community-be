@@ -1,5 +1,5 @@
 # app/auth/auth_route.py
-from fastapi import APIRouter, Request, Response, Cookie, Depends
+from fastapi import APIRouter, Response, Cookie, Depends
 from typing import Optional
 from app.auth.auth_scheme import SignUpRequest, LoginRequest
 from app.auth import auth_controller
@@ -9,7 +9,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # 회원가입
 @router.post("/signup", status_code=201)
-async def signup(signup_data: SignUpRequest, request: Request):
+async def signup(signup_data: SignUpRequest):
     """회원가입 API"""
     return auth_controller.signup(
         email=signup_data.email,
@@ -21,7 +21,7 @@ async def signup(signup_data: SignUpRequest, request: Request):
 
 # 로그인 (쿠키-세션 방식)
 @router.post("/login", status_code=200)
-async def login(login_data: LoginRequest, request: Request, response: Response):
+async def login(login_data: LoginRequest, response: Response):
     """로그인 API (쿠키-세션 방식)"""
     result = auth_controller.login(
         email=login_data.email,

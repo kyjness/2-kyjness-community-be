@@ -1,9 +1,12 @@
 # app/auth/auth_controller.py
+import logging
 from fastapi import HTTPException
 from typing import Optional
 import re
 from app.auth.auth_model import AuthModel
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 """인증 관련 비즈니스 로직 처리 (함수형 컨트롤러).
 
@@ -122,10 +125,12 @@ def login(email: str, password: str):
     # 사용자 찾기
     user = AuthModel.find_user_by_email(email)
     if not user:
+        logger.warning(f"Login failed: User not found (email provided)")
         raise HTTPException(status_code=401, detail={"code": "INVALID_CREDENTIALS", "data": None})
 
     # 비밀번호 확인 (해시화된 비밀번호와 비교)
     if not AuthModel.verify_password(user["userId"], password):
+        logger.warning(f"Login failed: Invalid password (user_id={user['userId']})")
         raise HTTPException(status_code=401, detail={"code": "INVALID_CREDENTIALS", "data": None})
 
     # 세션 ID 생성 (쿠키-세션 방식)

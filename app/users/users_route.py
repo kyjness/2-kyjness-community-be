@@ -42,7 +42,7 @@ async def get_user(user_id: int = Path(..., ge=1, description="사용자 ID"), a
 
 # 내 정보 수정
 @router.patch("/{user_id}", status_code=200)
-async def update_user(user_id: int = Path(..., ge=1, description="사용자 ID"), user_data: UpdateUserRequest = ..., authenticated_user_id: int = Depends(get_current_user)):
+async def update_user(user_data: UpdateUserRequest, user_id: int = Path(..., ge=1, description="사용자 ID"), authenticated_user_id: int = Depends(get_current_user)):
     """내 정보 수정 API"""
     return users_controller.update_user(
         user_id=user_id,
@@ -53,7 +53,7 @@ async def update_user(user_id: int = Path(..., ge=1, description="사용자 ID")
 
 # 비밀번호 변경
 @router.patch("/{user_id}/password", status_code=200)
-async def update_password(user_id: int = Path(..., ge=1, description="사용자 ID"), password_data: UpdatePasswordRequest = ..., authenticated_user_id: int = Depends(get_current_user)):
+async def update_password(password_data: UpdatePasswordRequest, user_id: int = Path(..., ge=1, description="사용자 ID"), authenticated_user_id: int = Depends(get_current_user)):
     """비밀번호 변경 API"""
     return users_controller.update_password(
         user_id=user_id,
