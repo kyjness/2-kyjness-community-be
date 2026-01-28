@@ -31,20 +31,20 @@ class AuthModel:
     RATE_LIMIT_MAX_REQUESTS = settings.RATE_LIMIT_MAX_REQUESTS  # 최대 10회 요청
     SESSION_EXPIRY_TIME = settings.SESSION_EXPIRY_TIME  # 세션 만료 시간 (24시간, 초 단위)
     
-    @staticmethod
-    def _hash_password(password: str) -> str:
-        """비밀번호 해시화 (bcrypt 사용)"""
-        salt = bcrypt.gensalt()
-        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-        return hashed.decode('utf-8')
+    @classmethod
+    def _hash_password(cls, password: str) -> str:
+        """비밀번호 해시화 (bcrypt, 설정된 rounds 적용) — 회원가입·비밀번호 변경 시 사용"""
+        salt = bcrypt.gensalt(rounds=settings.BCRYPT_ROUNDS)
+        hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+        return hashed.decode("utf-8")
     
     @staticmethod
     def _verify_password(password: str, hashed_password: str) -> bool:
-        """비밀번호 검증 (bcrypt 사용)"""
+        """비밀번호 검증 (bcrypt) — 로그인·비밀번호 변경 시 현재 비밀번호 확인에 사용"""
         try:
             return bcrypt.checkpw(
-                password.encode('utf-8'),
-                hashed_password.encode('utf-8')
+                password.encode("utf-8"),
+                hashed_password.encode("utf-8")
             )
         except (ValueError, TypeError):
             return False

@@ -1,10 +1,36 @@
 import logging
 import time
+from datetime import datetime
+from typing import Optional
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _console_sql_log(method: str, path: str, sql: Optional[str]) -> None:
+    """콘솔에 요청 시각과 SQL 문을 함께 출력."""
+    if not sql:
+        return
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {method} {path}\n    SQL: {sql}"
+    print(line, flush=True)
+
+
+async def sql_logging_middleware(request: Request, call_next):
+    """API 요청 시 콘솔에 요청 시각과 해당 요청에 대응하는 SQL 문을 함께 출력."""
+    method = request.method
+    path = request.url.path or ""
+    sql = None
+    try:
+        from app.core.database import sql_for_request
+        sql = sql_for_request(method, path)
+    except Exception:
+        pass
+    _console_sql_log(method, path, sql)
+    response = await call_next(request)
+    return response
 
 
 async def global_policy_middleware(request: Request, call_next):

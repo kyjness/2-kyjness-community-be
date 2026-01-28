@@ -1,4 +1,6 @@
 # main.py
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.auth.auth_route import router as auth_router
@@ -9,16 +11,28 @@ from app.likes.likes_route import router as likes_router
 from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.exception_handlers import register_exception_handlers
-from app.core.middleware import global_policy_middleware
+from app.core.middleware import global_policy_middleware, sql_logging_middleware
 
 configure_logging()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """앱 시작 시 DB 연결 및 콘솔에 '데이터베이스 연결 성공' 표시."""
+    from app.core.database import init_database, close_database
+    init_database()
+    yield
+    close_database()
+
 
 app = FastAPI(
     title="PuppyTalk API",
     description="커뮤니티 백엔드 API",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
+app.middleware("http")(sql_logging_middleware)
 app.middleware("http")(global_policy_middleware)
 
 # CORS 설정 (프론트엔드와 연결할 때 필요)

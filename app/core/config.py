@@ -32,5 +32,11 @@ class Settings:
     # API 기본 URL (파일 업로드 URL 생성용)
     BE_API_URL: str = os.getenv("BE_API_URL", "http://localhost:8000")
 
+    # bcrypt 비밀번호 해시 강도 (rounds, 기본 12권장, 높을수록 안전하나 느려짐)
+    BCRYPT_ROUNDS: int = int(os.getenv("BCRYPT_ROUNDS", "12"))
+
+    # DB (SQL 로깅·연결 확인용 SQLite 경로)
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./puppytalk.db")
+
 # 전역 설정 인스턴스
 settings = Settings()
