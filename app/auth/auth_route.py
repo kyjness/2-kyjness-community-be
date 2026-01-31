@@ -1,7 +1,7 @@
 # app/auth/auth_route.py
 from fastapi import APIRouter, Response, Cookie, Depends
 from typing import Optional
-from app.auth.auth_scheme import SignUpRequest, LoginRequest
+from app.auth.auth_schema import SignUpRequest, LoginRequest
 from app.auth import auth_controller
 from app.core.dependencies import get_current_user
 

@@ -1,34 +1,159 @@
 # PuppyTalk API - 커뮤니티 백엔드
 
-FastAPI 기반의 커뮤니티 백엔드 API 서버입니다.
+FastAPI 기반의 커뮤니티 백엔드 API 서버입니다. **Route → Controller → Model(RCM)** 패턴과 전역 예외/미들웨어 정책을 적용했습니다.
 
-## 프로젝트 구조
+---
+
+## 아키텍처 개요
+
+```
+[클라이언트] → [CORS] → [Security Headers] → [Rate Limit + Duration 로깅]
+    → [Route] → [Controller] → [Model(인메모리 저장소)]
+    ← [응답: { "code": "...", "data": ... }]
+```
+
+- **미들웨어**: CORS, HTTP 보안 헤더, 전역 Rate Limiting(인메모리), 요청 처리 시간(X-Process-Time 헤더 + 로깅).
+- **예외**: RequestValidationError → 400 `INVALID_REQUEST_BODY`, HTTPException → 상태코드 유지 + `{code, data}`, 500 → `INTERNAL_SERVER_ERROR`.
+- **인증**: Dependency `get_current_user(session_id: Cookie)` → user_id. 세션은 인메모리.
+
+---
+
+## 폴더 구조 (2단계 유지)
 
 ```
 .
-├── app/                    # 애플리케이션 코드
-│   ├── core/              # 공통 모듈 (설정, 의존성)
+├── app/
+│   ├── core/                    # 공통
 │   │   ├── __init__.py
-│   │   ├── config.py      # 설정 관리
-│   │   ├── dependencies.py # 공통 의존성 (인증 등)
-│   │   ├── exception_handlers.py # 예외 핸들러
-│   │   ├── logging_config.py # 로깅 설정
-│   │   └── middleware.py  # 미들웨어 (Rate Limiting 등)
-│   ├── auth/              # 인증 모듈
-│   │   ├── auth_controller.py
-│   │   ├── auth_model.py
+│   │   ├── config.py
+│   │   ├── dependencies.py      # get_current_user (Cookie → user_id)
+│   │   ├── exception_handlers.py
+│   │   ├── logging_config.py
+│   │   └── middleware.py        # CORS, Security, Rate Limit, Duration
+│   ├── auth/
 │   │   ├── auth_route.py
-│   │   └── auth_scheme.py
-│   ├── users/             # 사용자 모듈
-│   ├── posts/             # 게시글 모듈
-│   ├── comments/          # 댓글 모듈
-│   └── likes/             # 좋아요 모듈
-├── main.py                # FastAPI 애플리케이션 진입점
-├── pyproject.toml         # Python 프로젝트 설정 및 의존성
-├── .env.example          # 환경 변수 예시 파일
-├── .gitignore            # Git 무시 파일 목록
-└── README.md             # 프로젝트 문서
+│   │   ├── auth_controller.py
+│   │   ├── auth_model.py        # 인메모리 사용자/세션
+│   │   └── auth_schema.py
+│   ├── users/
+│   │   ├── users_route.py
+│   │   ├── users_controller.py
+│   │   ├── users_model.py       # AuthModel 래핑
+│   │   └── users_schema.py
+│   ├── posts/
+│   │   ├── posts_route.py
+│   │   ├── posts_controller.py
+│   │   ├── posts_model.py
+│   │   └── posts_schema.py
+│   ├── comments/
+│   │   ├── comments_route.py
+│   │   ├── comments_controller.py
+│   │   ├── comments_model.py
+│   │   └── comments_schema.py
+│   └── likes/
+│       ├── likes_route.py
+│       ├── likes_controller.py
+│       ├── likes_model.py
+│       └── likes_schema.py
+├── main.py
+├── pyproject.toml
+├── .env.example
+├── .gitignore
+└── README.md
 ```
+
+---
+
+## 점검 체크리스트 (현업 스타일)
+
+| 항목 | 적용 여부 |
+|------|-----------|
+| 미들웨어: CORS | ✅ CORSMiddleware, allow_credentials |
+| 미들웨어: Rate Limiting | ✅ 인메모리, IP 기반 |
+| 미들웨어: 요청 처리 시간 | ✅ X-Process-Time 헤더 + duration 로깅 |
+| Dependency: 인증/현재 사용자 | ✅ get_current_user(Cookie session_id) → user_id |
+| RCM 흐름 | ✅ Route → Controller → Model (Controller에서 DB 직접 접근 없음) |
+| Path 검증 | ✅ 타입 힌트만 (Path(..., description=...)) |
+| Query 검증 | ✅ Query(ge=1 등) 사용 |
+| Optional Body(None) 금지 | ✅ 요청 Body는 Pydantic 모델로 수신 |
+| 예외 응답 포맷 | ✅ { "code": "CODE", "data": null } 통일 (RequestValidationError, HTTPException, 500) |
+
+---
+
+## 꼭 필요한 개념 vs 제외한 개념
+
+- **적용**: CORS, Rate Limiting, 전역 예외 핸들러, 쿠키 세션(인메모리), RCM, Pydantic 검증, HTTP 보안 헤더, 요청 duration 로깅.
+- **제외(간단 커뮤니티 범위 밖)**: ETag/HTTP 캐시, Redis 세션, GraphQL, WebSocket, Timeout 미들웨어.
+
+---
+
+## Postman 테스트 시나리오 (최소 10개)
+
+**Base URL**: `http://localhost:8000`  
+**공통**: 인증 필요 API는 로그인 후 쿠키 `session_id` 자동 저장된 환경에서 호출.
+
+### 정상 플로우
+
+1. **회원가입**  
+   `POST /auth/signup`  
+   Body (JSON): `{"email":"test@example.com","password":"Abc123!@#","passwordConfirm":"Abc123!@#","nickname":"테스트"}`  
+   기대: 201, `{"code":"SIGNUP_SUCCESS","data":null}`
+
+2. **로그인**  
+   `POST /auth/login`  
+   Body: `{"email":"test@example.com","password":"Abc123!@#"}`  
+   기대: 200, `{"code":"LOGIN_SUCCESS","data":{...}}`, 응답 헤더/쿠키에 `session_id` 설정됨.
+
+3. **쿠키 유지 확인**  
+   `GET /auth/me` (Cookie에 `session_id` 포함)  
+   기대: 200, `{"code":"AUTH_SUCCESS","data":{...}}`
+
+4. **게시글 작성**  
+   `POST /posts`  
+   Body: `{"title":"제목","content":"본문"}`  
+   기대: 201, `{"code":"POST_UPLOADED","data":{"postId":1}}`
+
+5. **게시글 목록 조회**  
+   `GET /posts?page=1&size=10`  
+   기대: 200, `{"code":"POSTS_RETRIEVED","data":[...]}`
+
+6. **게시글 상세 조회**  
+   `GET /posts/1`  
+   기대: 200, `{"code":"POST_RETRIEVED","data":{...}}`
+
+7. **게시글 수정**  
+   `PATCH /posts/1`  
+   Body: `{"title":"수정제목","content":"수정본문"}`  
+   기대: 200, `{"code":"POST_UPDATED","data":null}`
+
+8. **댓글 작성**  
+   `POST /posts/1/comments`  
+   Body: `{"content":"댓글 내용"}`  
+   기대: 201
+
+9. **좋아요 추가**  
+   `POST /posts/1/likes`  
+   기대: 201
+
+10. **로그아웃**  
+    `POST /auth/logout` (Cookie 포함)  
+    기대: 200, `{"code":"LOGOUT_SUCCESS","data":null}`
+
+### 예외 케이스 (재현 방법)
+
+| 코드 | 재현 방법 |
+|------|-----------|
+| **400** | `POST /auth/signup` Body 필드 누락/형식 오류 → `INVALID_REQUEST_BODY` |
+| **401** | `GET /auth/me` Cookie 없음 또는 잘못된 session_id → `UNAUTHORIZED` |
+| **403** | `PATCH /users/2` 로 user_id=1로 로그인한 뒤 타인(2) 수정 시도 → `FORBIDDEN` |
+| **404** | `GET /posts/99999` 존재하지 않는 post_id → `POST_NOT_FOUND` |
+| **409** | 동일 이메일로 다시 `POST /auth/signup` → `EMAIL_ALREADY_EXISTS` |
+| **429** | 짧은 시간에 동일 IP로 11회 이상 API 호출 → `RATE_LIMIT_EXCEEDED` |
+| **500** | 서버 내부 오류(예: Model 예외) → `INTERNAL_SERVER_ERROR`, data: null |
+
+모든 실패 응답은 `{"code": "CODE_STRING", "data": null}` 형태입니다.
+
+---
 
 ## 설치 및 실행
 

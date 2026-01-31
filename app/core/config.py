@@ -20,8 +20,8 @@ class Settings:
     # 세션 설정
     SESSION_EXPIRY_TIME: int = int(os.getenv("SESSION_EXPIRY_TIME", "86400"))  # 24시간
     
-    # Rate Limiting 설정
-    # 어떤 사용자가 60초 안에 API 요청을 11번째로 보내면 차단( 429 에러 발생)
+    # Rate Limiting (PROD에서만 활성화 권장. 로컬/과제 시 비활성화)
+    RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "false").lower() == "true"
     RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "60"))  # 60초
     RATE_LIMIT_MAX_REQUESTS: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "10"))  # 최대 10회
     

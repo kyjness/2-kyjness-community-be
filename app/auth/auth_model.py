@@ -23,12 +23,7 @@ class AuthModel:
     
     # 세션 저장소 (세션 ID -> 사용자 ID/생성시간 매핑)
     _tokens: Dict[str, dict] = {}
-    
-    # Rate limiting 저장소 (IP -> 요청 정보)
-    _rate_limits: Dict[str, dict] = {}
-    
-    RATE_LIMIT_WINDOW = settings.RATE_LIMIT_WINDOW  # 60초 윈도우
-    RATE_LIMIT_MAX_REQUESTS = settings.RATE_LIMIT_MAX_REQUESTS  # 최대 10회 요청
+
     SESSION_EXPIRY_TIME = settings.SESSION_EXPIRY_TIME  # 세션 만료 시간 (24시간, 초 단위)
     
     @classmethod
@@ -268,30 +263,3 @@ class AuthModel:
             del cls._tokens[session_id]
         
         return len(expired_sessions)
-    
-    @classmethod
-    def check_rate_limit(cls, identifier: str) -> bool:
-        """Rate limiting 확인 (True: 허용, False: 거부)"""
-        current_time = time.time()
-        
-        if identifier not in cls._rate_limits:
-            cls._rate_limits[identifier] = {
-                "requests": [],
-                "window_start": current_time
-            }
-        
-        rate_info = cls._rate_limits[identifier]
-        
-        # 윈도우 밖의 요청 제거
-        rate_info["requests"] = [
-            req_time for req_time in rate_info["requests"]
-            if current_time - req_time < cls.RATE_LIMIT_WINDOW
-        ]
-        
-        # 요청 수 확인
-        if len(rate_info["requests"]) >= cls.RATE_LIMIT_MAX_REQUESTS:
-            return False
-        
-        # 요청 기록
-        rate_info["requests"].append(current_time)
-        return True

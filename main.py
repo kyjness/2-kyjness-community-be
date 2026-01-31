@@ -11,7 +11,7 @@ from app.likes.likes_route import router as likes_router
 from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.exception_handlers import register_exception_handlers
-from app.core.middleware import global_policy_middleware, sql_logging_middleware
+from app.core.middleware import global_policy_middleware, security_headers_middleware, sql_logging_middleware
 
 configure_logging()
 
@@ -34,6 +34,7 @@ app = FastAPI(
 
 app.middleware("http")(sql_logging_middleware)
 app.middleware("http")(global_policy_middleware)
+app.middleware("http")(security_headers_middleware)
 
 # CORS 설정 (프론트엔드와 연결할 때 필요)
 app.add_middleware(
@@ -53,17 +54,20 @@ app.include_router(posts_router)
 app.include_router(comments_router)
 app.include_router(likes_router)
 
-# 루트 엔드포인트 (서버 작동 확인용)
+# 루트: API 정보 (문서 링크 등)
 @app.get("/")
 def root():
     return {
-        "message": "PuppyTalk API is running!",
-        "version": "1.0.0",
-        "docs": "/docs"
+        "code": "OK",
+        "data": {
+            "message": "PuppyTalk API is running!",
+            "version": "1.0.0",
+            "docs": "/docs",
+        },
     }
 
-# 헬스체크 엔드포인트 (서버 상태 확인용)
+# 헬스체크: 상태 확인 전용 (200 + code/data 통일)
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    return {"code": "HEALTH_OK", "data": {"status": "healthy"}}
 

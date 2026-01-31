@@ -9,7 +9,7 @@ router = APIRouter(prefix="/posts/{post_id}/likes", tags=["likes"])
 # 좋아요 추가
 @router.post("", status_code=201)
 async def create_like(
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: int = Path(..., description="게시글 ID"),
     user_id: int = Depends(get_current_user)
 ):
     """좋아요 추가 API"""
@@ -21,7 +21,7 @@ async def create_like(
 # 좋아요 취소
 @router.delete("", status_code=204)
 async def delete_like(
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: int = Path(..., description="게시글 ID"),
     user_id: int = Depends(get_current_user)
 ):
     """좋아요 취소 API"""

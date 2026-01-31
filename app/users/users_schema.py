@@ -1,4 +1,4 @@
-# app/users/users_scheme.py
+# app/users/users_schema.py
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
@@ -25,10 +25,7 @@ class UserRetrievedData(BaseModel):
     profileImageUrl: str
     createdAt: str
 
-# 프로필 이미지 업로드
-# 요청: 파일 업로드 (FastAPI의 UploadFile 사용, 스키마 없음)
-# - profileImage: .jpg 파일 (multipart/form-data)
-# 응답 데이터
+# 프로필 이미지 업로드 응답 데이터
 class ProfileImageUploadData(BaseModel):
     profileImageUrl: str
 

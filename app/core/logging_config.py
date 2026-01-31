@@ -10,7 +10,7 @@ def configure_logging() -> None:
     - 운영(DEBUG=False): WARNING 이상
     """
     logging.basicConfig(
-        level=logging.INFO if settings.DEBUG else logging.WARNING,
+        level=logging.DEBUG if settings.DEBUG else logging.WARNING,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
