@@ -1,6 +1,9 @@
 # app/posts/posts_schema.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+
+from app.core.validators import ensure_file_url
+
 
 # 게시글 작성 요청
 class PostCreateRequest(BaseModel):
@@ -8,11 +11,26 @@ class PostCreateRequest(BaseModel):
     content: str = Field(..., min_length=1, description="본문 (길이 제한 없음)")
     fileUrl: Optional[str] = Field(default="", description="파일 URL (선택)")
 
+    @field_validator("fileUrl", mode="after")
+    @classmethod
+    def file_url_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not (v and v.strip()):
+            return v if v is not None else ""
+        return ensure_file_url(v)
+
+
 # 게시글 수정 요청
 class PostUpdateRequest(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=26, description="제목 (최대 26자, 선택)")
     content: Optional[str] = Field(default=None, min_length=1, description="본문 (길이 제한 없음, 선택)")
     fileUrl: Optional[str] = Field(default=None, description="파일 URL (선택)")
+
+    @field_validator("fileUrl", mode="after")
+    @classmethod
+    def file_url_format(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v:
+            return v
+        return ensure_file_url(v)
 
 # 게시글 이미지 업로드 응답
 class PostImageUploadResponse(BaseModel):

@@ -7,25 +7,47 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 
+# 라우트 없음(404), 메서드 불일치(405) 등 공통 code 매핑 (Postman 등 어떤 요청이든 { code, data } 형식 보장)
+HTTP_STATUS_TO_CODE = {
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    422: "UNPROCESSABLE_ENTITY",
+}
+
+
 def register_exception_handlers(app: FastAPI) -> None:
-    """전역 예외 핸들러 등록."""
+    """전역 예외 핸들러 등록. 어떤 예외든 { code, data } 형식으로 응답."""
+
+    # DTO 검증 시 validators.ensure_*가 ValueError("INVALID_XXX")로 던진 코드 보존
+    _KNOWN_VALIDATION_CODES = frozenset({
+        "INVALID_PASSWORD_FORMAT", "INVALID_NICKNAME_FORMAT", "INVALID_PROFILEIMAGEURL",
+        "INVALID_FILE_URL", "INVALID_REQUEST", "MISSING_REQUIRED_FIELD",
+    })
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        # 요청 바디/쿼리/패스 파라미터 검증 오류
         logger.warning(
             "Validation error: Path=%s, Errors=%s",
             request.url.path,
             exc.errors(),
         )
+        code = "INVALID_REQUEST_BODY"
+        for err in exc.errors():
+            msg = err.get("msg", "")
+            if isinstance(msg, str):
+                for known in _KNOWN_VALIDATION_CODES:
+                    if known in msg or msg == known:
+                        code = known
+                        break
+                if code != "INVALID_REQUEST_BODY":
+                    break
         return JSONResponse(
             status_code=400,
-            content={"code": "INVALID_REQUEST_BODY", "data": None},
+            content={"code": code, "data": None},
         )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        # 보안 관련(401/403)은 WARNING, 그 외 4xx는 INFO
         if exc.status_code in (401, 403):
             logger.warning(
                 "Security error: Status=%s, Path=%s, Detail=%s",
@@ -41,12 +63,17 @@ def register_exception_handlers(app: FastAPI) -> None:
                 exc.detail,
             )
 
-        # HTTP 상태 코드는 유지, 응답 포맷만 통일
-        if isinstance(exc.detail, dict):
+        # 응답 포맷 통일: 우리 포맷(dict with code)이면 그대로, 아니면 code 매핑
+        if isinstance(exc.detail, dict) and "code" in exc.detail:
             return JSONResponse(status_code=exc.status_code, content=exc.detail)
+        code = HTTP_STATUS_TO_CODE.get(exc.status_code)
+        if not code and isinstance(exc.detail, dict):
+            code = exc.detail.get("code", "HTTP_ERROR")
+        if not code:
+            code = str(exc.detail) if exc.detail else "HTTP_ERROR"
         return JSONResponse(
             status_code=exc.status_code,
-            content={"code": str(exc.detail) if exc.detail else "HTTP_ERROR", "data": None},
+            content={"code": code, "data": None},
         )
 
     @app.exception_handler(Exception)

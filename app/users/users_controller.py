@@ -1,5 +1,5 @@
 # app/users/users_controller.py
-"""사용자 관련 비즈니스 로직. 권한은 Route 의존성(require_same_user), 검증·응답은 core 사용."""
+"""사용자 관련 비즈니스 로직. 입력 형식 검증은 DTO(Pydantic)에서 수행, 컨트롤러는 검증된 값만 처리."""
 
 from typing import Optional
 
@@ -7,46 +7,37 @@ from fastapi import UploadFile
 
 from app.users.users_model import UsersModel
 from app.auth.auth_model import AuthModel
-from app.core.config import settings
 from app.core.response import success_response, raise_http_error
-from app.core.validators import validate_nickname_format, validate_password_format, validate_profile_image_url
-from app.core.file_upload import validate_image_upload, PROFILE_ALLOWED_TYPES, MAX_FILE_SIZE
+from app.core.file_upload import save_profile_image
 
 
 async def upload_profile_image(user_id: int, profile_image: Optional[UploadFile]):
-    """프로필 이미지 업로드. 권한은 Route(require_same_user)에서 검사."""
-    if not profile_image:
-        raise_http_error(400, "MISSING_REQUIRED_FIELD")
-    await validate_image_upload(profile_image, PROFILE_ALLOWED_TYPES, MAX_FILE_SIZE)
+    """
+    프로필 이미지 업로드. /users/me 전용.
+    검증·저장·URL 생성은 file_upload.save_profile_image에서 처리. 컨트롤러는 권한·DB만.
+    """
     user = UsersModel.get_user_by_id(user_id)
     if not user:
         raise_http_error(404, "USER_NOT_FOUND")
-    file_extension = "jpg"
-    profile_image_url = f"{settings.BE_API_URL}/public/image/profile/{user_id}.{file_extension}"
+
+    profile_image_url = await save_profile_image(profile_image)
+
     if not UsersModel.update_profile_image_url(user_id, profile_image_url):
         raise_http_error(500, "INTERNAL_SERVER_ERROR")
     return success_response("PROFILE_IMAGE_UPLOADED", {"profileImageUrl": profile_image_url})
 
 
-def check_email(email: Optional[str]):
-    if not email or not isinstance(email, str) or not email.strip():
-        raise_http_error(400, "MISSING_REQUIRED_FIELD")
-    is_available = not AuthModel.email_exists(email)
-    return success_response("EMAIL_AVAILABLE", {"available": is_available})
-
-
-def check_nickname(nickname: Optional[str]):
-    if not nickname or not isinstance(nickname, str) or not nickname.strip():
-        raise_http_error(400, "MISSING_REQUIRED_FIELD")
-    if not validate_nickname_format(nickname):
-        raise_http_error(400, "INVALID_NICKNAME_FORMAT")
-    if AuthModel.nickname_exists(nickname):
-        raise_http_error(409, "NICKNAME_ALREADY_EXISTS")
-    return success_response("NICKNAME_AVAILABLE", {"available": True})
+def check_user_exists(query):
+    """REST: users 리소스 존재 여부 조회. DTO에서 이미 email|nickname 정확히 하나 검증됨."""
+    if query.email:
+        exists = AuthModel.email_exists(query.email)
+        return success_response("OK", {"exists": exists})
+    exists = AuthModel.nickname_exists(query.nickname)
+    return success_response("OK", {"exists": exists})
 
 
 def get_user(user_id: int):
-    """내 정보 조회. 권한은 Route(require_same_user)에서 검사."""
+    """내 정보 조회. /users/me 전용."""
     user = UsersModel.get_user_by_id(user_id)
     if not user:
         raise_http_error(404, "USER_NOT_FOUND")
@@ -58,12 +49,8 @@ def update_user(
     nickname: Optional[str] = None,
     profile_image_url: Optional[str] = None,
 ):
-    """내 정보 수정. 권한은 Route(require_same_user)에서 검사."""
-    if nickname is None and profile_image_url is None:
-        raise_http_error(400, "MISSING_REQUIRED_FIELD")
+    """내 정보 수정. /users/me 전용. DTO에서 필수·닉네임 형식 검증 완료."""
     if nickname is not None:
-        if " " in nickname or not validate_nickname_format(nickname):
-            raise_http_error(400, "INVALID_NICKNAME_FORMAT")
         current_user = UsersModel.get_user_by_id(user_id)
         if not current_user:
             raise_http_error(404, "USER_NOT_FOUND")
@@ -73,19 +60,14 @@ def update_user(
             if not UsersModel.update_nickname(user_id, nickname):
                 raise_http_error(500, "INTERNAL_SERVER_ERROR")
     if profile_image_url is not None:
-        if not validate_profile_image_url(profile_image_url):
-            raise_http_error(400, "INVALID_PROFILEIMAGEURL")
+        # profileImageUrl 형식 검증은 DTO(UpdateUserRequest)에서 완료
         if not UsersModel.update_profile_image_url(user_id, profile_image_url):
             raise_http_error(500, "INTERNAL_SERVER_ERROR")
     return success_response("USER_UPDATED")
 
 
 def update_password(user_id: int, current_password: str, new_password: str):
-    """비밀번호 변경. 권한은 Route(require_same_user)에서 검사."""
-    if not validate_password_format(current_password):
-        raise_http_error(400, "INVALID_CURRENTPASSWORD_FORMAT")
-    if not validate_password_format(new_password):
-        raise_http_error(400, "INVALID_NEWPASSWORD_FORMAT")
+    """비밀번호 변경. /users/me 전용. DTO에서 비밀번호 형식 검증 완료."""
     user = UsersModel.get_user_by_id(user_id)
     if not user:
         raise_http_error(404, "USER_NOT_FOUND")
@@ -97,10 +79,10 @@ def update_password(user_id: int, current_password: str, new_password: str):
 
 
 def withdraw_user(user_id: int):
-    """회원 탈퇴. 권한은 Route(require_same_user)에서 검사."""
+    """회원 탈퇴. /users/me 전용. 성공 시 success_response, 실패 시 예외."""
     user = UsersModel.get_user_by_id(user_id)
     if not user:
         raise_http_error(404, "USER_NOT_FOUND")
     if not UsersModel.delete_user(user_id):
         raise_http_error(500, "INTERNAL_SERVER_ERROR")
-    return None
+    return success_response("USER_DELETED", None)

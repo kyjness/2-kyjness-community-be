@@ -29,4 +29,4 @@ def delete_like(post_id: int, user_id: int):
         raise_http_error(404, "LIKE_NOT_FOUND")
     LikesModel.delete_like(post_id, user_id)
     PostsModel.decrement_like_count(post_id)
-    return None
+    return success_response("LIKE_DELETED", None)

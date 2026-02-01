@@ -1,89 +1,133 @@
 # app/comments/comments_model.py
-from typing import Optional, Dict, List
-from datetime import datetime
-import threading
+"""댓글 모델 (MySQL comments 테이블)"""
+
+from typing import Optional, List
+
+from app.core.database import get_connection
+
 
 class CommentsModel:
-    """인메모리 JSON 저장소를 사용한 Comments 모델"""
+    """댓글 모델 (MySQL)"""
 
-    # 인메모리 데이터 저장소
-    # 구조: {comment_id: {commentId, postId, content, authorId, createdAt}}
-    _comments: Dict[int, dict] = {}
-    _comment_id_counter: int = 1
-    _comment_id_lock = threading.Lock()  # 동시성 제어용 락
+    @classmethod
+    def _row_to_comment(cls, row: dict) -> dict:
+        """DB 행을 API 형식 comment dict로 변환"""
+        if not row:
+            return None
+        return {
+            "commentId": row["id"],
+            "postId": row["post_id"],
+            "content": row["content"],
+            "authorId": row["author_id"],
+            "createdAt": row["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+            if row.get("created_at")
+            else "",
+        }
 
-    #댓글 생성, 자동으로 commentId 할당
     @classmethod
     def create_comment(cls, post_id: int, user_id: int, content: str) -> dict:
-        # 동시성 제어: comment_id 할당 시 락 사용
-        with cls._comment_id_lock:
-            comment_id = cls._comment_id_counter
-            cls._comment_id_counter += 1
-
-        comment = {
+        """댓글 생성"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO comments (post_id, author_id, content)
+                VALUES (%s, %s, %s)
+                """,
+                (post_id, user_id, content),
+            )
+            comment_id = cur.lastrowid
+        conn.commit()
+        return {
             "commentId": comment_id,
             "postId": post_id,
             "content": content,
             "authorId": user_id,
-            "createdAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "createdAt": "",
         }
 
-        cls._comments[comment_id] = comment
-        return comment
-
-    #댓글 조회
     @classmethod
     def find_comment_by_id(cls, comment_id: int) -> Optional[dict]:
-        return cls._comments.get(comment_id)
+        """댓글 조회"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, post_id, author_id, content, created_at
+                FROM comments WHERE id = %s AND deleted_at IS NULL
+                """,
+                (comment_id,),
+            )
+            row = cur.fetchone()
+        return cls._row_to_comment(row) if row else None
 
-    #특정 게시글의 댓글 목록 조회 (페이징 지원)
     @classmethod
-    def get_comments_by_post_id(cls, post_id: int, page: int = 1, size: int = 20) -> List[dict]:
-        # 해당 게시글의 댓글만 필터링
-        post_comments = [c for c in cls._comments.values() if c["postId"] == post_id]
-        
-        # 최신순 정렬 (commentId 내림차순)
-        sorted_comments = sorted(post_comments, key=lambda x: x["commentId"], reverse=True)
+    def get_comments_by_post_id(
+        cls, post_id: int, page: int = 1, size: int = 20
+    ) -> List[dict]:
+        """특정 게시글의 댓글 목록 (페이징)"""
+        conn = get_connection()
+        offset = (page - 1) * size
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, post_id, author_id, content, created_at
+                FROM comments
+                WHERE post_id = %s AND deleted_at IS NULL
+                ORDER BY id DESC
+                LIMIT %s OFFSET %s
+                """,
+                (post_id, size, offset),
+            )
+            rows = cur.fetchall()
+        return [cls._row_to_comment(r) for r in rows]
 
-        # 페이징 처리
-        start_idx = (page - 1) * size
-        end_idx = start_idx + size
-
-        return sorted_comments[start_idx:end_idx]
-
-    #댓글 수정
     @classmethod
     def update_comment(cls, comment_id: int, content: str) -> bool:
-        comment = cls._comments.get(comment_id)
-        if not comment:
-            return False
+        """댓글 수정"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE comments SET content = %s WHERE id = %s AND deleted_at IS NULL",
+                (content, comment_id),
+            )
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
 
-        comment["content"] = content
-        return True
-
-    #댓글 삭제
     @classmethod
     def delete_comment(cls, comment_id: int) -> bool:
-        if comment_id in cls._comments:
-            del cls._comments[comment_id]
-            return True
-        return False
+        """댓글 삭제 (soft delete)"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE comments SET deleted_at = NOW() WHERE id = %s",
+                (comment_id,),
+            )
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
 
-    #댓글 작성자 ID 조회
     @classmethod
     def get_comment_author_id(cls, comment_id: int) -> Optional[int]:
-        comment = cls._comments.get(comment_id)
-        return comment["authorId"] if comment else None
+        """댓글 작성자 ID 조회"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT author_id FROM comments WHERE id = %s AND deleted_at IS NULL",
+                (comment_id,),
+            )
+            row = cur.fetchone()
+        return row["author_id"] if row else None
 
-    #댓글의 게시글 ID 조회
     @classmethod
     def get_comment_post_id(cls, comment_id: int) -> Optional[int]:
-        comment = cls._comments.get(comment_id)
-        return comment["postId"] if comment else None
-
-    #모든 데이터 초기화(테스트용)
-    @classmethod
-    def clear_all_data(cls):
-        cls._comments.clear()
-        with cls._comment_id_lock:
-            cls._comment_id_counter = 1
+        """댓글의 게시글 ID 조회"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT post_id FROM comments WHERE id = %s AND deleted_at IS NULL",
+                (comment_id,),
+            )
+            row = cur.fetchone()
+        return row["post_id"] if row else None

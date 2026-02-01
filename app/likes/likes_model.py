@@ -1,77 +1,93 @@
 # app/likes/likes_model.py
-from typing import Optional, Dict
-from datetime import datetime
-import threading
+"""좋아요 모델 (MySQL likes 테이블)"""
+
+from typing import Optional, List
+
+from app.core.database import get_connection
+
 
 class LikesModel:
-    """인메모리 JSON 저장소를 사용한 Likes 모델"""
+    """좋아요 모델 (MySQL)"""
 
-    # 인메모리 데이터 저장소
-    # 구조: {(post_id, user_id): {postId, userId, createdAt}}
-    # 중복 좋아요 방지를 위해 (post_id, user_id) 튜플을 키로 사용
-    _likes: Dict[tuple, dict] = {}
-    _likes_lock = threading.Lock()  # 동시성 제어용 락
-
-    #좋아요 생성
     @classmethod
-    def create_like(cls, post_id: int, user_id: int) -> dict:
-        """좋아요 생성 (중복 체크 포함)"""
-        key = (post_id, user_id)
-        
-        # 동시성 제어: 좋아요 생성 시 락 사용
-        with cls._likes_lock:
-            # 중복 체크
-            if key in cls._likes:
-                return None  # 이미 좋아요가 존재함
-            
-            like = {
-                "postId": post_id,
-                "userId": user_id,
-                "createdAt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-            cls._likes[key] = like
-            return like
+    def create_like(cls, post_id: int, user_id: int) -> Optional[dict]:
+        """좋아요 생성 (중복 시 None)"""
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO likes (post_id, user_id)
+                    VALUES (%s, %s)
+                    """,
+                    (post_id, user_id),
+                )
+            conn.commit()
+            return {"postId": post_id, "userId": user_id, "createdAt": ""}
+        except Exception:
+            conn.rollback()
+            return None  # 중복 등
 
-    #좋아요 조회 (특정 게시글, 특정 사용자)
     @classmethod
     def find_like(cls, post_id: int, user_id: int) -> Optional[dict]:
-        """특정 게시글에 대한 특정 사용자의 좋아요 조회"""
-        key = (post_id, user_id)
-        return cls._likes.get(key)
+        """좋아요 조회"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT post_id, user_id FROM likes WHERE post_id = %s AND user_id = %s",
+                (post_id, user_id),
+            )
+            row = cur.fetchone()
+        return (
+            {"postId": row["post_id"], "userId": row["user_id"], "createdAt": ""}
+            if row
+            else None
+        )
 
-    #좋아요 존재 여부 확인
     @classmethod
     def has_liked(cls, post_id: int, user_id: int) -> bool:
-        """특정 게시글에 대한 특정 사용자의 좋아요 존재 여부"""
-        key = (post_id, user_id)
-        return key in cls._likes
+        """좋아요 존재 여부"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM likes WHERE post_id = %s AND user_id = %s LIMIT 1",
+                (post_id, user_id),
+            )
+            return cur.fetchone() is not None
 
-    #좋아요 삭제
     @classmethod
     def delete_like(cls, post_id: int, user_id: int) -> bool:
         """좋아요 삭제"""
-        key = (post_id, user_id)
-        if key in cls._likes:
-            del cls._likes[key]
-            return True
-        return False
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM likes WHERE post_id = %s AND user_id = %s",
+                (post_id, user_id),
+            )
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
 
-    #특정 게시글의 좋아요 수 조회
     @classmethod
     def get_like_count_by_post_id(cls, post_id: int) -> int:
-        """특정 게시글의 좋아요 수 조회"""
-        count = sum(1 for (p_id, _) in cls._likes.keys() if p_id == post_id)
-        return count
+        """게시글별 좋아요 수"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM likes WHERE post_id = %s",
+                (post_id,),
+            )
+            row = cur.fetchone()
+        return row["cnt"] or 0
 
-    #특정 사용자가 좋아요한 게시글 목록 조회
     @classmethod
-    def get_liked_posts_by_user_id(cls, user_id: int) -> list:
-        """특정 사용자가 좋아요한 게시글 ID 목록 조회"""
-        post_ids = [post_id for (post_id, u_id) in cls._likes.keys() if u_id == user_id]
-        return post_ids
-
-    #모든 데이터 초기화(테스트용)
-    @classmethod
-    def clear_all_data(cls):
-        cls._likes.clear()
+    def get_liked_posts_by_user_id(cls, user_id: int) -> List[int]:
+        """사용자가 좋아요한 게시글 ID 목록"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT post_id FROM likes WHERE user_id = %s",
+                (user_id,),
+            )
+            rows = cur.fetchall()
+        return [r["post_id"] for r in rows]

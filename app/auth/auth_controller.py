@@ -1,12 +1,11 @@
 # app/auth/auth_controller.py
-"""인증 비즈니스 로직. 입력 형식 검증은 Pydantic + core.validators, 에러는 core.response."""
+"""인증 비즈니스 로직. 입력 형식 검증은 DTO(Pydantic)에서 수행, 컨트롤러는 검증된 값만 처리."""
 
 import logging
 from typing import Optional
 
 from app.auth.auth_model import AuthModel
 from app.core.response import success_response, raise_http_error
-from app.core.validators import validate_password_format, validate_nickname_format, validate_profile_image_url
 
 logger = logging.getLogger(__name__)
 
@@ -14,18 +13,10 @@ logger = logging.getLogger(__name__)
 def signup(
     email: str,
     password: str,
-    password_confirm: str,
     nickname: str,
     profile_image_url: Optional[str] = None,
 ):
-    if not validate_password_format(password):
-        raise_http_error(400, "INVALID_PASSWORD_FORMAT")
-    if password != password_confirm:
-        raise_http_error(400, "PASSWORD_MISMATCH")
-    if " " in nickname or not validate_nickname_format(nickname):
-        raise_http_error(400, "INVALID_NICKNAME_FORMAT")
-    if not validate_profile_image_url(profile_image_url):
-        raise_http_error(400, "INVALID_PROFILEIMAGEURL")
+    # 비밀번호·닉네임·profileImageUrl 형식 검증은 DTO(SignUpRequest)에서 완료
     if AuthModel.email_exists(email):
         raise_http_error(409, "EMAIL_ALREADY_EXISTS")
     if AuthModel.nickname_exists(nickname):
@@ -35,8 +26,8 @@ def signup(
 
 
 def login(email: str, password: str):
-    if not validate_password_format(password):
-        raise_http_error(400, "INVALID_PASSWORD_FORMAT")
+    """쿠키-세션 방식 로그인. 세션 ID는 응답 body에 넣지 않고, 라우트에서 Set-Cookie로만 전달 (JWT 아님)."""
+    # 비밀번호 형식 검증은 DTO(LoginRequest)에서 완료
     user = AuthModel.find_user_by_email(email)
     if not user:
         logger.warning("Login failed: User not found")
@@ -44,18 +35,18 @@ def login(email: str, password: str):
     if not AuthModel.verify_password(user["userId"], password):
         logger.warning("Login failed: Invalid password")
         raise_http_error(401, "INVALID_CREDENTIALS")
-    session_id = AuthModel.create_token(user["userId"])
-    return success_response("LOGIN_SUCCESS", {
+    session_id = AuthModel.create_session(user["userId"])
+    response_body = success_response("LOGIN_SUCCESS", {
         "userId": user["userId"],
         "email": user["email"],
         "nickname": user["nickname"],
-        "authToken": session_id,
-        "profileImage": user["profileImageUrl"],
+        "profileImageUrl": user["profileImageUrl"],
     })
+    return response_body, session_id
 
 
 def logout(session_id: Optional[str]):
-    AuthModel.revoke_token(session_id)
+    AuthModel.revoke_session(session_id)
     return success_response("LOGOUT_SUCCESS")
 
 

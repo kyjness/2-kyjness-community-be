@@ -14,31 +14,27 @@ async def signup(signup_data: SignUpRequest):
     return auth_controller.signup(
         email=signup_data.email,
         password=signup_data.password,
-        password_confirm=signup_data.passwordConfirm,
         nickname=signup_data.nickname,
         profile_image_url=signup_data.profileImageUrl
     )
 
-# 로그인 (쿠키-세션 방식, 비밀번호 bcrypt 검증)
+# 로그인 (쿠키-세션 방식, JWT 아님 — 인증 정보는 Set-Cookie로만 전달)
 @router.post("/login", status_code=200)
 async def login(login_data: LoginRequest, response: Response):
-    """로그인 API — 입력 비밀번호를 저장된 bcrypt 해시와 비교하여 검증합니다."""
-    result = auth_controller.login(
+    """로그인 API — 세션 생성 후 세션 ID만 Set-Cookie로 내려줌. body에는 토큰 없음."""
+    result, session_id = auth_controller.login(
         email=login_data.email,
         password=login_data.password
     )
-    
-    # 세션 ID를 쿠키에 설정 (HTTP 응답 처리)
-    session_id = result["data"]["authToken"]
     response.set_cookie(
         key="session_id",
         value=session_id,
-        httponly=True,  # XSS 공격 방지
-        secure=False,  # HTTPS 사용 시 True로 변경
-        samesite="lax",  # CSRF 공격 방지
-        max_age=86400  # 24시간 (초 단위)
+        httponly=True,
+        secure=False,  # 개발환경(http)에서는 False. HTTPS 배포 시 True 권장
+        path="/",
+        samesite="lax",
+        max_age=86400,
     )
-    
     return result
 
 # 로그아웃 (쿠키-세션 방식)

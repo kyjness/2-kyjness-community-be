@@ -29,8 +29,8 @@ class UsersModel:
         if not AuthModel.delete_user_data(user_id):
             return False
         
-        # 해당 사용자의 모든 세션 토큰 삭제
-        AuthModel.revoke_all_user_tokens(user_id)
+        # 해당 사용자의 모든 세션 삭제
+        AuthModel.revoke_all_sessions_for_user(user_id)
         
         return True
     

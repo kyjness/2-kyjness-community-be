@@ -1,24 +1,43 @@
 # main.py
+import logging
+from pathlib import Path
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.requests import Request
+
 from app.auth.auth_route import router as auth_router
 from app.users.users_route import router as users_router
 from app.posts.posts_route import router as posts_router
 from app.comments.comments_route import router as comments_router
 from app.likes.likes_route import router as likes_router
 from app.core.config import settings
-from app.core.logging_config import configure_logging
 from app.core.exception_handlers import register_exception_handlers
-from app.core.middleware import global_policy_middleware, security_headers_middleware, sql_logging_middleware
 
-configure_logging()
+# 서버 실행 시 INFO 기본 출력 (최소 로깅)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+
+async def add_security_headers(request: Request, call_next):
+    """보안 헤더 + Process-Time(DEBUG)"""
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if settings.DEBUG:
+        response.headers["X-Process-Time"] = "0"
+    return response
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """앱 시작 시 DB 연결 및 콘솔에 '데이터베이스 연결 성공' 표시."""
+    """앱 시작/종료 시 DB 연결 관리"""
     from app.core.database import init_database, close_database
     init_database()
     yield
@@ -27,16 +46,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PuppyTalk API",
-    description="커뮤니티 백엔드 API",
+    description="소규모 커뮤니티 백엔드 API",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-app.middleware("http")(sql_logging_middleware)
-app.middleware("http")(global_policy_middleware)
-app.middleware("http")(security_headers_middleware)
+# 미들웨어
+app.middleware("http")(add_security_headers)
 
-# CORS 설정 (프론트엔드와 연결할 때 필요)
+# CORS 설정 (쿠키-세션 인증: allow_credentials=True)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -45,7 +63,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 예외 핸들러 등록
 register_exception_handlers(app)
+
+# 정적 파일 서빙 (public 폴더 → /public URL로 접근)
+public_dir = Path(__file__).parent / "public"
+public_dir.mkdir(exist_ok=True)
+app.mount("/public", StaticFiles(directory=str(public_dir)), name="public")
 
 # 라우터 등록
 app.include_router(auth_router)
@@ -54,9 +78,10 @@ app.include_router(posts_router)
 app.include_router(comments_router)
 app.include_router(likes_router)
 
-# 루트: API 정보 (문서 링크 등)
+
 @app.get("/")
 def root():
+    """API 정보"""
     return {
         "code": "OK",
         "data": {
@@ -65,9 +90,4 @@ def root():
             "docs": "/docs",
         },
     }
-
-# 헬스체크: 상태 확인 전용 (200 + code/data 통일)
-@app.get("/health")
-def health_check():
-    return {"code": "HEALTH_OK", "data": {"status": "healthy"}}
 

@@ -33,7 +33,7 @@ def get_comments(post_id: int, page: int = 1, size: int = 20):
                     "author": {
                         "userId": author["userId"],
                         "nickname": author["nickname"],
-                        "profileImageUrl": author.get("profileImageUrl", author.get("profileImage", "")),
+                        "profileImageUrl": author.get("profileImageUrl", ""),
                     },
                     "createdAt": comment["createdAt"],
                 }
@@ -67,4 +67,4 @@ def delete_comment(post_id: int, comment_id: int, user_id: int):
         raise_http_error(400, "INVALID_POSTID_FORMAT")
     CommentsModel.delete_comment(comment_id)
     PostsModel.decrement_comment_count(post_id)
-    return None
+    return success_response("COMMENT_DELETED", None)

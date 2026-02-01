@@ -13,21 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 def get_current_user(session_id: Optional[str] = Cookie(None)) -> int:
-    """인증된 사용자 ID 반환. 없거나 무효면 401."""
+    """Cookie의 session_id로 세션 저장소에서 user_id 조회. 없거나 무효면 401 (JWT 아님)."""
     if not session_id:
         logger.warning("Authentication failed: No session ID provided")
         raise_http_error(401, "UNAUTHORIZED")
-    user_id = AuthModel.verify_token(session_id)
+    user_id = AuthModel.get_user_id_by_session(session_id)
     if not user_id:
-        logger.warning("Authentication failed: Invalid session ID")
+        logger.warning("Authentication failed: Invalid or expired session")
         raise_http_error(401, "UNAUTHORIZED")
-    return user_id
-
-
-def require_same_user(user_id: int, current_id: int = Depends(get_current_user)) -> int:
-    """Path user_id와 로그인 사용자가 동일한지 검사. 아니면 403."""
-    if current_id != user_id:
-        raise_http_error(403, "FORBIDDEN")
     return user_id
 
 

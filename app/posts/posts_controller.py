@@ -7,31 +7,22 @@ from fastapi import UploadFile
 
 from app.posts.posts_model import PostsModel
 from app.auth.auth_model import AuthModel
-from app.core.config import settings
 from app.core.response import success_response, raise_http_error
-from app.core.file_upload import validate_image_upload, POST_ALLOWED_TYPES, MAX_FILE_SIZE
+from app.core.file_upload import save_post_image
 
 
 def create_post(user_id: int, title: str, content: str, file_url: str = ""):
-    if file_url and not (
-        file_url.startswith("http://")
-        or file_url.startswith("https://")
-        or file_url.startswith(settings.BE_API_URL)
-    ):
-        raise_http_error(400, "INVALID_FILE_URL")
-    post = PostsModel.create_post(user_id, title, content, file_url)
+    # fileUrl 형식 검증은 DTO(PostCreateRequest)에서 완료
+    post = PostsModel.create_post(user_id, title, content, file_url or "")
     return success_response("POST_UPLOADED", {"postId": post["postId"]})
 
 
 async def upload_post_image(post_id: int, user_id: int, file: Optional[UploadFile]):
-    """게시글 이미지 업로드. 게시글 존재·작성자 검사는 Route(require_post_author)에서 수행."""
-    if not file:
-        raise_http_error(400, "MISSING_REQUIRED_FIELD")
-    await validate_image_upload(file, POST_ALLOWED_TYPES, MAX_FILE_SIZE)
+    """게시글 이미지 업로드. 검증·저장·URL은 file_upload.save_post_image에서 처리."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, "POST_NOT_FOUND")
-    file_url = f"{settings.BE_API_URL}/public/image/post/{post_id}_{file.filename}"
+    file_url = await save_post_image(post_id, file)
     PostsModel.update_post(post_id, title=None, content=None, file_url=file_url)
     return success_response("POST_IMAGE_UPLOADED", {"postFileUrl": file_url})
 
@@ -53,7 +44,7 @@ def get_posts(page: int = 1, size: int = 10):
                     "author": {
                         "userId": author["userId"],
                         "nickname": author["nickname"],
-                        "profileImageUrl": author.get("profileImageUrl", author.get("profileImage", "")),
+                        "profileImageUrl": author.get("profileImageUrl", ""),
                     },
                     "file": post.get("file"),
                     "createdAt": post["createdAt"],
@@ -80,7 +71,7 @@ def get_post(post_id: int):
         "author": {
             "userId": author["userId"],
             "nickname": author["nickname"],
-            "profileImageUrl": author.get("profileImageUrl", author.get("profileImage", "")),
+            "profileImageUrl": author.get("profileImageUrl", ""),
         },
         "file": post.get("file"),
         "createdAt": post["createdAt"],
@@ -99,12 +90,7 @@ def update_post(
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, "POST_NOT_FOUND")
-    if file_url is not None and file_url and not (
-        file_url.startswith("http://")
-        or file_url.startswith("https://")
-        or file_url.startswith(settings.BE_API_URL)
-    ):
-        raise_http_error(400, "INVALID_FILE_URL")
+    # fileUrl 형식 검증은 DTO(PostUpdateRequest)에서 완료
     PostsModel.update_post(post_id, title, content, file_url)
     return success_response("POST_UPDATED")
 
@@ -115,4 +101,4 @@ def delete_post(post_id: int, user_id: int):
     if not post:
         raise_http_error(404, "POST_NOT_FOUND")
     PostsModel.delete_post(post_id)
-    return None
+    return success_response("POST_DELETED", None)

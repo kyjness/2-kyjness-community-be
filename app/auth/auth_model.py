@@ -1,265 +1,314 @@
 # app/auth/auth_model.py
-from typing import Optional, Dict
-import secrets  # 암호학적으로 안전한 랜덤 세션 ID 생성용
-import time
+"""인증 관련 데이터 모델 (MySQL users, sessions 테이블)"""
+
+from datetime import datetime, timedelta
+from typing import Optional
+
 import bcrypt
-import threading
-from datetime import datetime
+import secrets
+
 from app.core.config import settings
+from app.core.database import get_connection
+
 
 class AuthModel:
-    """인증 관련 데이터 모델 (JSON 기반, DB 사용하지 않음)"""
-    
-    # 사용자 저장소 (메모리 기반)
-    _users: Dict[int, dict] = {}
-    _next_user_id: int = 1
-    _user_id_lock = threading.Lock()  # 동시성 제어용 락
-    
-    # 이메일 인덱스 (중복 체크용)
-    _email_index: Dict[str, int] = {}
-    
-    # 닉네임 인덱스 (중복 체크용)
-    _nickname_index: Dict[str, int] = {}
-    
-    # 세션 저장소 (세션 ID -> 사용자 ID/생성시간 매핑)
-    _tokens: Dict[str, dict] = {}
+    """인증 관련 데이터 모델 (MySQL)"""
 
-    SESSION_EXPIRY_TIME = settings.SESSION_EXPIRY_TIME  # 세션 만료 시간 (24시간, 초 단위)
-    
+    SESSION_EXPIRY_TIME = settings.SESSION_EXPIRY_TIME  # 초 단위
+
     @classmethod
     def _hash_password(cls, password: str) -> str:
-        """비밀번호 해시화 (bcrypt, 설정된 rounds 적용) — 회원가입·비밀번호 변경 시 사용"""
-        salt = bcrypt.gensalt(rounds=settings.BCRYPT_ROUNDS)
+        """비밀번호 해시화 (bcrypt)"""
+        salt = bcrypt.gensalt()
         hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
         return hashed.decode("utf-8")
-    
+
     @staticmethod
     def _verify_password(password: str, hashed_password: str) -> bool:
-        """비밀번호 검증 (bcrypt) — 로그인·비밀번호 변경 시 현재 비밀번호 확인에 사용"""
+        """비밀번호 검증 (bcrypt)"""
         try:
             return bcrypt.checkpw(
                 password.encode("utf-8"),
-                hashed_password.encode("utf-8")
+                hashed_password.encode("utf-8"),
             )
         except (ValueError, TypeError):
             return False
-    
-    #데이터 CRUD 메서드
+
     @classmethod
-    def create_user(cls, email: str, password: str, nickname: str, profile_image_url: Optional[str] = None) -> dict:
-        """새 사용자 생성"""
-        # 동시성 제어: user_id 할당 시 락 사용
-        with cls._user_id_lock:
-            user_id = cls._next_user_id
-            cls._next_user_id += 1
-        
-        default_profile = profile_image_url or f"{settings.BE_API_URL}/public/image/profile/default.png"
-        
-        # 비밀번호 해시화
-        hashed_password = cls._hash_password(password)
-        
+    def _row_to_user(cls, row: dict, include_password: bool = False) -> dict:
+        """DB 행을 API 형식 user dict로 변환"""
+        if not row:
+            return None
         user = {
-            "userId": user_id,
-            "email": email,
-            "password": hashed_password,  # 해시화된 비밀번호 저장
-            "nickname": nickname,
-            "profileImageUrl": default_profile,
-            "createdAt": datetime.now().isoformat()
+            "userId": row["id"],
+            "email": row["email"],
+            "nickname": row["nickname"],
+            "profileImageUrl": row["profile_image_url"] or "",
+            "createdAt": row["created_at"].isoformat() if row.get("created_at") else "",
         }
-        
-        cls._users[user_id] = user
-        cls._email_index[email.lower()] = user_id
-        cls._nickname_index[nickname] = user_id
-        
+        if include_password:
+            user["password"] = row["password"]
         return user
-    
+
+    @classmethod
+    def create_user(
+        cls,
+        email: str,
+        password: str,
+        nickname: str,
+        profile_image_url: Optional[str] = None,
+    ) -> dict:
+        """새 사용자 생성"""
+        conn = get_connection()
+        hashed = cls._hash_password(password)
+        profile = profile_image_url if profile_image_url else ""
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (email, password, nickname, profile_image_url)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (email.lower(), hashed, nickname, profile),
+            )
+            user_id = cur.lastrowid
+        conn.commit()
+
+        return cls._row_to_user(
+            {
+                "id": user_id,
+                "email": email,
+                "nickname": nickname,
+                "profile_image_url": profile,
+                "created_at": datetime.now(),
+            }
+        )
+
     @classmethod
     def find_user_by_email(cls, email: str) -> Optional[dict]:
-        """이메일로 사용자 찾기"""
-        user_id = cls._email_index.get(email.lower())
-        if user_id:
-            return cls._users.get(user_id)
-        return None
-    
+        """이메일로 사용자 찾기 (비밀번호 검증용 전체 반환)"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, email, password, nickname, profile_image_url, created_at
+                FROM users WHERE email = %s AND deleted_at IS NULL
+                """,
+                (email.lower(),),
+            )
+            row = cur.fetchone()
+        return cls._row_to_user(row, include_password=True) if row else None
+
     @classmethod
     def find_user_by_nickname(cls, nickname: str) -> Optional[dict]:
         """닉네임으로 사용자 찾기"""
-        user_id = cls._nickname_index.get(nickname)
-        if user_id:
-            return cls._users.get(user_id)
-        return None
-    
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, email, nickname, profile_image_url, created_at
+                FROM users WHERE nickname = %s AND deleted_at IS NULL
+                """,
+                (nickname,),
+            )
+            row = cur.fetchone()
+        return cls._row_to_user(row) if row else None
+
     @classmethod
     def find_user_by_id(cls, user_id: int) -> Optional[dict]:
-        """ID로 사용자 찾기"""
-        user = cls._users.get(user_id)
-        if user:
-            # 비밀번호 제외하고 반환
-            return {
-                "userId": user["userId"],
-                "email": user["email"],
-                "nickname": user["nickname"],
-                "profileImageUrl": user["profileImageUrl"]
-            }
-        return None
-    
+        """ID로 사용자 찾기 (비밀번호 제외)"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, email, nickname, profile_image_url
+                FROM users WHERE id = %s AND deleted_at IS NULL
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        return cls._row_to_user(row) if row else None
+
     @classmethod
     def get_user_by_id(cls, user_id: int) -> Optional[dict]:
-        """사용자 정보 조회 (비밀번호 제외, createdAt 포함) - UsersModel용 public 메서드"""
-        user = cls._users.get(user_id)
-        if not user:
-            return None
-        
-        return {
-            "userId": user["userId"],
-            "email": user["email"],
-            "nickname": user["nickname"],
-            "profileImageUrl": user["profileImageUrl"],
-            "createdAt": user.get("createdAt", "")
-        }
-    
+        """사용자 정보 조회 (비밀번호 제외, createdAt 포함)"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, email, nickname, profile_image_url, created_at
+                FROM users WHERE id = %s AND deleted_at IS NULL
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        return cls._row_to_user(row) if row else None
+
     @classmethod
-    def update_user_nickname(cls, user_id: int, old_nickname: str, new_nickname: str) -> bool:
-        """닉네임 수정 - UsersModel용 public 메서드"""
-        user = cls._users.get(user_id)
-        if not user:
-            return False
-        
-        # 기존 닉네임 인덱스에서 제거
-        if old_nickname in cls._nickname_index:
-            del cls._nickname_index[old_nickname]
-        
-        # 새 닉네임으로 업데이트
-        user["nickname"] = new_nickname
-        cls._nickname_index[new_nickname] = user_id
-        
-        return True
-    
+    def update_user_nickname(
+        cls, user_id: int, old_nickname: str, new_nickname: str
+    ) -> bool:
+        """닉네임 수정"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET nickname = %s WHERE id = %s AND deleted_at IS NULL",
+                (new_nickname, user_id),
+            )
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
+
     @classmethod
     def update_user_password(cls, user_id: int, new_password: str) -> bool:
-        """비밀번호 수정 - UsersModel용 public 메서드"""
-        user = cls._users.get(user_id)
-        if not user:
-            return False
-        
-        # 새 비밀번호 해시화하여 저장
-        user["password"] = cls._hash_password(new_password)
-        return True
-    
+        """비밀번호 수정"""
+        conn = get_connection()
+        hashed = cls._hash_password(new_password)
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE users SET password = %s WHERE id = %s AND deleted_at IS NULL",
+                (hashed, user_id),
+            )
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
+
     @classmethod
-    def update_user_profile_image_url(cls, user_id: int, profile_image_url: str) -> bool:
-        """프로필 이미지 URL 수정 - UsersModel용 public 메서드"""
-        user = cls._users.get(user_id)
-        if not user:
-            return False
-        
-        user["profileImageUrl"] = profile_image_url
-        return True
-    
+    def update_user_profile_image_url(
+        cls, user_id: int, profile_image_url: str
+    ) -> bool:
+        """프로필 이미지 URL 수정"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE users SET profile_image_url = %s
+                WHERE id = %s AND deleted_at IS NULL
+                """,
+                (profile_image_url, user_id),
+            )
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
+
     @classmethod
     def delete_user_data(cls, user_id: int) -> bool:
-        """사용자 데이터 삭제 - UsersModel용 public 메서드"""
-        user = cls._users.get(user_id)
-        if not user:
-            return False
-        
-        email = user["email"]
-        nickname = user["nickname"]
-        
-        # 인덱스에서 제거
-        if email.lower() in cls._email_index:
-            del cls._email_index[email.lower()]
-        if nickname in cls._nickname_index:
-            del cls._nickname_index[nickname]
-        
-        # 사용자 데이터 삭제
-        del cls._users[user_id]
-        
-        return True
-    
+        """사용자 삭제 (하드 삭제)"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+            cur.execute("UPDATE users SET deleted_at = NOW() WHERE id = %s", (user_id,))
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
+
     @classmethod
-    def revoke_all_user_tokens(cls, user_id: int) -> int:
-        """사용자의 모든 세션 삭제 - UsersModel용 public 메서드"""
-        sessions_to_remove = []
-        for session_id, session_info in cls._tokens.items():
-            if session_info["userId"] == user_id:
-                sessions_to_remove.append(session_id)
-        
-        for session_id in sessions_to_remove:
-            del cls._tokens[session_id]
-        
-        return len(sessions_to_remove)
-    
+    def revoke_all_sessions_for_user(cls, user_id: int) -> int:
+        """해당 사용자의 모든 세션 삭제"""
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+            count = cur.rowcount
+        conn.commit()
+        return count
+
     @classmethod
     def email_exists(cls, email: str) -> bool:
         """이메일 중복 확인"""
-        return email.lower() in cls._email_index
-    
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM users WHERE email = %s AND deleted_at IS NULL LIMIT 1",
+                (email.lower(),),
+            )
+            return cur.fetchone() is not None
+
     @classmethod
     def nickname_exists(cls, nickname: str) -> bool:
         """닉네임 중복 확인"""
-        return nickname in cls._nickname_index
-    
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM users WHERE nickname = %s AND deleted_at IS NULL LIMIT 1",
+                (nickname,),
+            )
+            return cur.fetchone() is not None
+
     @classmethod
     def verify_password(cls, user_id: int, password: str) -> bool:
         """비밀번호 검증"""
-        user = cls._users.get(user_id)
-        if not user:
-            return False
-        return cls._verify_password(password, user["password"])
-    
-    # 세션 저장소 관리 (쿠키-세션 방식)
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT password FROM users WHERE id = %s AND deleted_at IS NULL",
+                (user_id,),
+            )
+            row = cur.fetchone()
+        return (
+            cls._verify_password(password, row["password"])
+            if row and row.get("password")
+            else False
+        )
+
     @classmethod
-    def create_token(cls, user_id: int) -> str:
-        """세션 ID 생성 (쿠키-세션 방식)"""
+    def create_session(cls, user_id: int) -> str:
+        """세션 생성 후 세션 ID 반환"""
         session_id = secrets.token_urlsafe(32)
-        cls._tokens[session_id] = {
-            "userId": user_id,
-            "createdAt": time.time()
-        }
+        expires_at = datetime.now() + timedelta(seconds=cls.SESSION_EXPIRY_TIME)
+
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO sessions (session_id, user_id, expires_at)
+                VALUES (%s, %s, %s)
+                """,
+                (session_id, user_id, expires_at),
+            )
+        conn.commit()
         return session_id
-    
+
     @classmethod
-    def verify_token(cls, session_id: Optional[str]) -> Optional[int]:
-        """세션 ID 검증 및 사용자 ID 반환 (만료 시간 체크 포함)"""
+    def get_user_id_by_session(cls, session_id: Optional[str]) -> Optional[int]:
+        """세션 ID로 user_id 조회. 만료 시 None"""
         if not session_id:
             return None
-        
-        session_info = cls._tokens.get(session_id)
-        if not session_info:
-            return None
-        
-        # 세션 만료 시간 체크
-        current_time = time.time()
-        if current_time - session_info["createdAt"] > cls.SESSION_EXPIRY_TIME:
-            # 만료된 세션 삭제
-            del cls._tokens[session_id]
-            return None
-        
-        return session_info["userId"]
-    
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id FROM sessions
+                WHERE session_id = %s AND expires_at > NOW()
+                """,
+                (session_id,),
+            )
+            row = cur.fetchone()
+        return row["user_id"] if row else None
+
     @classmethod
-    def revoke_token(cls, session_id: Optional[str]) -> bool:
-        """세션 ID 삭제 (로그아웃)"""
+    def revoke_session(cls, session_id: Optional[str]) -> bool:
+        """세션 삭제 (로그아웃)"""
         if not session_id:
             return False
-        
-        if session_id in cls._tokens:
-            del cls._tokens[session_id]
-            return True
-        return False
-    
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
+            affected = cur.rowcount
+        conn.commit()
+        return affected > 0
+
     @classmethod
     def cleanup_expired_sessions(cls) -> int:
         """만료된 세션 정리"""
-        current_time = time.time()
-        expired_sessions = []
-        
-        for session_id, session_info in cls._tokens.items():
-            if current_time - session_info["createdAt"] > cls.SESSION_EXPIRY_TIME:
-                expired_sessions.append(session_id)
-        
-        for session_id in expired_sessions:
-            del cls._tokens[session_id]
-        
-        return len(expired_sessions)
+        conn = get_connection()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM sessions WHERE expires_at <= NOW()")
+            count = cur.rowcount
+        conn.commit()
+        return count
+
+    # 하위 호환 별칭
+    create_token = create_session
+    verify_token = get_user_id_by_session
+    revoke_token = revoke_session
+    revoke_all_user_tokens = revoke_all_sessions_for_user
