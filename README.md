@@ -88,15 +88,15 @@ API 요청이 들어왔을 때 어떤 순서로 어떤 개념이 적용되는지
     HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 ```
 
-### 2. 계층별 역할과 적용 개념
+### 2. 계층별 역할
 
 | 계층 | 역할 |
-|-----|-----|
+|------|------|
 | Lifespan | 서버 시작 시 DB 연결 확인 |
-| Middleware | CORS 처리, 기본 보안 헤더 설정 |
+| Middleware | CORS, 기본 보안 헤더 |
 | Router | URL·HTTP 메서드별 API 분기 |
 | Dependencies | 인증(session_id), 권한 검사 |
-| Schema (Pydantic) | 요청 데이터 검증 |
+| Schema | 요청 데이터 검증 (Pydantic) |
 | Controller | 비즈니스 로직 처리 |
 | Model | SQL 실행 및 트랜잭션 관리 |
 | Exception Handler | 에러 응답 포맷 통일 |
@@ -110,8 +110,8 @@ API 요청이 들어왔을 때 어떤 순서로 어떤 개념이 적용되는지
 
 ### 4. 인증·응답 형식
 
-- **인증**: 로그인 시 `session_id`를 **Set-Cookie**로 전달. 이후 요청 시 브라우저가 자동으로 쿠키 포함.
-- **응답 형식**: 성공·실패 모두 `{ "code": "문자열", "data": ... }` 형태로 통일됩니다.
+- **인증**: 로그인 시 `session_id`를 Set-Cookie로 전달. 이후 요청 시 브라우저가 자동으로 쿠키 포함.
+- **응답**: 성공·실패 모두 `{ "code": "문자열", "data": ... }` 형식으로 통일.
 
 ---
 
