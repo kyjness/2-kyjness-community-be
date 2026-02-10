@@ -188,15 +188,35 @@ API 요청이 들어왔을 때 어떤 순서로 어떤 개념이 적용되는지
 
 ## 실행 방법
 
-### 1. 패키지 설치
+### 1. 개발 환경 구축 (venv)
 
-이 프로젝트 폴더에서 아래 명령을 실행합니다.
+백엔드는 Python 가상환경(venv)을 사용하는 것을 권장합니다.
 
 ```bash
-pip install -e ".[dev]"
+# 프로젝트 폴더로 이동
+cd 2-kyjness-community-be
+
+# 가상환경 생성
+python -m venv venv
+
+# 가상환경 활성화
+# Windows CMD:        venv\Scripts\activate
+# Windows PowerShell: .\venv\Scripts\Activate.ps1
+# Git Bash:           source venv/Scripts/activate
 ```
 
-### 2. 환경 변수 파일 만들기
+### 2. 패키지 설치 (pip)
+
+가상환경 활성화 후, 프로젝트 루트에서 아래만 실행하면 됩니다. `pyproject.toml`에 적힌 필요한 패키지(fastapi, uvicorn, pydantic, bcrypt, pymysql 등)가 알아서 설치됩니다.
+
+```bash
+pip install .
+```
+
+- **배포(EC2 등)** → 위 명령만 하면 됨.
+- **로컬에서 pytest로 테스트까지 돌릴 때** → `pip install ".[dev]"` 로 하면 pytest 등이 추가로 설치됨.
+
+### 3. 환경 변수 파일 만들기
 
 루트에 `.env`를 두고 아래 변수를 설정한다. MySQL은 `DATABASE_URL`(`mysql+pymysql://사용자:비밀번호@호스트:포트/DB이름`) 또는 개별 `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` 사용. 없으면 localhost/root 등 기본값 적용.
 
@@ -206,7 +226,7 @@ pip install -e ".[dev]"
 - `MAX_FILE_SIZE`, `ALLOWED_IMAGE_TYPES` — 파일 업로드
 - `BE_API_URL` — API 기본 URL
 
-### 3. 서버 실행
+### 4. 서버 실행
 
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -214,7 +234,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 `--reload`는 코드 수정 시 자동으로 서버를 다시 실행하는 개발용 옵션입니다.
 
-### 4. API 문서 보기
+### 5. API 문서 보기
 
 서버가 실행된 상태에서 아래 주소로 접속하면 API 목록과 사용법을 확인할 수 있습니다.
 
