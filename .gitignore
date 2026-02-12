@@ -25,11 +25,8 @@ venv.bak/
 .env.test
 .env.production
 
-# 업로드된 이미지 (폴더 구조는 .gitkeep만 커밋, 실제 이미지 파일은 제외)
-upload/image/profile/*
-!upload/image/profile/.gitkeep
-upload/image/post/*
-!upload/image/post/.gitkeep
+# 업로드된 파일 (한 번 구조 올렸으면 이제 통째로 무시)
+upload/
 
 # IDE / Editors
 # PyCharm / IntelliJ IDEA
