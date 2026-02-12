@@ -26,11 +26,8 @@ venv.bak/
 .env.test
 .env.production
 
-# 업로드된 이미지 (폴더 구조는 .gitkeep으로 유지)
-public/image/profile/*
-!public/image/profile/.gitkeep
-public/image/post/*
-!public/image/post/.gitkeep
+# 업로드된 파일 (실행 시 upload/ 폴더 자동 생성)
+upload/
 
 # IDE / Editors
 # PyCharm / IntelliJ IDEA

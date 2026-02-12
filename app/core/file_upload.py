@@ -14,10 +14,10 @@ PROFILE_ALLOWED_TYPES = ["image/jpeg", "image/jpg"]
 POST_ALLOWED_TYPES = settings.ALLOWED_IMAGE_TYPES
 MAX_FILE_SIZE = settings.MAX_FILE_SIZE
 
-# 프로젝트 루트 기준 public 폴더 (STORAGE_BACKEND=local 시, main.py에서 StaticFiles 마운트)
+# 프로젝트 루트 기준 upload 폴더 (STORAGE_BACKEND=local 시, main.py에서 StaticFiles 마운트)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-PUBLIC_PROFILE_DIR = PROJECT_ROOT / "public" / "image" / "profile"
-PUBLIC_POST_DIR = PROJECT_ROOT / "public" / "image" / "post"
+UPLOAD_PROFILE_DIR = PROJECT_ROOT / "upload" / "image" / "profile"
+UPLOAD_POST_DIR = PROJECT_ROOT / "upload" / "image" / "post"
 
 
 def _s3_upload(key: str, content: bytes, content_type: str) -> str:
@@ -86,7 +86,7 @@ async def validate_image_upload(
 async def save_profile_image(file: Optional[UploadFile]) -> str:
     """
     프로필 이미지: 검증 + 저장 + URL 반환.
-    STORAGE_BACKEND=local → public/image/profile, s3 → S3 버킷 image/profile/
+    STORAGE_BACKEND=local → upload/image/profile, s3 → S3 버킷 image/profile/
     """
     content = await _validate_image(
         file,
@@ -98,16 +98,16 @@ async def save_profile_image(file: Optional[UploadFile]) -> str:
     if settings.STORAGE_BACKEND == "s3":
         key = f"image/profile/{filename}"
         return _s3_upload(key, content, "image/jpeg")
-    PUBLIC_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = PUBLIC_PROFILE_DIR / filename
+    UPLOAD_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = UPLOAD_PROFILE_DIR / filename
     filepath.write_bytes(content)
-    return f"{settings.BE_API_URL}/public/image/profile/{filename}"
+    return f"{settings.BE_API_URL}/upload/image/profile/{filename}"
 
 
 async def save_post_image(post_id: int, file: Optional[UploadFile]) -> str:
     """
     게시글 이미지: 검증 + 저장 + URL 반환.
-    STORAGE_BACKEND=local → public/image/post, s3 → S3 버킷 image/post/
+    STORAGE_BACKEND=local → upload/image/post, s3 → S3 버킷 image/post/
     """
     content = await _validate_image(
         file,
@@ -126,7 +126,7 @@ async def save_post_image(post_id: int, file: Optional[UploadFile]) -> str:
     if settings.STORAGE_BACKEND == "s3":
         key = f"image/post/{filename}"
         return _s3_upload(key, content, content_type)
-    PUBLIC_POST_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = PUBLIC_POST_DIR / filename
+    UPLOAD_POST_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = UPLOAD_POST_DIR / filename
     filepath.write_bytes(content)
-    return f"{settings.BE_API_URL}/public/image/post/{filename}"
+    return f"{settings.BE_API_URL}/upload/image/post/{filename}"

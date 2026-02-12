@@ -43,7 +43,7 @@ class Settings:
     # API 기본 URL (파일 업로드 URL 생성용, local 저장 시 사용)
     BE_API_URL: str = os.getenv("BE_API_URL", "http://localhost:8000")
 
-    # 파일 저장소: "local" = public 폴더, "s3" = AWS S3 (배포 시 권장)
+    # 파일 저장소: "local" = upload 폴더, "s3" = AWS S3 (배포 시 권장)
     STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "local")
     # S3 사용 시 필수
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "")

@@ -66,10 +66,10 @@ app.add_middleware(
 # 예외 핸들러 등록
 register_exception_handlers(app)
 
-# 정적 파일 서빙 (public 폴더 → /public URL로 접근)
-public_dir = Path(__file__).parent / "public"
-public_dir.mkdir(exist_ok=True)
-app.mount("/public", StaticFiles(directory=str(public_dir)), name="public")
+# 업로드 파일 서빙 (upload 폴더 → /upload URL로 접근)
+upload_dir = Path(__file__).parent / "upload"
+upload_dir.mkdir(exist_ok=True)
+app.mount("/upload", StaticFiles(directory=str(upload_dir)), name="upload")
 
 # 라우터 등록
 app.include_router(auth_router)
