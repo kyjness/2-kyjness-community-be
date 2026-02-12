@@ -41,7 +41,7 @@ mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS puppytalk;"
 mysql -u root -p puppytalk < docs/puppyytalkdb.sql
 ```
 
-테이블 관계는 `docs/erd.png`, DDL은 `docs/puppyytalkdb.sql` 참고.
+테이블 관계는 `docs/erd.png`를, DDL은 `docs/puppyytalkdb.sql`을 참고합니다.
 
 ### 2. 가상환경 및 패키지
 
@@ -63,7 +63,7 @@ pip install .
 
 **앱이 읽는 파일은 루트의 `.env` 하나뿐입니다.** 저장소에는 견본인 `.env.example`만 올라가며, 로컬/배포 시 `.env.example`을 복사해 `.env`로 저장한 뒤 값을 채우면 됩니다.
 
-루트에 `.env` 생성 (`.env.example` 복사 후 값 채우기). MySQL은 `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` 사용.
+루트에 `.env`를 생성합니다 (`.env.example`을 복사한 뒤 값을 채웁니다). MySQL에는 `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`을 사용합니다.
 
 | 변수 | 용도 |
 |------|------|
@@ -76,6 +76,18 @@ pip install .
 | `STORAGE_BACKEND` | `local`(기본) 또는 `s3`. 배포 시 S3 권장 |
 | `S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | S3 사용 시 필수 |
 | `S3_PUBLIC_BASE_URL` | S3 공개 URL 접두사(선택). 비우면 버킷 기본 URL 사용. CloudFront 사용 시 여기 설정 |
+| `LOG_LEVEL` | 로그 레벨: `DEBUG`, `INFO`, `WARNING`, `ERROR` (기본 `INFO`) |
+| `LOG_FILE_PATH` | 비우면 콘솔만. 경로 지정 시 해당 파일로 로테이팅 로그 기록 (예: `logs/app.log`) |
+
+**배포 시 반드시 수정할 항목** (`.env.example`에 `# [배포 시 수정]` 표시됨)
+
+| 변수 | 배포 시 설정 |
+|------|--------------|
+| `DEBUG` | `False` |
+| `CORS_ORIGINS` | 실제 프론트엔드 URL(쉼표 구분) |
+| `BE_API_URL` | 실제 API 서버 URL (이미지·파일 링크에 사용) |
+| `STORAGE_BACKEND` | `s3` 권장 (로컬은 `local`) |
+| `S3_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` 등 | S3 사용 시 실제 값 입력 |
 
 ### 4. 서버 실행
 
@@ -232,7 +244,7 @@ HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 
 ### 환경 변수 (.env)
 
-**앱은 `.env`만 로드합니다.** 저장소에는 `.env.example`(견본)만 올라가고, `.env`는 git에 올리지 않습니다. `.env.example`을 복사해 `.env`로 저장한 뒤 값을 채워 사용하세요. 배포 시에는 서버 또는 플랫폼 환경 변수에 같은 키로 설정하면 됩니다.
+**앱은 `.env`만 로드합니다.** 저장소에는 `.env.example`(견본)만 올라가고, `.env`는 git에 올리지 않습니다. `.env.example`을 복사해 `.env`로 저장한 뒤 값을 채워 사용합니다. 배포 시에는 서버 또는 플랫폼 환경 변수에 같은 키로 설정하면 됩니다.
 
 필수: DB 연결 정보, `CORS_ORIGINS`(프론트 주소).
 
@@ -240,8 +252,8 @@ HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 
 기본값(`STORAGE_BACKEND=local`)은 프로젝트 내 `upload/image/`에 저장됩니다. 배포 시 서버 재시작·스케일 아웃 시 파일이 사라지거나 인스턴스마다 달라질 수 있으므로 **S3 사용을 권장**합니다.
 
-- `.env`에 `STORAGE_BACKEND=s3` 설정 후 `S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` 입력.
-- S3 버킷에서 해당 객체를 공개 읽기 허용(버킷 정책 또는 객체 ACL)하거나, CloudFront를 쓰면 `S3_PUBLIC_BASE_URL`에 CloudFront URL을 넣으면 됩니다.
+- `.env`에 `STORAGE_BACKEND=s3` 설정 후 `S3_BUCKET_NAME`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 입력합니다.
+- S3 버킷에서 해당 객체를 공개 읽기 허용(버킷 정책 또는 객체 ACL)하거나, CloudFront를 사용하면 `S3_PUBLIC_BASE_URL`에 CloudFront URL을 넣으면 됩니다.
 
 ### 프론트엔드 연동 (크로스 오리진)
 

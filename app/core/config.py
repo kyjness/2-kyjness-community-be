@@ -59,6 +59,10 @@ class Settings:
     # S3 객체 공개 URL 접두사. 비우면 https://{bucket}.s3.{region}.amazonaws.com/ 사용
     S3_PUBLIC_BASE_URL: str = os.getenv("S3_PUBLIC_BASE_URL", "")
 
+    # 로깅 (레벨: DEBUG, INFO, WARNING, ERROR / 파일 비우면 콘솔만)
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
+    LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", "").strip()
+
     # MySQL 설정 (puppytalk)
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: int = int(os.getenv("DB_PORT", "3306"))

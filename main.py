@@ -1,5 +1,7 @@
 # main.py
 import logging
+import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -17,12 +19,54 @@ from app.likes.likes_route import router as likes_router
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 
-# 서버 실행 시 INFO 기본 출력 (최소 로깅)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+# 로깅 설정: 레벨·포맷·파일(선택)
+_LOG_FMT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+
+def _setup_logging() -> None:
+    level = getattr(logging, settings.LOG_LEVEL, logging.INFO)
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.handlers.clear()
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter(_LOG_FMT, datefmt=_LOG_DATEFMT))
+    root.addHandler(console)
+    if settings.LOG_FILE_PATH:
+        log_path = Path(settings.LOG_FILE_PATH)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_path,
+            maxBytes=5 * 1024 * 1024,  # 5MB
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(logging.Formatter(_LOG_FMT, datefmt=_LOG_DATEFMT))
+        logging.getLogger().addHandler(file_handler)
+
+
+_setup_logging()
+_access_logger = logging.getLogger("app.access")
+
+
+async def access_log_middleware(request: Request, call_next):
+    """모든 HTTP 요청에 대해 Method, Path, Status, 소요 시간(ms) 로깅."""
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    client = request.client.host if request.client else "-"
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client = forwarded.split(",")[0].strip()
+    _access_logger.info(
+        "%s %s %s %.2fms %s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        client,
+    )
+    return response
 
 
 async def add_security_headers(request: Request, call_next):
@@ -51,7 +95,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 미들웨어
+# 미들웨어 (아래서부터 실행: access_log → CORS → security_headers)
+app.middleware("http")(access_log_middleware)
 app.middleware("http")(add_security_headers)
 
 # CORS 설정 (쿠키-세션 인증: allow_credentials=True)
