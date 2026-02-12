@@ -26,10 +26,7 @@ venv.bak/
 .env.production
 
 # 업로드된 이미지 제외, 폴더 구조(.gitkeep)만 커밋
-upload/image/profile/*
-!upload/image/profile/.gitkeep
-upload/image/post/*
-!upload/image/post/.gitkeep
+upload
 
 # IDE / Editors
 # PyCharm / IntelliJ IDEA
