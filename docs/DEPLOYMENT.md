@@ -120,4 +120,4 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | DB 연결 실패 | 1) 보안 그룹/방화벽에서 DB 포트 허용 2) 환경 변수 값 확인 3) DB 존재 여부 |
 | CORS 에러 | `CORS_ORIGINS`에 프론트 URL(https 포함) 정확히 입력 |
 | 이미지 404 | S3 버킷 공개 설정 또는 CloudFront `S3_PUBLIC_BASE_URL` 확인 |
-| 401 (쿠키) | 배포 환경이 HTTPS인지, `COOKIE_SECURE` 설정 확인 |
+| 401 (쿠키) | 배포 환경 HTTPS 여부, 프론트에서 `credentials: 'include'` 사용 여부, CORS 허용 origin 확인 |

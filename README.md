@@ -205,8 +205,10 @@ HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 │   └── puppyytalkdb.sql           # DB 테이블 생성 스크립트
 │
 ├── main.py                        # 앱 진입점, lifespan, 미들웨어(CORS, 보안헤더), 라우터 등록
-├── upload/                         # STORAGE_BACKEND=local 시 업로드 이미지 저장
-│   └── image/profile/, image/post/
+├── upload/                         # STORAGE_BACKEND=local 시 업로드 이미지 저장 (실행 시 생성, git 제외)
+│   └── image/
+│       ├── profile/                # 프로필 사진
+│       └── post/                   # 게시글 이미지
 ├── pyproject.toml                 # 의존성 패키지 목록
 ├── .env.example                   # 환경 변수 견본 (복사 → .env 로 저장 후 값 채우기)
 ├── .env                           # 환경 변수 (직접 생성, git 제외, 앱이 읽는 파일)
