@@ -96,7 +96,22 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 7. 플랫폼별 참고
+## 7. Docker로 실행 (추후 배포용)
+
+```bash
+# 이미지 빌드
+docker build -t puppytalk-api .
+
+# 실행 (환경 변수는 -e 또는 --env-file로 전달)
+docker run -p 8000:8000 --env-file .env puppytalk-api
+```
+
+- `.env`는 이미지에 포함되지 않습니다. 반드시 `--env-file .env` 또는 `-e DB_HOST=...` 등으로 런타임에 전달하세요.
+- MySQL은 같은 호스트/다른 컨테이너에 두었다면 `DB_HOST`를 `host.docker.internal`(Mac/Windows) 또는 실제 DB 호스트로 설정하세요.
+
+---
+
+## 8. 플랫폼별 참고
 
 ### Railway / Render / Fly.io
 
@@ -113,7 +128,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 8. 문제 해결
+## 9. 문제 해결
 
 | 현상 | 확인 사항 |
 |------|-----------|

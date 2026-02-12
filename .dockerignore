@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# 환경/비밀 (이미지에 넣지 않음, 런타임에 주입)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+env
+
+# 테스트/문서 (이미지 크기 절감)
+tests
+docs
+*.md
+!README.md
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# 기타
+*.log
+upload/*
+!upload/.gitkeep
