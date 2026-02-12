@@ -34,10 +34,16 @@ class Settings:
 
     # 파일 업로드 설정
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "10485760"))  # 10MB
+    MAX_VIDEO_SIZE: int = int(os.getenv("MAX_VIDEO_SIZE", "52428800"))  # 50MB
     ALLOWED_IMAGE_TYPES: List[str] = [
         img_type.strip()
         for img_type in os.getenv("ALLOWED_IMAGE_TYPES", "image/jpeg,image/jpg,image/png").split(",")
         if img_type.strip()
+    ]
+    ALLOWED_VIDEO_TYPES: List[str] = [
+        v.strip()
+        for v in os.getenv("ALLOWED_VIDEO_TYPES", "video/mp4,video/webm").split(",")
+        if v.strip()
     ]
     
     # API 기본 URL (파일 업로드 URL 생성용, local 저장 시 사용)

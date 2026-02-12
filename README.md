@@ -166,7 +166,7 @@ HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 │   │   ├── database.py            # MySQL 연결 (get_connection, init_database)
 │   │   ├── dependencies.py        # 인증·권한 의존성 (get_current_user, require_post_author 등)
 │   │   ├── exception_handlers.py  # 예외 처리 (RequestValidationError, HTTPException → {code, data} 변환)
-│   │   ├── file_upload.py         # 프로필/게시글 이미지 검증·저장·URL 생성
+│   │   ├── file_upload.py         # 프로필/게시글 이미지·비디오 검증·저장·URL 생성
 │   │   ├── response.py            # success_response, raise_http_error
 │   │   └── validators.py          # 비밀번호/닉네임/URL 형식 검증 (DTO에서 사용)
 │   │
@@ -183,8 +183,8 @@ HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 │   │   └── users_schema.py        # UpdateUserRequest, UpdatePasswordRequest, CheckUserExistsQuery
 │   │
 │   ├── posts/                     # 게시글
-│   │   ├── posts_route.py         # GET/POST /posts, GET/PATCH/DELETE /posts/{id}, POST /posts/{id}/image
-│   │   ├── posts_controller.py    # create_post, get_posts, get_post, update_post, delete_post, upload_post_image
+│   │   ├── posts_route.py         # GET/POST /posts, GET/PATCH/DELETE /posts/{id}, POST /posts/{id}/image, /posts/{id}/video
+│   │   ├── posts_controller.py    # create_post, get_posts, get_post, update_post, delete_post, upload_post_image, upload_post_video
 │   │   ├── posts_model.py         # posts, post_files 테이블 접근
 │   │   └── posts_schema.py        # PostCreateRequest, PostUpdateRequest
 │   │
@@ -205,10 +205,12 @@ HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 │   └── puppyytalkdb.sql           # DB 테이블 생성 스크립트
 │
 ├── main.py                        # 앱 진입점, lifespan, 미들웨어(CORS, 보안헤더), 라우터 등록
-├── upload/                         # STORAGE_BACKEND=local 시 업로드 이미지 저장 (실행 시 생성, git 제외)
-│   └── image/
-│       ├── profile/                # 프로필 사진
-│       └── post/                   # 게시글 이미지
+├── upload/                         # STORAGE_BACKEND=local 시 업로드 파일 저장 (실행 시 생성, git 제외)
+│   ├── image/
+│   │   ├── profile/                # 프로필 사진
+│   │   └── post/                   # 게시글 이미지
+│   └── video/
+│       └── post/                   # 게시글 비디오
 ├── pyproject.toml                 # 의존성 패키지 목록
 ├── .env.example                   # 환경 변수 견본 (복사 → .env 로 저장 후 값 채우기)
 ├── .env                           # 환경 변수 (직접 생성, git 제외, 앱이 읽는 파일)

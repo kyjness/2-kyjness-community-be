@@ -8,7 +8,7 @@ from fastapi import UploadFile
 from app.posts.posts_model import PostsModel
 from app.auth.auth_model import AuthModel
 from app.core.response import success_response, raise_http_error
-from app.core.file_upload import save_post_image
+from app.core.file_upload import save_post_image, save_post_video
 
 
 def create_post(user_id: int, title: str, content: str, file_url: str = ""):
@@ -25,6 +25,16 @@ async def upload_post_image(post_id: int, user_id: int, file: Optional[UploadFil
     file_url = await save_post_image(post_id, file)
     PostsModel.update_post(post_id, title=None, content=None, file_url=file_url)
     return success_response("POST_IMAGE_UPLOADED", {"postFileUrl": file_url})
+
+
+async def upload_post_video(post_id: int, user_id: int, file: Optional[UploadFile]):
+    """게시글 비디오 업로드. 검증·저장·URL은 file_upload.save_post_video에서 처리."""
+    post = PostsModel.find_post_by_id(post_id)
+    if not post:
+        raise_http_error(404, "POST_NOT_FOUND")
+    file_url = await save_post_video(post_id, file)
+    PostsModel.update_post(post_id, title=None, content=None, file_url=file_url)
+    return success_response("POST_VIDEO_UPLOADED", {"postFileUrl": file_url})
 
 
 def get_posts(page: int = 1, size: int = 10):

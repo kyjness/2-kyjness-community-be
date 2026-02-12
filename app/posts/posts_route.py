@@ -37,6 +37,21 @@ async def upload_post_image(
         file=postFile
     )
 
+# 게시글 비디오 업로드
+@router.post("/{post_id}/video", status_code=201)
+async def upload_post_video(
+    post_id: int = Path(..., description="게시글 ID"),
+    postFile: Optional[UploadFile] = File(None, description="게시글 비디오 파일 (mp4, webm)"),
+    user_id: int = Depends(get_current_user),
+    _: int = Depends(require_post_author),
+):
+    """게시글 비디오 업로드 API"""
+    return await posts_controller.upload_post_video(
+        post_id=post_id,
+        user_id=user_id,
+        file=postFile
+    )
+
 # 게시글 목록 조회
 @router.get("", status_code=200)
 async def get_posts(

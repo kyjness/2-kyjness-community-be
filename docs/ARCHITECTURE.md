@@ -107,14 +107,20 @@
 
 ## 6. 데이터 흐름
 
-### 이미지 업로드
+### 이미지·비디오 업로드
 
 ```
-클라이언트 (multipart/form-data)
-    → file_upload.validate_image (타입·크기 검증)
+이미지: 클라이언트 (multipart/form-data)
+    → file_upload (타입·크기 검증)
     → STORAGE_BACKEND=local: upload/image/{profile|post}/
     → STORAGE_BACKEND=s3: S3 버킷 image/{profile|post}/
-    → URL 반환 (BE_API_URL 또는 S3_PUBLIC_BASE_URL)
+    → URL 반환
+
+비디오: POST /posts/{id}/video (게시글 비디오)
+    → file_upload.save_post_video (타입·크기 검증, mp4/webm)
+    → STORAGE_BACKEND=local: upload/video/post/
+    → STORAGE_BACKEND=s3: S3 버킷 video/post/
+    → URL 반환 (post_files.file_url에 저장)
 ```
 
 ### 인증 흐름
