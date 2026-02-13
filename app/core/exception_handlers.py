@@ -1,3 +1,6 @@
+# app/core/exception_handlers.py
+"""전역 예외 핸들러. 모든 오류 응답을 { code, data } 형식으로 통일."""
+
 import logging
 
 import pymysql

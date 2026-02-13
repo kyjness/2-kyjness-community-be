@@ -50,13 +50,9 @@ def logout(session_id: Optional[str]):
     return success_response("LOGOUT_SUCCESS")
 
 def get_me(user_id: int):
-    user = AuthModel.find_user_by_id(user_id)
+    """세션 검증용. 최소 4개 필드만 반환. 프로필 전체는 GET /users/me."""
+    user = AuthModel.get_user_minimal_for_session(user_id)
     if not user:
         raise_http_error(401, "UNAUTHORIZED")
-    return success_response("AUTH_SUCCESS", {
-        "userId": user["userId"],
-        "email": user["email"],
-        "nickname": user["nickname"],
-        "profileImageUrl": user["profileImageUrl"],
-    })
+    return success_response("AUTH_SUCCESS", user)
 

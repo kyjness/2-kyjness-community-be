@@ -24,15 +24,8 @@ class UsersModel:
     
     @classmethod
     def delete_user(cls, user_id: int) -> bool:
-        """회원 탈퇴 (사용자 삭제)"""
-        # AuthModel의 public 메서드 사용 (캡슐화 개선)
-        if not AuthModel.delete_user_data(user_id):
-            return False
-        
-        # 해당 사용자의 모든 세션 삭제
-        AuthModel.revoke_all_sessions_for_user(user_id)
-        
-        return True
+        """회원 탈퇴 (사용자 soft delete). delete_user_data가 세션 삭제까지 수행."""
+        return AuthModel.delete_user_data(user_id)
     
     @classmethod
     def get_user_by_id(cls, user_id: int) -> Optional[dict]:

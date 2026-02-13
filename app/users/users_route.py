@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.users.users_schema import UpdateUserRequest, UpdatePasswordRequest, CheckUserExistsQuery
 from app.users import users_controller
 from app.core.dependencies import get_current_user
-from app.core.response import raise_http_error
+from app.core.response import ApiResponse, raise_http_error
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -25,16 +25,17 @@ def get_check_user_query(
 
 
 # GET /users?email=... 또는 ?nickname=... (중복 체크). 입력 검증은 DTO.
-@router.get("", status_code=200)
+@router.get("", status_code=200, response_model=ApiResponse)
 async def get_users_exists(query: CheckUserExistsQuery = Depends(get_check_user_query)):
     return users_controller.check_user_exists(query=query)
 
-# --- /users/me: 현재 로그인한 사용자 전용 (Path user_id·require_same_user 제거) ---
-@router.get("/me", status_code=200)
+# --- /users/me: 현재 사용자 프로필 리소스 (조회·수정·탈퇴) ---
+@router.get("/me", status_code=200, response_model=ApiResponse)
 async def get_me(user_id: int = Depends(get_current_user)):
+    """내 프로필 조회. 프로필 화면·수정용. createdAt 등 포함. 로그인 여부만 확인할 때는 GET /auth/me 사용."""
     return users_controller.get_user(user_id=user_id)
 
-@router.patch("/me", status_code=200)
+@router.patch("/me", status_code=200, response_model=ApiResponse)
 async def update_me(
     user_data: UpdateUserRequest,
     user_id: int = Depends(get_current_user),
@@ -45,7 +46,7 @@ async def update_me(
         profile_image_url=user_data.profileImageUrl,
     )
 
-@router.patch("/me/password", status_code=200)
+@router.patch("/me/password", status_code=200, response_model=ApiResponse)
 async def update_me_password(
     password_data: UpdatePasswordRequest,
     user_id: int = Depends(get_current_user),
@@ -57,7 +58,7 @@ async def update_me_password(
     )
 
 # 라우터: 요청 수신 → 컨트롤러 호출만. 파일 정책(필수/확장자/MIME/크기)은 컨트롤러에서 검증.
-@router.post("/me/profile-image", status_code=201)
+@router.post("/me/profile-image", status_code=201, response_model=ApiResponse)
 async def upload_me_profile_image(
     profileImage: UploadFile = File(description="프로필 이미지"),
     user_id: int = Depends(get_current_user),

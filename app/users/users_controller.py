@@ -37,7 +37,7 @@ def check_user_exists(query):
 
 
 def get_user(user_id: int):
-    """내 정보 조회. /users/me 전용."""
+    """내 프로필 리소스 조회. createdAt 포함. /users/me 전용."""
     user = UsersModel.get_user_by_id(user_id)
     if not user:
         raise_http_error(404, "USER_NOT_FOUND")

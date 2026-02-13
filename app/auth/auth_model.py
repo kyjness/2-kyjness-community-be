@@ -116,7 +116,7 @@ class AuthModel:
 
     @classmethod
     def find_user_by_id(cls, user_id: int) -> Optional[dict]:
-        """ID로 사용자 찾기 (비밀번호 제외)"""
+        """ID로 사용자 찾기 (비밀번호 제외). 내부/기타 용도."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -130,8 +130,30 @@ class AuthModel:
         return cls._row_to_user(row) if row else None
 
     @classmethod
+    def get_user_minimal_for_session(cls, user_id: int) -> Optional[dict]:
+        """세션 검증용. 최소 4개 필드만 반환(createdAt 미포함). GET /auth/me 전용."""
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, email, nickname, profile_image_url
+                    FROM users WHERE id = %s AND deleted_at IS NULL
+                    """,
+                    (user_id,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "userId": row["id"],
+            "email": row["email"],
+            "nickname": row["nickname"],
+            "profileImageUrl": row["profile_image_url"] or "",
+        }
+
+    @classmethod
     def get_user_by_id(cls, user_id: int) -> Optional[dict]:
-        """사용자 정보 조회 (비밀번호 제외, createdAt 포함)"""
+        """프로필 리소스 조회. createdAt 포함. GET /users/me 전용."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -193,7 +215,7 @@ class AuthModel:
 
     @classmethod
     def delete_user_data(cls, user_id: int) -> bool:
-        """사용자 삭제 (하드 삭제)"""
+        """사용자 삭제 (soft delete: deleted_at 설정). 해당 사용자 세션 먼저 삭제."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))

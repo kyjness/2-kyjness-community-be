@@ -18,6 +18,7 @@ from app.comments.comments_route import router as comments_router
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.rate_limit import rate_limit_middleware
+from app.core.response import ApiResponse
 
 # 로깅 설정: 레벨·포맷·파일(선택)
 _LOG_FMT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
@@ -124,7 +125,7 @@ app.include_router(posts_router)
 app.include_router(comments_router)
 
 
-@app.get("/")
+@app.get("/", response_model=ApiResponse)
 def root():
     """API 정보"""
     return {

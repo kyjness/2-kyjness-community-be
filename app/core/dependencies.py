@@ -1,10 +1,10 @@
 # app/core/dependencies.py
-"""인증·권한 공통 로직 (Route에서 Depends로 사용)."""
+"""인증·권한 공통 로직 (Route에서 Depends로 사용). Path 파라미터는 의존성에서 명시적으로 선언."""
 
 import logging
 from typing import Optional
 
-from fastapi import Cookie, Depends
+from fastapi import Cookie, Depends, Path
 
 from app.auth.auth_model import AuthModel
 from app.core.response import raise_http_error
@@ -24,8 +24,11 @@ def get_current_user(session_id: Optional[str] = Cookie(None)) -> int:
     return user_id
 
 
-def require_post_author(post_id: int, current_id: int = Depends(get_current_user)) -> int:
-    """게시글 작성자만 통과. 없으면 404, 타인이면 403."""
+def require_post_author(
+    post_id: int = Path(..., description="게시글 ID"),
+    current_id: int = Depends(get_current_user),
+) -> int:
+    """게시글 작성자만 통과. 없으면 404, 타인이면 403. post_id는 경로에서 주입."""
     from app.posts.posts_model import PostsModel
 
     post = PostsModel.find_post_by_id(post_id)
@@ -37,11 +40,11 @@ def require_post_author(post_id: int, current_id: int = Depends(get_current_user
 
 
 def require_comment_author(
-    post_id: int,
-    comment_id: int,
+    post_id: int = Path(..., description="게시글 ID"),
+    comment_id: int = Path(..., description="댓글 ID"),
     current_id: int = Depends(get_current_user),
 ) -> int:
-    """댓글 작성자만 통과. 게시글/댓글 없으면 404, 타인이면 403."""
+    """댓글 작성자만 통과. post_id, comment_id는 경로에서 주입."""
     from app.comments.comments_model import CommentsModel
     from app.posts.posts_model import PostsModel
 
