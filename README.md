@@ -57,50 +57,55 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 | Swagger UI | http://localhost:8000/docs |
 | ReDoc | http://localhost:8000/redoc |
 
+**모든 API는 `/v1` prefix를 사용합니다.** 프론트엔드에서는 베이스 URL을 `http://localhost:8000/v1`로 두고 호출하면 됩니다.
+
 도메인별 API 구성은 다음과 같습니다.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  auth  │  /auth/...                                                     │
+│  media │  /v1/media/...     (이미지 업로드 — 회원가입·프로필·게시글 공통)   │
 ├────────┼────────────────────────────────────────────────────────────────┤
-│  POST  │  /upload-signup-profile-image   회원가입용 프로필 이미지 업로드  │
-│  POST  │  /signup                         회원가입                        │
-│  POST  │  /login                          로그인 (세션 쿠키 설정)         │
-│  POST  │  /logout                         로그아웃                        │
-│  GET   │  /me                             세션 검증·로그인 여부 확인 (최소 정보) │
+│  POST  │  /images            이미지 1건 업로드 → imageId, url 반환        │
 └────────┴────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  users │  /users/...                                                     │
+│  auth  │  /v1/auth/...                                                  │
 ├────────┼────────────────────────────────────────────────────────────────┤
-│  GET   │  ?email=... | ?nickname=...      이메일/닉네임 중복 체크          │
-│  GET   │  /me                             내 프로필 조회 (리소스 전체, createdAt 등) │
-│  PATCH │  /me                             내 정보 수정                    │
-│  PATCH │  /me/password                    비밀번호 변경                  │
-│  POST  │  /me/profile-image               프로필 사진 업로드              │
-│  DELETE│  /me                             회원 탈퇴                       │
+│  POST  │  /signup             회원가입 (profileImageId는 미리 /media/images 업로드) │
+│  POST  │  /login              로그인 (세션 쿠키 설정)                     │
+│  POST  │  /logout             로그아웃                                    │
+│  GET   │  /me                 세션 검증·로그인 여부 확인                    │
 └────────┴────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  posts │  /posts/...                                                     │
+│  users │  /v1/users/...                                                 │
 ├────────┼────────────────────────────────────────────────────────────────┤
-│  POST  │  /                               게시글 작성                     │
-│  POST  │  /{post_id}/image                게시글 이미지 업로드 (최대 5장)   │
-│  GET   │  /                               게시글 목록 (무한 스크롤)        │
-│  GET   │  /{post_id}                      게시글 상세                     │
-│  PATCH │  /{post_id}                      게시글 수정                     │
-│  DELETE│  /{post_id}                      게시글 삭제                     │
-│  POST  │  /{post_id}/likes                좋아요 추가                     │
-│  DELETE│  /{post_id}/likes                좋아요 취소                     │
+│  GET   │  /availability       이메일/닉네임 중복 체크 (?email=... | ?nickname=...) │
+│  GET   │  /me                 내 프로필 조회 (createdAt 등)               │
+│  PATCH │  /me                 내 정보 수정 (profileImageId는 미리 /media/images 업로드) │
+│  PATCH │  /me/password        비밀번호 변경                               │
+│  DELETE│  /me                 회원 탈퇴                                  │
 └────────┴────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
-│comments│  /posts/{post_id}/comments/...                                  │
+│  posts │  /v1/posts/...                                                 │
 ├────────┼────────────────────────────────────────────────────────────────┤
-│  POST  │  /                               댓글 작성                      │
-│  GET   │  /                               댓글 목록 (페이징)              │
-│  PATCH │  /{comment_id}                   댓글 수정                      │
-│  DELETE│  /{comment_id}                   댓글 삭제                      │
+│  POST  │  /                   게시글 작성 (imageIds는 미리 /media/images 업로드, 최대 5개) │
+│  GET   │  /                   게시글 목록 (무한 스크롤, hasMore)          │
+│  GET   │  /{post_id}          게시글 상세                                 │
+│  PATCH │  /{post_id}          게시글 수정 (imageIds 최대 5개)             │
+│  DELETE│  /{post_id}          게시글 삭제                                 │
+│  POST  │  /{post_id}/likes    좋아요 추가                                 │
+│  DELETE│  /{post_id}/likes    좋아요 취소                                 │
+└────────┴────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│comments│  /v1/posts/{post_id}/comments/...                               │
+├────────┼────────────────────────────────────────────────────────────────┤
+│  POST  │  /                   댓글 작성                                 │
+│  GET   │  /                   댓글 목록 (페이징, totalCount·totalPages) │
+│  PATCH │  /{comment_id}       댓글 수정                                 │
+│  DELETE│  /{comment_id}       댓글 삭제                                 │
 └────────┴────────────────────────────────────────────────────────────────┘
 ```
 
@@ -112,8 +117,12 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 2-kyjness-community-be/
 │
 ├── app/
+│   ├── api/                       # API 버전별 라우터 조립
+│   │   └── v1.py                  # /v1 prefix, auth·users·media·posts·comments include
+│   │
 │   ├── core/                      # 공통 유틸·설정
 │   │   ├── config.py              # 환경 변수 (포트, DB, CORS, 파일 업로드 등)
+│   │   ├── codes.py               # 응답 코드 (ApiCode)
 │   │   ├── database.py            # MySQL 연결 관리
 │   │   ├── dependencies.py        # 로그인 검증, 게시글/댓글 작성자 검증
 │   │   ├── exception_handlers.py  # 에러 응답 포맷 통일 ({code, data})
@@ -123,19 +132,24 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 │   │   └── validators.py          # 비밀번호·닉네임·URL 형식 검증
 │   │
 │   ├── auth/                      # 인증
-│   │   ├── auth_route.py          # 회원가입·로그인·로그아웃·프로필 업로드 API
-│   │   ├── auth_controller.py     # 인증 비즈니스 로직
+│   │   ├── auth_route.py          # 회원가입·로그인·로그아웃·/me API
+│   │   ├── auth_controller.py    # 인증 비즈니스 로직
 │   │   ├── auth_model.py          # users·sessions DB 접근
 │   │   └── auth_schema.py         # 요청/응답 형식 정의
 │   │
 │   ├── users/                     # 사용자
-│   │   ├── users_route.py         # 프로필 조회·수정·비밀번호 변경·프로필 사진 API
-│   │   ├── users_controller.py    # 사용자 비즈니스 로직
+│   │   ├── users_route.py         # 프로필 조회·수정·비밀번호 변경·탈퇴 API
+│   │   ├── users_controller.py   # 사용자 비즈니스 로직
 │   │   ├── users_model.py         # 사용자 정보 DB 접근
 │   │   └── users_schema.py        # 요청 형식 정의
 │   │
+│   ├── media/                     # 미디어 (이미지 업로드 API)
+│   │   ├── media_route.py         # POST /images (프로필·게시글 공통)
+│   │   ├── media_controller.py    # 업로드 후 images 테이블 저장
+│   │   └── media_model.py         # images DB 접근
+│   │
 │   ├── posts/                     # 게시글
-│   │   ├── posts_route.py         # 게시글 CRUD·이미지 업로드(최대 5장)·좋아요 API
+│   │   ├── posts_route.py         # 게시글 CRUD·좋아요 API (이미지는 /media/images 업로드 후 imageIds)
 │   │   ├── posts_controller.py    # 게시글 비즈니스 로직
 │   │   ├── posts_model.py         # 게시글·이미지·좋아요 DB 접근
 │   │   └── posts_schema.py        # 요청 형식 정의
@@ -147,13 +161,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 │   │   └── comments_schema.py     # 요청 형식 정의
 │   │
 ├── docs/                          # 문서
-│   ├── erd.png                    # DB ERD
 │   └── puppyytalkdb.sql           # 테이블 생성 스크립트
 │
 ├── main.py                        # 앱 진입점
-├── upload/                        # 업로드 파일 저장 (로컬 시)
-│   ├── profile/                   # 프로필 사진
-│   └── post/                      # 게시글 이미지
+├── upload/                        # 업로드 파일 저장 (로컬 시, StaticFiles 마운트)
+│   └── images/                    # 미디어 이미지 (프로필·게시글 공통)
 ├── pyproject.toml                 # 의존성
 ├── .env.example                   # 환경 변수 견본
 └── README.md
@@ -222,7 +234,7 @@ mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS puppytalk;"
 mysql -u root -p puppytalk < docs/puppyytalkdb.sql
 ```
 
-테이블 관계는 `docs/erd.png`를, DDL은 `docs/puppyytalkdb.sql`을 참고합니다.
+DDL은 `docs/puppyytalkdb.sql`을 참고합니다.
 
 ### 2. 가상환경 및 패키지
 

@@ -1,34 +1,36 @@
 # app/posts/posts_controller.py
 """게시글 비즈니스 로직. 권한(작성자)은 Route(require_post_author), 검증·응답은 core 사용."""
 
-from typing import Optional
+import logging
+from typing import Optional, List
 
-from fastapi import UploadFile
+logger = logging.getLogger(__name__)
 
 from app.posts.posts_model import PostsModel, PostLikesModel
-from app.posts.posts_schema import PostResponse, AuthorInfo, FileInfo
+from app.posts.posts_schema import PostCreateRequest, PostUpdateRequest, PostResponse, AuthorInfo, FileInfo
 from app.auth.auth_model import AuthModel
 from app.core.codes import ApiCode
 from app.core.response import success_response, raise_http_error
-from app.core.file_upload import save_post_image
+from app.media.media_model import MediaModel
 
 
-def create_post(user_id: int, title: str, content: str, file_url: str = ""):
-    # fileUrl 형식 검증은 DTO(PostCreateRequest)에서 완료
-    post = PostsModel.create_post(user_id, title, content, file_url or "")
-    return success_response(ApiCode.POST_UPLOADED, {"postId": post["postId"]})
+def _validate_image_ids(image_ids: Optional[List[int]]) -> None:
+    """imageIds가 images 테이블에 존재하는지 검사. 없으면 400."""
+    if not image_ids:
+        return
+    for iid in image_ids:
+        if MediaModel.get_url_by_id(iid) is None:
+            raise_http_error(400, ApiCode.INVALID_REQUEST)
 
 
-async def upload_post_image(post_id: int, user_id: int, file: Optional[UploadFile]):
-    """게시글 이미지 업로드. 최대 5장. 검증·저장·URL은 file_upload.save_post_image에서 처리."""
-    post = PostsModel.find_post_by_id(post_id)
-    if not post:
-        raise_http_error(404, ApiCode.POST_NOT_FOUND)
-    if len(post.get("files", [])) >= PostsModel.MAX_POST_FILES:
-        raise_http_error(400, ApiCode.POST_FILE_LIMIT_EXCEEDED)
-    file_url = await save_post_image(post_id, file)
-    PostsModel.update_post(post_id, title=None, content=None, file_url=file_url)
-    return success_response(ApiCode.POST_IMAGE_UPLOADED, {"postFileUrl": file_url})
+def create_post(user_id: int, data: PostCreateRequest):
+    try:
+        _validate_image_ids(data.imageIds)
+        post = PostsModel.create_post(user_id, data.title, data.content, data.imageIds)
+        return success_response(ApiCode.POST_UPLOADED, {"postId": post["postId"]})
+    except Exception as e:
+        logger.exception("게시글 작성 실패 user_id=%s: %s", user_id, e)
+        raise
 
 
 def _post_to_response_item(post: dict, author: dict) -> dict:
@@ -75,29 +77,23 @@ def get_post(post_id: int):
     return success_response(ApiCode.POST_RETRIEVED, data)
 
 
-def update_post(
-    post_id: int,
-    user_id: int,
-    title: Optional[str] = None,
-    content: Optional[str] = None,
-    file_url: Optional[str] = None,
-):
+def update_post(post_id: int, user_id: int, data: PostUpdateRequest):
     """게시글 수정. 작성자 검사는 Route(require_post_author)에서 수행."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
-    # fileUrl 형식 검증은 DTO(PostUpdateRequest)에서 완료
-    PostsModel.update_post(post_id, title, content, file_url)
+    if data.imageIds is not None:
+        _validate_image_ids(data.imageIds)
+    PostsModel.update_post(post_id, title=data.title, content=data.content, image_ids=data.imageIds)
     return success_response(ApiCode.POST_UPDATED)
 
 
 def delete_post(post_id: int, user_id: int):
-    """게시글 삭제. 작성자 검사는 Route(require_post_author)에서 수행."""
+    """게시글 삭제. 작성자 검사는 Route(require_post_author)에서 수행. 성공 시 반환 없음(route에서 204 반환)."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
     PostsModel.delete_post(post_id)
-    return success_response(ApiCode.POST_DELETED, None)
 
 
 def create_like(post_id: int, user_id: int):

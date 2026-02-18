@@ -1,5 +1,5 @@
 # app/core/file_upload.py
-"""파일 업로드: 검증, 저장, URL 생성. 프로필/게시글 이미지. local | S3 지원."""
+"""파일 업로드 인프라: 검증, 저장, URL 생성. local | S3. 실제 API는 app.media에서 제공."""
 
 import uuid
 from pathlib import Path
@@ -11,15 +11,12 @@ from app.core.config import settings
 from app.core.codes import ApiCode
 from app.core.response import raise_http_error
 
-# 프로필·게시글 이미지 모두 config와 동일 (jpeg/jpg/png)
-PROFILE_ALLOWED_TYPES = settings.ALLOWED_IMAGE_TYPES
-POST_ALLOWED_TYPES = settings.ALLOWED_IMAGE_TYPES
 MAX_FILE_SIZE = settings.MAX_FILE_SIZE
 
-# 프로젝트 루트 기준 upload 폴더 (STORAGE_BACKEND=local 시, main.py에서 StaticFiles 마운트)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-UPLOAD_PROFILE_DIR = PROJECT_ROOT / "upload" / "profile"
-UPLOAD_POST_DIR = PROJECT_ROOT / "upload" / "post"
+UPLOAD_DIR = PROJECT_ROOT / "upload"
+# 저장 서브폴더: profile(회원 프로필), post(게시글 이미지). images 폴더는 사용하지 않음.
+VALID_UPLOAD_FOLDERS = ("profile", "post")
 
 
 def _s3_upload(key: str, content: bytes, content_type: str) -> str:
@@ -73,10 +70,7 @@ async def validate_image_upload(
     allowed_types: List[str],
     max_size: int = MAX_FILE_SIZE,
 ) -> bytes:
-    """
-    이미지 업로드 검증만 수행 (게시글 등 다른 용도에서 재사용).
-    검증+저장+URL이 필요하면 save_profile_image 사용.
-    """
+    """이미지 검증만 수행. 저장까지 필요하면 save_image_for_media 사용 (media_controller 경유)."""
     return await _validate_image(file, allowed_types, max_size)
 
 
@@ -91,47 +85,30 @@ def _safe_extension(filename: Optional[str], content_type: str) -> str:
     return "jpg"
 
 
-async def save_profile_image(file: Optional[UploadFile]) -> str:
+async def save_image_for_media(
+    file: Optional[UploadFile],
+    allowed_types: Optional[List[str]] = None,
+    max_size: int = MAX_FILE_SIZE,
+    folder: str = "post",
+) -> tuple[str, str, str, int]:
     """
-    프로필 이미지: 검증(Content-Type·크기만) + 저장 + URL 반환. 확장자 제한 없음.
-    STORAGE_BACKEND=local → upload/profile, s3 → S3 버킷 profile/
+    이미지 검증 후 저장. (file_key, file_url, content_type, size) 반환.
+    folder: "profile"(회원 프로필) | "post"(게시글). 메타 저장은 media_controller에서 수행.
     """
-    content = await _validate_image(
-        file,
-        allowed_types=PROFILE_ALLOWED_TYPES,
-        max_size=MAX_FILE_SIZE,
-    )
-
+    if folder not in VALID_UPLOAD_FOLDERS:
+        folder = "post"
+    types = allowed_types or settings.ALLOWED_IMAGE_TYPES
+    content = await _validate_image(file, allowed_types=types, max_size=max_size)
     ext = _safe_extension(file.filename if file else None, file.content_type or "")
     filename = f"{uuid.uuid4().hex}.{ext}"
     ct = file.content_type or "image/jpeg"
+    key = f"{folder}/{filename}"
     if settings.STORAGE_BACKEND == "s3":
-        key = f"profile/{filename}"
-        return _s3_upload(key, content, ct)
-    UPLOAD_PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = UPLOAD_PROFILE_DIR / filename
-    filepath.write_bytes(content)
-    return f"{settings.BE_API_URL}/upload/profile/{filename}"
-
-
-async def save_post_image(post_id: int, file: Optional[UploadFile]) -> str:
-    """
-    게시글 이미지: 검증(Content-Type·크기만) + 저장 + URL 반환. 확장자 제한 없음.
-    """
-    content = await _validate_image(
-        file,
-        allowed_types=POST_ALLOWED_TYPES,
-        max_size=MAX_FILE_SIZE,
-    )
-
-    ext = _safe_extension(file.filename if file else None, file.content_type or "")
-    filename = f"{post_id}_{uuid.uuid4().hex}.{ext}"
-    ct = file.content_type if file else "image/jpeg"
-
-    if settings.STORAGE_BACKEND == "s3":
-        key = f"post/{filename}"
-        return _s3_upload(key, content, ct)
-    UPLOAD_POST_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = UPLOAD_POST_DIR / filename
-    filepath.write_bytes(content)
-    return f"{settings.BE_API_URL}/upload/post/{filename}"
+        url = _s3_upload(key, content, ct)
+    else:
+        subdir = UPLOAD_DIR / folder
+        subdir.mkdir(parents=True, exist_ok=True)
+        filepath = subdir / filename
+        filepath.write_bytes(content)
+        url = f"{settings.BE_API_URL}/upload/{folder}/{filename}"
+    return key, url, ct, len(content)

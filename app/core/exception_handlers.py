@@ -34,6 +34,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     _KNOWN_VALIDATION_CODES = frozenset({
         "INVALID_PASSWORD_FORMAT", "INVALID_NICKNAME_FORMAT", "INVALID_PROFILEIMAGEURL",
         "INVALID_FILE_URL", "INVALID_REQUEST", "MISSING_REQUIRED_FIELD",
+        "POST_FILE_LIMIT_EXCEEDED",
     })
 
     @app.exception_handler(RequestValidationError)

@@ -3,21 +3,17 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 
-from app.core.validators import (
-    ensure_password_format,
-    ensure_nickname_format,
-    ensure_profile_image_url,
-)
+from app.core.validators import ensure_password_format, ensure_nickname_format
 
 
-# 회원가입 요청 바디 (passwordConfirm은 UI 검증용, 서버에서는 미사용)
+# 회원가입 요청 바디. 프로필 이미지는 먼저 POST /v1/media/images 로 업로드 후 profileImageId 전달.
 class SignUpRequest(BaseModel):
     """형식 검증은 DTO에서 수행. 컨트롤러는 검증된 값만 처리."""
 
     email: EmailStr = Field(..., description="사용자 이메일")
     password: str = Field(..., min_length=8, max_length=20, description="비밀번호 (8-20자, 대소문자+숫자+특수문자)")
     nickname: str = Field(..., min_length=1, max_length=10, description="닉네임 (1-10자, 한글/영/숫자)")
-    profileImageUrl: Optional[str] = Field(default=None, description="프로필 이미지 URL (선택)")
+    profileImageId: Optional[int] = Field(default=None, description="프로필 이미지 ID (media 업로드 후 반환된 id, 선택)")
 
     @field_validator("password", mode="after")
     @classmethod
@@ -28,11 +24,6 @@ class SignUpRequest(BaseModel):
     @classmethod
     def nickname_format(cls, v: str) -> str:
         return ensure_nickname_format(v)
-
-    @field_validator("profileImageUrl", mode="after")
-    @classmethod
-    def profile_image_url_format(cls, v: Optional[str]) -> Optional[str]:
-        return ensure_profile_image_url(v)
 
 
 # 로그인 요청 바디

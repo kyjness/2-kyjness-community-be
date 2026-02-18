@@ -1,19 +1,22 @@
 # app/posts/posts_model.py
-"""게시글 모델 (MySQL posts, post_files 테이블)"""
+"""게시글 모델 (MySQL posts, post_images 테이블). 게시글-이미지 연결은 post_images."""
 
+import logging
 from typing import Optional, List
 
 from app.core.database import get_connection
+
+logger = logging.getLogger(__name__)
 
 
 class PostsModel:
     """게시글 모델 (MySQL)"""
 
-    MAX_POST_FILES = 5
+    MAX_POST_IMAGES = 5
 
     @classmethod
     def _row_to_post(cls, row: dict, file_rows: Optional[List[dict]] = None) -> dict:
-        """DB 행을 API 형식 post dict로 변환. file_rows는 최대 5개까지."""
+        """DB 행을 API 형식 post dict로 변환. file_rows는 post_images JOIN images 결과(최대 5개)."""
         if not row:
             return None
         post = {
@@ -30,16 +33,21 @@ class PostsModel:
             else "",
         }
         if file_rows:
-            for fr in file_rows[: cls.MAX_POST_FILES]:
-                if fr and fr.get("file_url"):
-                    post["files"].append({"fileId": fr["id"], "fileUrl": fr["file_url"]})
+            for fr in file_rows[: cls.MAX_POST_IMAGES]:
+                if fr and fr.get("file_url") is not None:
+                    post["files"].append({
+                        "fileId": fr["id"],
+                        "fileUrl": fr["file_url"],
+                        "imageId": fr.get("image_id"),
+                    })
         return post
 
     @classmethod
     def create_post(
-        cls, user_id: int, title: str, content: str, file_url: str = ""
+        cls, user_id: int, title: str, content: str, image_ids: Optional[List[int]] = None
     ) -> dict:
-        """게시글 생성"""
+        """게시글 생성. image_ids는 media 업로드 후 반환된 이미지 ID 목록(최대 5). post_images에 연결."""
+        image_ids = image_ids or []
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -50,23 +58,16 @@ class PostsModel:
                     (user_id, title, content),
                 )
                 post_id = cur.lastrowid
-
-                file_id = None
-                if file_url:
+                logger.info("게시글 INSERT posts ok post_id=%s user_id=%s", post_id, user_id)
+                for iid in image_ids[: cls.MAX_POST_IMAGES]:
                     cur.execute(
-                        """
-                        INSERT INTO post_files (post_id, file_url)
-                        VALUES (%s, %s)
-                        """,
-                        (post_id, file_url),
+                        "INSERT INTO post_images (post_id, image_id) VALUES (%s, %s)",
+                        (post_id, iid),
                     )
-                    file_id = cur.lastrowid
-
             conn.commit()
+            logger.info("게시글 commit ok post_id=%s", post_id)
 
-        files = []
-        if file_url and file_id:
-            files = [{"fileId": file_id, "fileUrl": file_url}]
+        files = [{"fileId": 0, "fileUrl": "", "imageId": iid} for iid in image_ids[: cls.MAX_POST_IMAGES]]
         return {
             "postId": post_id,
             "title": title,
@@ -96,7 +97,13 @@ class PostsModel:
                     return None
 
                 cur.execute(
-                    "SELECT id, file_url FROM post_files WHERE post_id = %s AND deleted_at IS NULL ORDER BY id",
+                    """
+                    SELECT pi.id, i.file_url, i.id AS image_id
+                    FROM post_images pi
+                    INNER JOIN images i ON pi.image_id = i.id
+                    WHERE pi.post_id = %s
+                    ORDER BY pi.id
+                    """,
                     (post_id,),
                 )
                 file_rows = cur.fetchall()
@@ -124,7 +131,13 @@ class PostsModel:
                 result = []
                 for row in rows[:size]:
                     cur.execute(
-                        "SELECT id, file_url FROM post_files WHERE post_id = %s AND deleted_at IS NULL ORDER BY id",
+                        """
+                        SELECT pi.id, i.file_url, i.id AS image_id
+                        FROM post_images pi
+                        INNER JOIN images i ON pi.image_id = i.id
+                        WHERE pi.post_id = %s
+                        ORDER BY pi.id
+                        """,
                         (row["id"],),
                     )
                     file_rows = cur.fetchall()
@@ -138,9 +151,9 @@ class PostsModel:
         post_id: int,
         title: Optional[str] = None,
         content: Optional[str] = None,
-        file_url: Optional[str] = None,
+        image_ids: Optional[List[int]] = None,
     ) -> bool:
-        """게시글 수정"""
+        """게시글 수정. image_ids 지정 시 기존 첨부를 해당 목록으로 교체(최대 5)."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 if title is not None:
@@ -153,26 +166,13 @@ class PostsModel:
                         "UPDATE posts SET content = %s WHERE id = %s AND deleted_at IS NULL",
                         (content, post_id),
                     )
-
-                if file_url is not None:
-                    cur.execute(
-                        "SELECT id FROM post_files WHERE post_id = %s AND deleted_at IS NULL",
-                        (post_id,),
-                    )
-                    existing = cur.fetchall()
-                    if file_url:
-                        if len(existing) < cls.MAX_POST_FILES:
-                            cur.execute(
-                                "INSERT INTO post_files (post_id, file_url) VALUES (%s, %s)",
-                                (post_id, file_url),
-                            )
-                    else:
-                        for row in existing:
-                            cur.execute(
-                                "UPDATE post_files SET deleted_at = NOW() WHERE id = %s",
-                                (row["id"],),
-                            )
-
+                if image_ids is not None:
+                    cur.execute("DELETE FROM post_images WHERE post_id = %s", (post_id,))
+                    for iid in image_ids[: cls.MAX_POST_IMAGES]:
+                        cur.execute(
+                            "INSERT INTO post_images (post_id, image_id) VALUES (%s, %s)",
+                            (post_id, iid),
+                        )
             conn.commit()
         return True
 
@@ -250,12 +250,12 @@ class PostsModel:
         return True
 
     @classmethod
-    def count_post_files(cls, post_id: int) -> int:
-        """게시글의 이미지 파일 개수 (삭제 제외)"""
+    def count_post_images(cls, post_id: int) -> int:
+        """게시글의 이미지 개수"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) as cnt FROM post_files WHERE post_id = %s AND deleted_at IS NULL",
+                    "SELECT COUNT(*) as cnt FROM post_images WHERE post_id = %s",
                     (post_id,),
                 )
                 row = cur.fetchone()

@@ -5,36 +5,35 @@ import logging
 from typing import Optional
 
 from app.auth.auth_model import AuthModel
-from app.auth.auth_schema import LoginData, MeData
+from app.auth.auth_schema import SignUpRequest, LoginRequest, LoginData, MeData
 from app.core.codes import ApiCode
 from app.core.response import success_response, raise_http_error
+from app.media.media_model import MediaModel
 
 logger = logging.getLogger(__name__)
 
 
-def signup(
-    email: str,
-    password: str,
-    nickname: str,
-    profile_image_url: Optional[str] = None,
-):
-    # 비밀번호·닉네임·profileImageUrl 형식 검증은 DTO(SignUpRequest)에서 완료
-    if AuthModel.email_exists(email):
+def signup(data: SignUpRequest):
+    if AuthModel.email_exists(data.email):
         raise_http_error(409, ApiCode.EMAIL_ALREADY_EXISTS)
-    if AuthModel.nickname_exists(nickname):
+    if AuthModel.nickname_exists(data.nickname):
         raise_http_error(409, ApiCode.NICKNAME_ALREADY_EXISTS)
-    AuthModel.create_user(email, password, nickname, profile_image_url)
+    profile_image_url = None
+    if data.profileImageId:
+        profile_image_url = MediaModel.get_url_by_id(data.profileImageId)
+        if not profile_image_url:
+            raise_http_error(400, ApiCode.INVALID_REQUEST)
+    AuthModel.create_user(data.email, data.password, data.nickname, profile_image_url)
     return success_response(ApiCode.SIGNUP_SUCCESS)
 
 
-def login(email: str, password: str):
+def login(data: LoginRequest):
     """쿠키-세션 방식 로그인. 세션 ID는 응답 body에 넣지 않고, 라우트에서 Set-Cookie로만 전달 (JWT 아님)."""
-    # 비밀번호 형식 검증은 DTO(LoginRequest)에서 완료
-    user = AuthModel.find_user_by_email(email)
+    user = AuthModel.find_user_by_email(data.email)
     if not user:
         logger.warning("Login failed: User not found")
         raise_http_error(401, ApiCode.INVALID_CREDENTIALS)
-    if not AuthModel.verify_password(user["userId"], password):
+    if not AuthModel.verify_password(user["userId"], data.password):
         logger.warning("Login failed: Invalid password")
         raise_http_error(401, ApiCode.INVALID_CREDENTIALS)
     session_id = AuthModel.create_session(user["userId"])

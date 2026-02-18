@@ -1,11 +1,11 @@
 # app/users/users_route.py
-# REST: 중복 체크 = GET /users?email=...|?nickname=... / 보호된 API = /users/me. 입력 검증은 DTO(Pydantic)에서.
-from fastapi import APIRouter, Query, UploadFile, File, Depends
+# /v1/users: availability, /users/me (조회·수정·탈퇴·비밀번호). 입력 검증은 DTO.
+from fastapi import APIRouter, Query, Depends
 from fastapi.responses import Response
 from typing import Optional
 from pydantic import ValidationError
 
-from app.users.users_schema import UpdateUserRequest, UpdatePasswordRequest, CheckUserExistsQuery
+from app.users.users_schema import UpdateUserRequest, UpdatePasswordRequest, AvailabilityQuery
 from app.users import users_controller
 from app.core.codes import ApiCode
 from app.core.dependencies import get_current_user
@@ -14,57 +14,44 @@ from app.core.response import ApiResponse, raise_http_error
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-def get_check_user_query(
-    email: Optional[str] = Query(None),
-    nickname: Optional[str] = Query(None),
-) -> CheckUserExistsQuery:
-    """Query → DTO. 검증 실패 시 400 INVALID_REQUEST (DTO가 exactly-one 검증)."""
+def get_availability_query(
+    email: Optional[str] = Query(None, description="이메일"),
+    nickname: Optional[str] = Query(None, description="닉네임"),
+) -> AvailabilityQuery:
+    """최소 하나 필수. 검증 실패 시 400."""
     try:
-        return CheckUserExistsQuery(email=email, nickname=nickname)
+        return AvailabilityQuery(email=email, nickname=nickname)
     except ValidationError:
         raise_http_error(400, ApiCode.INVALID_REQUEST)
 
 
-# GET /users?email=... 또는 ?nickname=... (중복 체크). 입력 검증은 DTO.
-@router.get("", status_code=200, response_model=ApiResponse)
-async def get_users_exists(query: CheckUserExistsQuery = Depends(get_check_user_query)):
-    return users_controller.check_user_exists(query=query)
+@router.get("/availability", status_code=200, response_model=ApiResponse)
+async def get_availability(query: AvailabilityQuery = Depends(get_availability_query)):
+    """이메일·닉네임 가용 여부. 요청한 항목만 반환. 사용자 정보 노출 없음."""
+    return users_controller.check_availability(query)
 
-# --- /users/me: 현재 사용자 프로필 리소스 (조회·수정·탈퇴) ---
+
 @router.get("/me", status_code=200, response_model=ApiResponse)
 async def get_me(user_id: int = Depends(get_current_user)):
-    """내 프로필 조회. 프로필 화면·수정용. createdAt 등 포함. 로그인 여부만 확인할 때는 GET /auth/me 사용."""
+    """내 프로필 조회. 로그인 여부만 확인할 때는 GET /v1/auth/me 사용."""
     return users_controller.get_user(user_id=user_id)
+
 
 @router.patch("/me", status_code=200, response_model=ApiResponse)
 async def update_me(
     user_data: UpdateUserRequest,
     user_id: int = Depends(get_current_user),
 ):
-    return users_controller.update_user(
-        user_id=user_id,
-        nickname=user_data.nickname,
-        profile_image_url=user_data.profileImageUrl,
-    )
+    return users_controller.update_user(user_id=user_id, data=user_data)
+
 
 @router.patch("/me/password", status_code=200, response_model=ApiResponse)
 async def update_me_password(
     password_data: UpdatePasswordRequest,
     user_id: int = Depends(get_current_user),
 ):
-    return users_controller.update_password(
-        user_id=user_id,
-        current_password=password_data.currentPassword,
-        new_password=password_data.newPassword,
-    )
+    return users_controller.update_password(user_id=user_id, data=password_data)
 
-# 라우터: 요청 수신 → 컨트롤러 호출만. 파일 정책(필수/확장자/MIME/크기)은 컨트롤러에서 검증.
-@router.post("/me/profile-image", status_code=201, response_model=ApiResponse)
-async def upload_me_profile_image(
-    profileImage: UploadFile = File(description="프로필 이미지"),
-    user_id: int = Depends(get_current_user),
-):
-    return await users_controller.upload_profile_image(user_id=user_id, profile_image=profileImage)
 
 @router.delete("/me", status_code=204)
 async def withdraw_me(user_id: int = Depends(get_current_user)):
