@@ -1,4 +1,4 @@
-# app/users/users_model.py
+# app/users/model.py
 """사용자 데이터 모델. users 테이블 전담."""
 
 from datetime import datetime
@@ -34,7 +34,6 @@ class UsersModel:
         nickname: str,
         profile_image_url: Optional[str] = None,
     ) -> dict:
-        """새 사용자 생성"""
         hashed = hash_password(password)
         profile = profile_image_url if profile_image_url else ""
         with get_connection() as conn:
@@ -60,7 +59,6 @@ class UsersModel:
 
     @classmethod
     def find_user_by_email(cls, email: str) -> Optional[dict]:
-        """이메일로 사용자 찾기 (비밀번호 포함, 로그인용)"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -75,7 +73,6 @@ class UsersModel:
 
     @classmethod
     def get_user_by_id(cls, user_id: int) -> Optional[dict]:
-        """사용자 정보 조회 (비밀번호 제외, createdAt 포함)"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -90,7 +87,6 @@ class UsersModel:
 
     @classmethod
     def get_user_summary(cls, user_id: int) -> Optional[dict]:
-        """사용자 요약 조회. 4개 필드(userId, email, nickname, profileImageUrl)만 반환."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -112,12 +108,10 @@ class UsersModel:
 
     @classmethod
     def find_user_by_id(cls, user_id: int) -> Optional[dict]:
-        """ID로 사용자 찾기 (비밀번호 제외). 게시글/댓글 작성자 조회용."""
         return cls.get_user_by_id(user_id)
 
     @classmethod
     def update_nickname(cls, user_id: int, new_nickname: str) -> bool:
-        """닉네임 수정"""
         user = cls.get_user_by_id(user_id)
         if not user:
             return False
@@ -133,7 +127,6 @@ class UsersModel:
 
     @classmethod
     def update_password(cls, user_id: int, new_password: str) -> bool:
-        """비밀번호 수정"""
         hashed = hash_password(new_password)
         with get_connection() as conn:
             with conn.cursor() as cur:
@@ -147,14 +140,10 @@ class UsersModel:
 
     @classmethod
     def update_profile_image_url(cls, user_id: int, profile_image_url: str) -> bool:
-        """프로필 이미지 URL 수정"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    UPDATE users SET profile_image_url = %s
-                    WHERE id = %s AND deleted_at IS NULL
-                    """,
+                    "UPDATE users SET profile_image_url = %s WHERE id = %s AND deleted_at IS NULL",
                     (profile_image_url, user_id),
                 )
                 affected = cur.rowcount
@@ -162,8 +151,7 @@ class UsersModel:
         return affected > 0
 
     @classmethod
-    def delete_user(cls, user_id: int) -> bool:
-        """회원 탈퇴 (users 테이블 soft delete만). 세션 삭제는 AuthModel.revoke_sessions_for_user 사용."""
+    def withdraw_user(cls, user_id: int) -> bool:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("UPDATE users SET deleted_at = NOW() WHERE id = %s", (user_id,))
@@ -173,7 +161,6 @@ class UsersModel:
 
     @classmethod
     def email_exists(cls, email: str) -> bool:
-        """이메일 중복 확인"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -184,7 +171,6 @@ class UsersModel:
 
     @classmethod
     def nickname_exists(cls, nickname: str) -> bool:
-        """닉네임 중복 확인"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -195,7 +181,6 @@ class UsersModel:
 
     @classmethod
     def verify_password(cls, user_id: int, password: str) -> bool:
-        """비밀번호 검증"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -210,16 +195,14 @@ class UsersModel:
         )
 
     @classmethod
-    def soft_delete_old_profile_image(cls, user_id: int) -> None:
-        """프로필 변경 전 이전 프로필 이미지를 images 테이블에서 soft delete."""
+    def withdraw_old_profile_image(cls, user_id: int) -> None:
         user = cls.get_user_by_id(user_id)
         if not user or not user.get("profileImageUrl"):
             return
-        from app.media.media_model import MediaModel
-        MediaModel.soft_delete_by_url(user["profileImageUrl"])
+        from app.media.model import MediaModel
+        MediaModel.withdraw_by_url(user["profileImageUrl"])
 
     @classmethod
     def resolve_image_url(cls, image_id: int) -> Optional[str]:
-        """images 테이블에서 image_id로 URL 조회 (프로필/게시글 연결용)."""
-        from app.media.media_model import MediaModel
+        from app.media.model import MediaModel
         return MediaModel.get_url_by_id(image_id)

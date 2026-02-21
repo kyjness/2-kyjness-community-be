@@ -84,7 +84,7 @@ async def save_image_for_media(
 ) -> tuple[str, str, str, int]:
     """
     이미지 검증 후 저장. (file_key, file_url, content_type, size) 반환.
-    folder: "profile"(회원 프로필) | "post"(게시글). 메타 저장은 media_controller에서 수행.
+    folder: "profile"(회원 프로필) | "post"(게시글). 메타 저장은 media.controller에서 수행.
     """
     if folder not in VALID_UPLOAD_FOLDERS:
         folder = "post"

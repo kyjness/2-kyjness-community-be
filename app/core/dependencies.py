@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import Cookie, Depends, Path
 
-from app.auth.auth_model import AuthModel
+from app.auth.model import AuthModel
 from app.core.codes import ApiCode
 from app.core.response import raise_http_error
 
@@ -32,7 +32,7 @@ def require_post_author(
     current_id: int = Depends(get_current_user),
 ) -> int:
     """게시글 작성자만 통과. 없으면 404, 타인이면 403. post_id는 경로에서 주입."""
-    from app.posts.posts_model import PostsModel
+    from app.posts.model import PostsModel
 
     post = PostsModel.find_post_by_id(post_id)
     if not post:
@@ -48,8 +48,8 @@ def require_comment_author(
     current_id: int = Depends(get_current_user),
 ) -> int:
     """댓글 작성자만 통과. post_id, comment_id는 경로에서 주입."""
-    from app.comments.comments_model import CommentsModel
-    from app.posts.posts_model import PostsModel
+    from app.comments.model import CommentsModel
+    from app.posts.model import PostsModel
 
     post = PostsModel.find_post_by_id(post_id)
     if not post:

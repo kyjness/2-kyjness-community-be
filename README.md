@@ -133,33 +133,33 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 │   │   └── validators.py          # 비밀번호·닉네임·URL 형식 검증
 │   │
 │   ├── auth/                      # 인증
-│   │   ├── auth_route.py          # 회원가입·로그인·로그아웃·/me API
-│   │   ├── auth_controller.py    # 인증 비즈니스 로직
-│   │   ├── auth_model.py          # users·sessions DB 접근
-│   │   └── auth_schema.py         # 요청/응답 형식 정의
+│   │   ├── router.py          # 회원가입·로그인·로그아웃·/me API
+│   │   ├── controller.py         # 인증 비즈니스 로직
+│   │   ├── model.py              # sessions DB 접근
+│   │   └── schema.py             # 요청/응답 형식 정의
 │   │
 │   ├── users/                     # 사용자
-│   │   ├── users_route.py         # 프로필 조회·수정·비밀번호 변경·탈퇴 API
-│   │   ├── users_controller.py   # 사용자 비즈니스 로직
-│   │   ├── users_model.py         # 사용자 정보 DB 접근
-│   │   └── users_schema.py        # 요청 형식 정의
+│   │   ├── router.py         # 프로필 조회·수정·비밀번호 변경·탈퇴 API
+│   │   ├── controller.py         # 사용자 비즈니스 로직
+│   │   ├── model.py              # users DB 접근
+│   │   └── schema.py             # 요청 형식 정의
 │   │
 │   ├── media/                     # 미디어 (이미지 업로드 API)
-│   │   ├── media_route.py         # POST /images (프로필·게시글 공통)
-│   │   ├── media_controller.py    # 업로드 후 images 테이블 저장
-│   │   └── media_model.py         # images DB 접근
+│   │   ├── router.py         # POST /images (프로필·게시글 공통)
+│   │   ├── controller.py         # 업로드 후 images 테이블 저장
+│   │   └── model.py              # images DB 접근
 │   │
 │   ├── posts/                     # 게시글
-│   │   ├── posts_route.py         # 게시글 CRUD·좋아요 API (이미지는 /media/images 업로드 후 imageIds)
-│   │   ├── posts_controller.py    # 게시글 비즈니스 로직
-│   │   ├── posts_model.py         # 게시글·이미지·좋아요 DB 접근
-│   │   └── posts_schema.py        # 요청 형식 정의
+│   │   ├── router.py         # 게시글 CRUD·좋아요 API (이미지는 /media/images 업로드 후 imageIds)
+│   │   ├── controller.py         # 게시글 비즈니스 로직
+│   │   ├── model.py              # 게시글·이미지·좋아요 DB 접근
+│   │   └── schema.py             # 요청 형식 정의
 │   │
 │   ├── comments/                  # 댓글
-│   │   ├── comments_route.py      # 댓글 CRUD API (페이지당 기본 10개, size 쿼리 지원)
-│   │   ├── comments_controller.py # 댓글 비즈니스 로직
-│   │   ├── comments_model.py      # 댓글 DB 접근
-│   │   └── comments_schema.py     # 요청 형식 정의
+│   │   ├── router.py      # 댓글 CRUD API (페이지당 기본 10개, size 쿼리 지원)
+│   │   ├── controller.py         # 댓글 비즈니스 로직
+│   │   ├── model.py              # 댓글 DB 접근
+│   │   └── schema.py             # 요청 형식 정의
 │   │
 ├── docs/                          # 문서
 │   ├── puppyytalkdb.sql           # 테이블 생성 스크립트
@@ -205,7 +205,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 │     → 요청 body를 DTO(PostCreateRequest 등)로 검증. 실패 시 400 + code │
 │                                                                      │
 │  ⑥ Route 핸들러                                                       │
-│     → auth_controller.signup(), posts_controller.create_post() 등 호출│
+│     → auth.controller.signup(), posts.controller.create_post() 등 호출│
 │                                                                      │
 │  ⑦ Controller                                                        │
 │     → 비즈니스 로직 처리, Model 호출, success_response / raise_http   │

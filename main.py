@@ -83,7 +83,7 @@ async def add_security_headers(request: Request, call_next):
 def _run_session_cleanup():
     """만료된 세션 삭제. 동기 함수라 스레드에서 호출."""
     try:
-        from app.auth.auth_model import AuthModel
+        from app.auth.model import AuthModel
         AuthModel.cleanup_expired_sessions()
     except Exception as e:
         logging.getLogger(__name__).warning("Session cleanup failed: %s", e)

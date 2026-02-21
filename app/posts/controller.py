@@ -1,23 +1,22 @@
-# app/posts/posts_controller.py
-"""게시글 비즈니스 로직. 권한(작성자)은 Route(require_post_author), 검증·응답은 core 사용."""
+# app/posts/controller.py
+"""게시글 비즈니스 로직."""
 
 import logging
 from typing import Optional, List
 
 from fastapi import HTTPException
 
-from app.posts.posts_model import PostsModel, PostLikesModel
-from app.posts.posts_schema import PostCreateRequest, PostUpdateRequest, PostResponse, AuthorInfo, FileInfo
-from app.users.users_model import UsersModel
+from app.posts.model import PostsModel, PostLikesModel
+from app.posts.schema import PostCreateRequest, PostUpdateRequest, PostResponse, AuthorInfo, FileInfo
+from app.users.model import UsersModel
 from app.core.codes import ApiCode
 from app.core.response import success_response, raise_http_error
-from app.media.media_model import MediaModel
+from app.media.model import MediaModel
 
 logger = logging.getLogger(__name__)
 
 
 def _validate_image_ids(image_ids: Optional[List[int]]) -> None:
-    """imageIds가 images 테이블에 존재하는지 검사. 없으면 400."""
     if not image_ids:
         return
     for iid in image_ids:
@@ -38,7 +37,6 @@ def create_post(user_id: int, data: PostCreateRequest):
 
 
 def _build_post_response_item(post: dict, author: dict) -> dict:
-    """단일 게시글 + 작성자 정보를 API 응답 형식으로 구성."""
     item = PostResponse(
         postId=post["postId"],
         title=post["title"],
@@ -58,7 +56,6 @@ def _build_post_response_item(post: dict, author: dict) -> dict:
 
 
 def get_posts(page: int = 1, size: int = 10):
-    """무한 스크롤용 게시글 목록. data, hasMore 반환."""
     posts_raw, has_more = PostsModel.get_all_posts(page, size)
     result = []
     for post in posts_raw:
@@ -69,7 +66,6 @@ def get_posts(page: int = 1, size: int = 10):
 
 
 def record_view(post_id: int) -> None:
-    """조회수 1 증가. 페이지 진입 시 전용. 게시글 없으면 404."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
@@ -77,7 +73,6 @@ def record_view(post_id: int) -> None:
 
 
 def get_post(post_id: int):
-    """게시글 상세 조회. 조회수는 POST /view에서 별도 처리."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
@@ -89,7 +84,6 @@ def get_post(post_id: int):
 
 
 def update_post(post_id: int, user_id: int, data: PostUpdateRequest):
-    """게시글 수정. 작성자 검사는 Route(require_post_author)에서 수행."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
@@ -99,16 +93,14 @@ def update_post(post_id: int, user_id: int, data: PostUpdateRequest):
     return success_response(ApiCode.POST_UPDATED)
 
 
-def delete_post(post_id: int, user_id: int):
-    """게시글 삭제. 작성자 검사는 Route(require_post_author)에서 수행. 성공 시 반환 없음(route에서 204 반환)."""
+def withdraw_post(post_id: int, user_id: int):
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
-    PostsModel.delete_post(post_id)
+    PostsModel.withdraw_post(post_id)
 
 
 def create_like(post_id: int, user_id: int):
-    """게시글 좋아요 추가. 로그인 사용자만 가능."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
@@ -124,7 +116,6 @@ def create_like(post_id: int, user_id: int):
 
 
 def delete_like(post_id: int, user_id: int):
-    """게시글 좋아요 취소. 로그인 사용자만 가능."""
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)

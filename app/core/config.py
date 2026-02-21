@@ -1,4 +1,5 @@
 # app/core/config.py
+"""환경 변수 기반 설정 (HOST, PORT, DB, CORS, 세션 등)."""
 import os
 from pathlib import Path
 from typing import List

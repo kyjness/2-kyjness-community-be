@@ -1,5 +1,5 @@
-# app/posts/posts_model.py
-"""게시글 모델 (MySQL posts, post_images 테이블). 게시글-이미지 연결은 post_images."""
+# app/posts/model.py
+"""게시글 모델 (posts, post_images, likes 테이블)."""
 
 import logging
 from datetime import datetime
@@ -9,17 +9,14 @@ import pymysql
 
 from app.core.database import get_connection
 
-logger = logging.getLogger(__name__)  # exception 로그용
+logger = logging.getLogger(__name__)
 
 
 class PostsModel:
-    """게시글 모델 (MySQL)"""
-
     MAX_POST_IMAGES = 5
 
     @classmethod
     def _row_to_post(cls, row: dict, file_rows: Optional[List[dict]] = None) -> dict:
-        """DB 행을 API 형식 post dict로 변환. file_rows는 post_images JOIN images 결과(최대 5개)."""
         if not row:
             return None
         post = {
@@ -49,15 +46,11 @@ class PostsModel:
     def create_post(
         cls, user_id: int, title: str, content: str, image_ids: Optional[List[int]] = None
     ) -> dict:
-        """게시글 생성. image_ids는 media 업로드 후 반환된 이미지 ID 목록(최대 5). post_images에 연결."""
         image_ids = image_ids or []
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    INSERT INTO posts (user_id, title, content)
-                    VALUES (%s, %s, %s)
-                    """,
+                    "INSERT INTO posts (user_id, title, content) VALUES (%s, %s, %s)",
                     (user_id, title, content),
                 )
                 post_id = cur.lastrowid
@@ -66,7 +59,6 @@ class PostsModel:
                         "INSERT INTO post_images (post_id, image_id) VALUES (%s, %s)",
                         (post_id, iid),
                     )
-
                 file_rows = []
                 if image_ids:
                     cur.execute(
@@ -79,11 +71,7 @@ class PostsModel:
                         (post_id,),
                     )
                     file_rows = cur.fetchall()
-
-                cur.execute(
-                    "SELECT created_at FROM posts WHERE id = %s",
-                    (post_id,),
-                )
+                cur.execute("SELECT created_at FROM posts WHERE id = %s", (post_id,))
                 created_row = cur.fetchone()
                 created_at = (
                     created_row["created_at"].strftime("%Y-%m-%d %H:%M:%S")
@@ -91,7 +79,6 @@ class PostsModel:
                     else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 )
             conn.commit()
-
         files = [
             {"fileId": fr["id"], "fileUrl": fr["file_url"] or "", "imageId": fr["image_id"]}
             for fr in file_rows
@@ -110,7 +97,6 @@ class PostsModel:
 
     @classmethod
     def find_post_by_id(cls, post_id: int) -> Optional[dict]:
-        """게시글 조회"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -123,24 +109,20 @@ class PostsModel:
                 row = cur.fetchone()
                 if not row:
                     return None
-
                 cur.execute(
                     """
                     SELECT pi.id, i.file_url, i.id AS image_id
                     FROM post_images pi
                     INNER JOIN images i ON pi.image_id = i.id AND i.deleted_at IS NULL
-                    WHERE pi.post_id = %s
-                    ORDER BY pi.id
+                    WHERE pi.post_id = %s ORDER BY pi.id
                     """,
                     (post_id,),
                 )
                 file_rows = cur.fetchall()
-
         return cls._row_to_post(row, file_rows or None)
 
     @classmethod
     def get_all_posts(cls, page: int = 1, size: int = 20) -> tuple[List[dict], bool]:
-        """무한 스크롤용 목록 조회. (posts, has_more) 반환. post_images는 배치 조회로 N+1 방지."""
         offset = (page - 1) * size
         fetch_limit = size + 1
         with get_connection() as conn:
@@ -154,12 +136,10 @@ class PostsModel:
                     (fetch_limit, offset),
                 )
                 rows = cur.fetchall()
-
                 has_more = len(rows) > size
                 rows = rows[:size]
                 if not rows:
                     return [], has_more
-
                 post_ids = [r["id"] for r in rows]
                 placeholders = ", ".join(["%s"] * len(post_ids))
                 cur.execute(
@@ -173,11 +153,9 @@ class PostsModel:
                     tuple(post_ids),
                 )
                 all_file_rows = cur.fetchall()
-
                 files_by_post: dict[int, list] = {pid: [] for pid in post_ids}
                 for fr in all_file_rows:
                     files_by_post[fr["post_id"]].append(fr)
-
                 result = [
                     cls._row_to_post(row, files_by_post.get(row["id"]) or None)
                     for row in rows
@@ -192,7 +170,6 @@ class PostsModel:
         content: Optional[str] = None,
         image_ids: Optional[List[int]] = None,
     ) -> bool:
-        """게시글 수정. image_ids 지정 시 기존 첨부를 해당 목록으로 교체(최대 5)."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 if title is not None:
@@ -206,26 +183,18 @@ class PostsModel:
                         (content, post_id),
                     )
                 if image_ids is not None:
-                    cur.execute(
-                        "SELECT image_id FROM post_images WHERE post_id = %s",
-                        (post_id,),
-                    )
+                    cur.execute("SELECT image_id FROM post_images WHERE post_id = %s", (post_id,))
                     old_image_ids = {r["image_id"] for r in cur.fetchall()}
                     new_image_ids_set = set(image_ids[: cls.MAX_POST_IMAGES])
                     removed_ids = old_image_ids - new_image_ids_set
-
                     cur.execute("DELETE FROM post_images WHERE post_id = %s", (post_id,))
                     for iid in image_ids[: cls.MAX_POST_IMAGES]:
                         cur.execute(
                             "INSERT INTO post_images (post_id, image_id) VALUES (%s, %s)",
                             (post_id, iid),
                         )
-
                     for img_id in removed_ids:
-                        cur.execute(
-                            "SELECT 1 FROM post_images WHERE image_id = %s LIMIT 1",
-                            (img_id,),
-                        )
+                        cur.execute("SELECT 1 FROM post_images WHERE image_id = %s LIMIT 1", (img_id,))
                         if cur.fetchone() is None:
                             cur.execute(
                                 "UPDATE images SET deleted_at = NOW() WHERE id = %s AND deleted_at IS NULL",
@@ -235,53 +204,31 @@ class PostsModel:
         return True
 
     @classmethod
-    def delete_post(cls, post_id: int) -> bool:
-        """게시글 삭제 (soft delete) + 연관 데이터 처리
-        - posts: soft delete (deleted_at)
-        - comments: soft delete (deleted_at)
-        - likes: hard delete
-        - post_images: hard delete
-        - images: post_images에서 참조 해제된 이미지는 soft delete
-        """
+    def withdraw_post(cls, post_id: int) -> bool:
         with get_connection() as conn:
             with conn.cursor() as cur:
-                # 1. 댓글 soft delete
                 cur.execute(
                     "UPDATE comments SET deleted_at = NOW() WHERE post_id = %s AND deleted_at IS NULL",
                     (post_id,),
                 )
-                # 2. 좋아요 hard delete
                 cur.execute("DELETE FROM likes WHERE post_id = %s", (post_id,))
-                # 3. post_images에서 해당 게시글의 image_id 목록 수집 후 삭제
-                cur.execute(
-                    "SELECT image_id FROM post_images WHERE post_id = %s",
-                    (post_id,),
-                )
+                cur.execute("SELECT image_id FROM post_images WHERE post_id = %s", (post_id,))
                 image_ids = [r["image_id"] for r in cur.fetchall()]
                 cur.execute("DELETE FROM post_images WHERE post_id = %s", (post_id,))
-                # 4. 다른 게시글에서 참조하지 않는 이미지 soft delete
                 for img_id in image_ids:
-                    cur.execute(
-                        "SELECT 1 FROM post_images WHERE image_id = %s LIMIT 1",
-                        (img_id,),
-                    )
+                    cur.execute("SELECT 1 FROM post_images WHERE image_id = %s LIMIT 1", (img_id,))
                     if cur.fetchone() is None:
                         cur.execute(
                             "UPDATE images SET deleted_at = NOW() WHERE id = %s AND deleted_at IS NULL",
                             (img_id,),
                         )
-                # 5. 게시글 soft delete
-                cur.execute(
-                    "UPDATE posts SET deleted_at = NOW() WHERE id = %s",
-                    (post_id,),
-                )
+                cur.execute("UPDATE posts SET deleted_at = NOW() WHERE id = %s", (post_id,))
                 affected = cur.rowcount
             conn.commit()
         return affected > 0
 
     @classmethod
     def increment_hits(cls, post_id: int) -> bool:
-        """조회수 증가"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -293,13 +240,9 @@ class PostsModel:
 
     @classmethod
     def increment_like_count(cls, post_id: int) -> int:
-        """좋아요 수 증가. 갱신된 like_count 반환 (재조회 불필요)."""
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE posts SET like_count = like_count + 1 WHERE id = %s",
-                    (post_id,),
-                )
+                cur.execute("UPDATE posts SET like_count = like_count + 1 WHERE id = %s", (post_id,))
                 cur.execute("SELECT like_count FROM posts WHERE id = %s", (post_id,))
                 row = cur.fetchone()
             conn.commit()
@@ -307,7 +250,6 @@ class PostsModel:
 
     @classmethod
     def decrement_like_count(cls, post_id: int) -> int:
-        """좋아요 수 감소. 갱신된 like_count 반환 (재조회 불필요)."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -321,7 +263,6 @@ class PostsModel:
 
     @classmethod
     def increment_comment_count(cls, post_id: int) -> bool:
-        """댓글 수 증가"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -333,7 +274,6 @@ class PostsModel:
 
     @classmethod
     def decrement_comment_count(cls, post_id: int) -> bool:
-        """댓글 수 감소"""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -345,8 +285,6 @@ class PostsModel:
 
 
 class PostLikesModel:
-    """게시글 좋아요 모델 (likes 테이블: liker_key = 'u_'+user_id 또는 anon_id)"""
-
     @classmethod
     def _liker_key_user(cls, user_id: int) -> str:
         return f"u_{user_id}"
@@ -375,7 +313,7 @@ class PostLikesModel:
         except pymysql.err.IntegrityError:
             return None
         except Exception as e:
-            logger.exception("likes INSERT 실패 post_id=%s liker_key=%s: %s", post_id, liker_key, e)
+            logger.exception("likes INSERT 실패: %s", e)
             raise
 
     @classmethod
