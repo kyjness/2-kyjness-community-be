@@ -5,12 +5,6 @@ import re
 
 PASSWORD_SPECIAL = re.compile(r"[!@#$%^&*()_+\-=\[\]{};\':\"\\|,.<>/?]")
 NICKNAME_PATTERN = re.compile(r"^[가-힣a-zA-Z0-9]{1,10}$")
-EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-
-
-def validate_email_format(email: str) -> bool:
-    """이메일 형식 검증."""
-    return bool(email and isinstance(email, str) and EMAIL_PATTERN.match(email.strip()))
 
 
 def validate_password_format(password: str) -> bool:

@@ -85,14 +85,3 @@ class MediaModel:
                 )
             conn.commit()
         return True
-
-    @classmethod
-    def exists(cls, image_id: int) -> bool:
-        """삭제되지 않은 이미지 존재 여부."""
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT 1 FROM images WHERE id = %s AND deleted_at IS NULL LIMIT 1",
-                    (image_id,),
-                )
-                return cur.fetchone() is not None

@@ -38,15 +38,15 @@ class LoginRequest(BaseModel):
     def password_format(cls, v: str) -> str:
         return ensure_password_format(v)
 
-# 로그인 성공 응답 데이터 (data 필드용)
-class LoginData(BaseModel):
+# 로그인 성공 응답 (data 필드용)
+class LoginResponse(BaseModel):
     userId: int
     email: str
     nickname: str
     profileImageUrl: str
 
-# 로그인 상태 체크 응답 데이터
-class MeData(BaseModel):
+# 세션 사용자 조회 응답 (GET /auth/me data 필드용)
+class SessionUserResponse(BaseModel):
     userId: int
     email: str
     nickname: str

@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app.posts.posts_model import PostsModel, PostLikesModel
 from app.posts.posts_schema import PostCreateRequest, PostUpdateRequest, PostResponse, AuthorInfo, FileInfo
-from app.auth.auth_model import AuthModel
+from app.users.users_model import UsersModel
 from app.core.codes import ApiCode
 from app.core.response import success_response, raise_http_error
 from app.media.media_model import MediaModel
@@ -62,7 +62,7 @@ def get_posts(page: int = 1, size: int = 10):
     posts_raw, has_more = PostsModel.get_all_posts(page, size)
     result = []
     for post in posts_raw:
-        author = AuthModel.find_user_by_id(post["authorId"])
+        author = UsersModel.find_user_by_id(post["authorId"])
         if author:
             result.append(_build_post_response_item(post, author))
     return {"code": ApiCode.POSTS_RETRIEVED.value, "data": result, "hasMore": has_more}
@@ -81,7 +81,7 @@ def get_post(post_id: int):
     post = PostsModel.find_post_by_id(post_id)
     if not post:
         raise_http_error(404, ApiCode.POST_NOT_FOUND)
-    author = AuthModel.find_user_by_id(post["authorId"])
+    author = UsersModel.find_user_by_id(post["authorId"])
     if not author:
         raise_http_error(404, ApiCode.USER_NOT_FOUND)
     data = _build_post_response_item(post, author)

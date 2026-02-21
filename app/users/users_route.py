@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from typing import Optional
 from pydantic import ValidationError
 
-from app.users.users_schema import UpdateUserRequest, UpdatePasswordRequest, AvailabilityQuery
+from app.users.users_schema import UpdateUserRequest, UpdatePasswordRequest, UserAvailabilityQuery
 from app.users import users_controller
 from app.core.codes import ApiCode
 from app.core.dependencies import get_current_user
@@ -17,16 +17,16 @@ router = APIRouter(prefix="/users", tags=["users"])
 def parse_availability_query(
     email: Optional[str] = Query(None, description="이메일"),
     nickname: Optional[str] = Query(None, description="닉네임"),
-) -> AvailabilityQuery:
-    """Query 파라미터를 파싱해 AvailabilityQuery 생성. 최소 하나 필수. 검증 실패 시 400."""
+) -> UserAvailabilityQuery:
+    """Query 파라미터를 파싱해 UserAvailabilityQuery 생성. 최소 하나 필수. 검증 실패 시 400."""
     try:
-        return AvailabilityQuery(email=email, nickname=nickname)
+        return UserAvailabilityQuery(email=email, nickname=nickname)
     except ValidationError:
         raise_http_error(400, ApiCode.INVALID_REQUEST)
 
 
 @router.get("/availability", status_code=200, response_model=ApiResponse)
-async def get_availability(query: AvailabilityQuery = Depends(parse_availability_query)):
+async def get_availability(query: UserAvailabilityQuery = Depends(parse_availability_query)):
     """이메일·닉네임 가용 여부. 요청한 항목만 반환. 사용자 정보 노출 없음."""
     return users_controller.check_availability(query)
 

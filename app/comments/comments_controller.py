@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from app.comments.comments_model import CommentsModel
 from app.comments.comments_schema import CommentCreateRequest, CommentUpdateRequest, CommentResponse, CommentAuthorInfo
 from app.posts.posts_model import PostsModel
-from app.auth.auth_model import AuthModel
+from app.users.users_model import UsersModel
 from app.core.codes import ApiCode
 from app.core.response import success_response, raise_http_error
 
@@ -41,7 +41,7 @@ def get_comments(post_id: int, page: int = 1, size: int = 10):
 
     result = []
     for comment in comments:
-        author = AuthModel.find_user_by_id(comment["authorId"])
+        author = UsersModel.find_user_by_id(comment["authorId"])
         if author:
             item = CommentResponse(
                 commentId=comment["commentId"],
