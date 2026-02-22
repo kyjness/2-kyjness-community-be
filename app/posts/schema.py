@@ -1,6 +1,6 @@
 # app/posts/schema.py
-"""요청/응답 DTO."""
 
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -33,24 +33,44 @@ class PostUpdateRequest(BaseModel):
 
 
 class AuthorInfo(BaseModel):
-    userId: int
+    id: int = Field(serialization_alias="userId")
     nickname: str
-    profileImageUrl: str
+    profile_image_url: str = Field(serialization_alias="profileImageUrl", default="")
+
+    @field_validator("profile_image_url", mode="before")
+    @classmethod
+    def empty_str_if_none(cls, v):
+        return (v or "").strip() or ""
 
 
 class FileInfo(BaseModel):
-    fileId: int
-    fileUrl: str
-    imageId: Optional[int] = None
+    id: int = Field(serialization_alias="fileId")
+    file_url: str = Field(serialization_alias="fileUrl", default="")
+    image_id: Optional[int] = Field(default=None, serialization_alias="imageId")
+
+    @field_validator("file_url", mode="before")
+    @classmethod
+    def empty_str_if_none(cls, v):
+        return (v or "").strip() or ""
 
 
 class PostResponse(BaseModel):
-    postId: int
+    id: int = Field(serialization_alias="postId")
     title: str
     content: str
-    hits: int
-    likeCount: int
-    commentCount: int
+    view_count: int = Field(serialization_alias="hits", default=0)
+    like_count: int = Field(serialization_alias="likeCount", default=0)
+    comment_count: int = Field(serialization_alias="commentCount", default=0)
     author: AuthorInfo
     files: List[FileInfo] = Field(default_factory=list)
-    createdAt: str
+    created_at: datetime = Field(serialization_alias="createdAt")
+
+    @classmethod
+    def from_rows(cls, post_row: dict, file_rows: List[dict], author_row: dict) -> "PostResponse":
+        """post_row + file_rows + author_row → 응답. 내부에서 model_validate 활용."""
+        data = {
+            **post_row,
+            "author": author_row,
+            "files": (file_rows or [])[:5],
+        }
+        return cls.model_validate(data)

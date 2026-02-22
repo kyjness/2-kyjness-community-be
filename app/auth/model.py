@@ -1,8 +1,7 @@
 # app/auth/model.py
-"""인증 데이터 모델. sessions 테이블 전담."""
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Any
 
 import secrets
 
@@ -11,10 +10,7 @@ from app.core.database import get_connection
 
 
 class AuthModel:
-    """sessions 테이블 전담."""
-
     SESSION_EXPIRY_TIME = settings.SESSION_EXPIRY_TIME
-
     @classmethod
     def create_session(cls, user_id: int) -> str:
         session_id = secrets.token_urlsafe(32)
@@ -53,7 +49,11 @@ class AuthModel:
         return affected > 0
 
     @classmethod
-    def revoke_sessions_for_user(cls, user_id: int) -> None:
+    def revoke_sessions_for_user(cls, user_id: int, conn: Optional[Any] = None) -> None:
+        if conn is not None:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+            return
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))

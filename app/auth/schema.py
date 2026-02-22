@@ -1,5 +1,4 @@
 # app/auth/schema.py
-"""요청/응답 DTO."""
 
 from typing import Optional
 
@@ -9,7 +8,6 @@ from app.core.validators import ensure_password_format, ensure_nickname_format
 
 
 class SignUpRequest(BaseModel):
-    """프로필 이미지는 POST /v1/media/images 업로드 후 profileImageId 전달."""
     email: EmailStr = Field(..., description="사용자 이메일")
     password: str = Field(..., min_length=8, max_length=20, description="비밀번호 (8-20자)")
     nickname: str = Field(..., min_length=1, max_length=10, description="닉네임 (1-10자)")
@@ -37,15 +35,24 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    userId: int
+    id: int = Field(serialization_alias="userId")
     email: str
     nickname: str
-    profileImageUrl: str
+    profile_image_url: str = Field(serialization_alias="profileImageUrl", default="")
+
+    @field_validator("profile_image_url", mode="before")
+    @classmethod
+    def empty_str_if_none(cls, v):
+        return (v or "").strip() or ""
 
 
 class SessionUserResponse(BaseModel):
-    """GET /auth/me: 세션 유효성 + 최소 사용자 정보."""
-    userId: int
+    id: int = Field(serialization_alias="userId")
     email: str
     nickname: str
-    profileImageUrl: str
+    profile_image_url: str = Field(serialization_alias="profileImageUrl", default="")
+
+    @field_validator("profile_image_url", mode="before")
+    @classmethod
+    def empty_str_if_none(cls, v):
+        return (v or "").strip() or ""

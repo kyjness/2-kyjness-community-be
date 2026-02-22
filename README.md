@@ -205,7 +205,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 │     → 요청 body를 DTO(PostCreateRequest 등)로 검증. 실패 시 400 + code │
 │                                                                      │
 │  ⑥ Route 핸들러                                                       │
-│     → auth.controller.signup(), posts.controller.create_post() 등 호출│
+│     → auth.controller.signup_user(), posts.controller.create_post() 등 호출│
 │                                                                      │
 │  ⑦ Controller                                                        │
 │     → 비즈니스 로직 처리, Model 호출, success_response / raise_http   │
@@ -270,6 +270,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ---
 
 ## 확장 전략
+
+### 세션 (sessions)
+
+- **로그아웃 시**: `revoked_at` 컬럼 추가 후 soft revoke (DELETE 대신 UPDATE revoked_at)
+- **cleanup**: 만료(expires_at) 또는 철회(revoked_at)된 세션 주기적(예: 하루 1번) 삭제
 
 ### 기능
 

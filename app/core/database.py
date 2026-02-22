@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def get_connection():
-    """MySQL 연결 context manager. DictCursor로 dict 형태 행 반환. 사용 후 자동 close."""
+    """MySQL 연결 context manager. DictCursor로 dict 형태 행 반환. 사용 후 자동 close.
+    여러 model 호출을 한 트랜잭션으로 묶을 때: with get_connection() as conn: ...; model.xxx(..., conn=conn); conn.commit()
+    예외 시 자동 rollback."""
     conn = None
     try:
         conn = pymysql.connect(

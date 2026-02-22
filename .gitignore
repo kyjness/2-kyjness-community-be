@@ -107,5 +107,3 @@ dmypy.json
 *.backup
 *~
 
-# 문서 (로컬 참고용, GitHub 미업로드)
-docs/API_REFERENCE.md

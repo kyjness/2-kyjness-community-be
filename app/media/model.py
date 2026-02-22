@@ -1,21 +1,13 @@
 # app/media/model.py
-"""이미지 업로드 메타 저장 (images 테이블)."""
 
-from typing import Optional
+from typing import Optional, Any
 
 from app.core.database import get_connection
 
 
 class MediaModel:
     @classmethod
-    def create_image(
-        cls,
-        file_key: str,
-        file_url: str,
-        content_type: Optional[str] = None,
-        size: Optional[int] = None,
-        uploader_id: Optional[int] = None,
-    ) -> dict:
+    def create_image(cls, file_key: str, file_url: str, content_type: Optional[str] = None, size: Optional[int] = None, uploader_id: Optional[int] = None) -> dict:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -27,7 +19,7 @@ class MediaModel:
                 )
                 image_id = cur.lastrowid
             conn.commit()
-        return {"imageId": image_id, "fileUrl": file_url}
+        return {"id": image_id, "file_url": file_url}
 
     @classmethod
     def get_url_by_id(cls, image_id: int) -> Optional[str]:
@@ -41,40 +33,35 @@ class MediaModel:
         return row["file_url"] if row else None
 
     @classmethod
-    def withdraw_image(cls, image_id: int) -> bool:
+    def withdraw_image_by_owner(cls, image_id: int, user_id: int) -> bool:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE images SET deleted_at = NOW() WHERE id = %s AND deleted_at IS NULL",
-                    (image_id,),
+                    "UPDATE images SET deleted_at = NOW() WHERE id = %s AND uploader_id = %s AND deleted_at IS NULL",
+                    (image_id, user_id),
                 )
                 affected = cur.rowcount
             conn.commit()
         return affected > 0
 
     @classmethod
-    def get_image_for_withdraw(cls, image_id: int) -> Optional[dict]:
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, uploader_id FROM images WHERE id = %s AND deleted_at IS NULL LIMIT 1",
-                    (image_id,),
-                )
-                return cur.fetchone()
-
-    @classmethod
-    def withdraw_by_url(cls, file_url: str) -> bool:
+    def withdraw_by_url(cls, file_url: str, conn: Optional[Any] = None) -> bool:
         if not file_url or not file_url.strip():
             return False
-        with get_connection() as conn:
-            with conn.cursor() as cur:
+        url = file_url.strip()
+
+        def _do(c):
+            with c.cursor() as cur:
                 cur.execute(
-                    "SELECT id FROM images WHERE file_url = %s AND deleted_at IS NULL LIMIT 1",
-                    (file_url.strip(),),
+                    "UPDATE images SET deleted_at = NOW() WHERE file_url = %s AND deleted_at IS NULL",
+                    (url,),
                 )
-                row = cur.fetchone()
-                if not row:
-                    return False
-                cur.execute("UPDATE images SET deleted_at = NOW() WHERE id = %s", (row["id"],))
+                return cur.rowcount > 0
+
+        if conn is not None:
+            return _do(conn)
+        with get_connection() as conn:
+            if not _do(conn):
+                return False
             conn.commit()
         return True

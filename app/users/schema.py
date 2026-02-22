@@ -1,19 +1,11 @@
 # app/users/schema.py
-"""요청/응답 DTO."""
 
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.validators import ensure_password_format, ensure_nickname_format
-
-
-def _strip_empty_to_none(v):
-    if v is None:
-        return None
-    if isinstance(v, str):
-        return v.strip() or None
-    return v
 
 
 class UserAvailabilityQuery(BaseModel):
@@ -23,13 +15,15 @@ class UserAvailabilityQuery(BaseModel):
     @field_validator("email", "nickname", mode="before")
     @classmethod
     def strip_empty_to_none(cls, v):
-        return _strip_empty_to_none(v)
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v.strip() or None
+        return v
 
     @model_validator(mode="after")
     def at_least_one(self):
-        if self.email is None and self.nickname is None:
-            raise ValueError("INVALID_REQUEST")
-        if not self.email and not self.nickname:
+        if not (self.email or self.nickname):
             raise ValueError("INVALID_REQUEST")
         return self
 
@@ -47,7 +41,11 @@ class UpdateUserRequest(BaseModel):
     @field_validator("nickname", mode="before")
     @classmethod
     def strip_empty_to_none(cls, v):
-        return _strip_empty_to_none(v)
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return v.strip() or None
+        return v
 
     @model_validator(mode="after")
     def at_least_one(self):
@@ -74,9 +72,13 @@ class UpdatePasswordRequest(BaseModel):
 
 
 class UserProfileResponse(BaseModel):
-    """GET /users/me 전용."""
-    userId: int
+    id: int = Field(serialization_alias="userId")
     email: str
     nickname: str
-    profileImageUrl: str
-    createdAt: str
+    profile_image_url: str = Field(serialization_alias="profileImageUrl", default="")
+    created_at: datetime = Field(serialization_alias="createdAt")
+
+    @field_validator("profile_image_url", mode="before")
+    @classmethod
+    def empty_str_if_none(cls, v):
+        return (v or "").strip() or ""
