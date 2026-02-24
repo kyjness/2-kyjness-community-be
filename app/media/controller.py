@@ -7,7 +7,7 @@ from app.core.codes import ApiCode
 from app.core.dependencies import CurrentUser
 from app.core.response import raise_http_error, success_response
 from app.media.model import MediaModel
-from app.media.upload import save_image_for_media
+from app.media.image_policy import save_image_for_media
 
 
 async def upload_image(file: Optional[UploadFile], user: CurrentUser, purpose: str, db: Session) -> dict:

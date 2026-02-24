@@ -24,7 +24,7 @@
 | **언어** | Python 3.8+ |
 | **프레임워크** | FastAPI |
 | **DB** | MySQL (SQLAlchemy 2.x + pymysql 드라이버) |
-| **검증** | Pydantic |
+| **검증** | Pydantic v2 |
 | **암호화** | bcrypt (비밀번호) |
 
 ### 설계 배경
@@ -40,6 +40,17 @@
 ---
 
 ## 폴더 구조
+
+**도메인 폴더(auth, users, media, posts, comments) 공통 역할**
+
+| 파일 | 역할 |
+|------|------|
+| **router** | HTTP 엔드포인트 정의, 요청/응답 매핑, Depends 주입 |
+| **controller** | 비즈니스 로직 (유효성·권한·트랜잭션 흐름) |
+| **model** | DB 접근 (CRUD, 쿼리) |
+| **schema** | 요청/응답 DTO (Pydantic v2, 검증·alias) |
+
+※ media는 도메인 정책(검증·용도 분기·키 생성)을 위한 `image_policy.py`를 추가로 둠.
 
 ```
 2-kyjness-community-be/
@@ -60,39 +71,14 @@
 │   │   ├── storage.py             # 스토리지 인프라 (storage_save, storage_delete, build_url, local|S3)
 │   │   └── validators.py          # 비밀번호·닉네임 형식 검증
 │   │
-│   ├── auth/                      # 인증
-│   │   ├── router.py              # 회원가입·로그인·로그아웃·/me API (로그인 시 쿠키 설정)
-│   │   ├── controller.py          # 인증 비즈니스 로직
-│   │   ├── model.py               # sessions DB 접근
-│   │   └── schema.py              # 요청/응답 형식 정의
-│   │
-│   ├── users/                     # 사용자
-│   │   ├── router.py              # 프로필 조회·수정·비밀번호 변경·탈퇴 API
-│   │   ├── controller.py          # 사용자 비즈니스 로직
-│   │   ├── model.py               # users DB 접근
-│   │   └── schema.py              # 요청/응답 형식 (UserProfileResponse 등)
-│   │
-│   ├── media/                     # 미디어 (이미지 업로드 API)
-│   │   ├── router.py         # POST /images (프로필·게시글 공통)
-│   │   ├── controller.py         # 업로드 후 images 테이블 저장
-│   │   ├── model.py              # images DB CRUD (메타)
-│   │   └── upload.py             # 검증·용도 분기·키 생성 (도메인 정책)
-│   │
-│   ├── posts/                     # 게시글
-│   │   ├── router.py              # 게시글 CRUD·좋아요 API (이미지는 /media/images 업로드 후 imageIds)
-│   │   ├── dependencies.py       # 목록 쿼리(PostListQuery) Depends
-│   │   ├── controller.py         # 게시글 비즈니스 로직
-│   │   ├── model.py              # 게시글·이미지·좋아요 DB 접근
-│   │   └── schema.py             # 요청/응답 형식 (목록 PostListResponse, 상세 PostResponse 등)
-│   │
-│   ├── comments/                  # 댓글
-│   │   ├── router.py              # 댓글 CRUD API (페이지당 기본 10개, page·size 쿼리)
-│   │   ├── controller.py          # 댓글 비즈니스 로직
-│   │   ├── model.py               # 댓글 DB 접근
-│   │   └── schema.py              # 요청/응답 형식 (CommentResponse 등)
+│   ├── auth/                      # 인증 (router, controller, model, schema)
+│   ├── users/                     # 사용자 (router, controller, model, schema)
+│   ├── media/                     # 미디어 (router, controller, model, schema, image_policy.py)
+│   ├── posts/                     # 게시글 (router, controller, model, schema)
+│   ├── comments/                  # 댓글 (router, controller, model, schema)
 │   │
 ├── docs/                          # 문서
-│   ├── puppyytalkdb.sql           # 테이블 생성 스크립트
+│   ├── puppytalkdb.sql           # 테이블 생성 스크립트
 │   ├── clear_db.sql               # 데이터만 비우기 (테이블 구조 유지)
 │   └── api-codes.md               # API 응답 code·HTTP 매핑 (내부 참고)
 │
@@ -235,10 +221,10 @@ HTTP 응답  { "code": "POST_UPLOADED", "data": { "postId": 1 } }
 
 ```bash
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS puppytalk;"
-mysql -u root -p puppytalk < docs/puppyytalkdb.sql
+mysql -u root -p puppytalk < docs/puppytalkdb.sql
 ```
 
-DDL은 `docs/puppyytalkdb.sql`을 참고합니다. **데이터만 비우기**(테이블 구조 유지)가 필요하면 `docs/clear_db.sql`을 실행하면 됩니다.  
+DDL은 `docs/puppytalkdb.sql`을 참고합니다. **데이터만 비우기**(테이블 구조 유지)가 필요하면 `docs/clear_db.sql`을 실행하면 됩니다.  
 애플리케이션은 **SQLAlchemy**로 MySQL에 접근합니다. 요청마다 `get_db()`가 세션을 주입하고, 성공 시 commit·예외 시 rollback을 처리합니다.  
 `likes` 테이블은 `(post_id, user_id)` UNIQUE(로그인 유저만 좋아요)이며, 중복 좋아요 시 IntegrityError로 처리됩니다.  
 스키마는 위 SQL 파일로 관리하며, 마이그레이션 도구(Alembic)는 사용하지 않습니다. 스키마 변경이 잦아지거나 운영 DB 보존이 필요하면 Alembic 도입을 검토하면 됩니다.

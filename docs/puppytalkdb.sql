@@ -1,5 +1,5 @@
 -- puppytalk DB 스키마 (복붙 후 그대로 실행 가능, 재실행 시 기존 테이블 삭제 후 재생성)
--- 사용: mysql -u root -p < docs/puppyytalkdb.sql  또는 클라이언트에서 전체 선택 후 실행
+-- 사용: mysql -u root -p < docs/puppytalkdb.sql  또는 클라이언트에서 전체 선택 후 실행
 
 CREATE DATABASE IF NOT EXISTS puppytalk
   DEFAULT CHARACTER SET utf8mb4

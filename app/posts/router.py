@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.orm import Session
 from fastapi.responses import JSONResponse, Response
 
-from app.posts.schema import PostCreateRequest, PostUpdateRequest, PostListQuery
-from app.posts.dependencies import get_post_list_query
+from app.posts.schema import PostCreateRequest, PostUpdateRequest
 from app.posts import controller
 from app.core.database import get_db
 from app.core.dependencies import CurrentUser, get_current_user, require_post_author
@@ -18,8 +17,12 @@ def create_post(post_data: PostCreateRequest, user: CurrentUser = Depends(get_cu
 
 
 @router.get("", status_code=200, response_model=ApiResponse)
-def get_posts(query: PostListQuery = Depends(get_post_list_query), db: Session = Depends(get_db)):
-    return controller.get_posts(page=query.page, size=query.size, db=db)
+def get_posts(
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    size: int = Query(10, ge=1, le=100, description="페이지 크기"),
+    db: Session = Depends(get_db),
+):
+    return controller.get_posts(page=page, size=size, db=db)
 
 
 @router.post("/{post_id}/view", status_code=204)
