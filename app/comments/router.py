@@ -5,8 +5,8 @@ from fastapi.responses import Response
 from app.comments.schema import CommentUpsertRequest
 from app.comments import controller
 from app.core.database import get_db
+from app.common import ApiResponse
 from app.core.dependencies import CommentAuthorContext, CurrentUser, get_current_user, require_comment_author
-from app.core.response import ApiResponse
 
 router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
 

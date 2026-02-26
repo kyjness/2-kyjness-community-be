@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from app.core.codes import ApiCode
+from app.common import ApiCode
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +69,11 @@ def register_exception_handlers(app: FastAPI) -> None:
             content={"code": code_str, "data": None},
         )
 
-    # DB 예외: SQLAlchemy가 드라이버(pymysql) 예외를 래핑하므로 sqlalchemy.exc 사용
     @app.exception_handler(IntegrityError)
     async def integrity_error_handler(request: Request, exc: IntegrityError):
         orig = getattr(exc, "orig", None)
         errno = (orig.args[0] if orig and getattr(orig, "args", None) else 0) or 0
         err_msg = (orig.args[1] if orig and len(getattr(orig, "args", ())) > 1 else str(exc)) or ""
-        # 1062=Duplicate entry (UNIQUE 위반)
         if errno == 1062:
             msg_lower = err_msg.lower() if isinstance(err_msg, str) else ""
             if "email" in msg_lower or "key 'email'" in msg_lower:
@@ -83,7 +81,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             if "nickname" in msg_lower or "key 'nickname'" in msg_lower:
                 return JSONResponse(status_code=409, content={"code": ApiCode.NICKNAME_ALREADY_EXISTS.value, "data": None})
             return JSONResponse(status_code=409, content={"code": ApiCode.CONFLICT.value, "data": None})
-        if errno in (1451, 1452):  # FK 제약 위반
+        if errno in (1451, 1452):
             return JSONResponse(status_code=409, content={"code": ApiCode.CONSTRAINT_ERROR.value, "data": None})
         return JSONResponse(status_code=400, content={"code": ApiCode.INVALID_REQUEST.value, "data": None})
 

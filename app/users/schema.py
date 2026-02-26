@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.core.validators import ensure_password_format, ensure_nickname_format
+from app.common import ensure_nickname_format, ensure_password_format
 
 
 class UserAvailabilityQuery(BaseModel):

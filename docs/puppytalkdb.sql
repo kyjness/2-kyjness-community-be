@@ -69,15 +69,18 @@ CREATE TABLE comments (
 );
 
 -- 4. 이미지 업로드 통합. 프로필/게시글 업로드 시 모두 이 테이블에 저장. 게시글 연결은 post_images로.
+-- signup_token_hash/signup_expires_at: 회원가입 전 프로필 업로드용. attach 시 NULL로 초기화.
 CREATE TABLE images (
-    id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    file_key        VARCHAR(255) NOT NULL COMMENT '저장 경로(profile/xxx.jpg 또는 post/xxx.jpg)',
-    file_url        VARCHAR(999) NOT NULL COMMENT '공개 URL',
-    content_type    VARCHAR(255) NULL,
-    size            INT UNSIGNED NULL,
-    uploader_id     INT UNSIGNED NULL COMMENT '업로더(비회원 가입 전이면 NULL)',
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    deleted_at      TIMESTAMP NULL DEFAULT NULL,
+    id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    file_key            VARCHAR(255) NOT NULL COMMENT '저장 경로(profile/xxx.jpg 또는 post/xxx.jpg)',
+    file_url            VARCHAR(999) NOT NULL COMMENT '공개 URL',
+    content_type        VARCHAR(255) NULL,
+    size                INT UNSIGNED NULL,
+    uploader_id          INT UNSIGNED NULL COMMENT '업로더(비회원 가입 전이면 NULL)',
+    signup_token_hash   VARCHAR(64) NULL COMMENT '회원가입용 토큰 해시. attach 시 NULL',
+    signup_expires_at   TIMESTAMP NULL COMMENT '회원가입용 만료. attach 시 NULL',
+    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at          TIMESTAMP NULL DEFAULT NULL,
 
     CONSTRAINT fk_images_uploader FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -146,5 +149,6 @@ CREATE INDEX idx_posts_deleted_at_id ON posts(deleted_at, id DESC);
 CREATE INDEX idx_comments_post_id ON comments(post_id);
 CREATE INDEX idx_comments_author_id ON comments(author_id);
 CREATE INDEX idx_images_uploader_id ON images(uploader_id);
+CREATE INDEX idx_images_signup_expires_at ON images(signup_expires_at);
 CREATE INDEX idx_post_images_post_id ON post_images(post_id);
 CREATE INDEX idx_post_images_image_id ON post_images(image_id);

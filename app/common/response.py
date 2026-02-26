@@ -3,7 +3,7 @@ from typing import Any, Optional, Union
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict
 
-from app.core.codes import ApiCode
+from app.common.codes import ApiCode
 
 
 def _serialize_data(data: Any) -> Any:

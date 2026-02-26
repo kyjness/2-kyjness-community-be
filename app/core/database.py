@@ -21,7 +21,12 @@ DATABASE_URL = (
     "?charset=utf8mb4"
 )
 
-engine: Engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=3600)
+engine: Engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    connect_args={"connect_timeout": settings.DB_PING_TIMEOUT},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -55,7 +60,6 @@ def init_database() -> bool:
 
 
 def check_database() -> bool:
-    """DB 연결 가능 여부만 확인 (health check / 로드밸런서용)."""
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1")).fetchone()

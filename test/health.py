@@ -9,7 +9,6 @@ def test_root(client):
 
 def test_health(client):
     res = client.get("/health")
-    # DB 연결 시 200 + database: connected, 미연결 시 503 (로드밸런서 검사용)
     data = res.json()
     assert res.status_code in (200, 503)
     assert "status" in data["data"]

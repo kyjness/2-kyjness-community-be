@@ -5,8 +5,8 @@ from fastapi.responses import Response
 from app.users.schema import UpdateUserRequest, UpdatePasswordRequest, UserAvailabilityQuery
 from app.users import controller
 from app.core.database import get_db
+from app.common import ApiResponse
 from app.core.dependencies import CurrentUser, get_current_user, parse_availability_query
-from app.core.response import ApiResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
 

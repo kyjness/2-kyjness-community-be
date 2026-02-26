@@ -4,10 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.auth.model import AuthModel
 from app.auth.schema import SignUpRequest, LoginRequest, LoginResponse, SessionUserResponse
+from app.common import ApiCode
 from app.core.dependencies import CurrentUser
-from app.core.codes import ApiCode
 from app.core.security import hash_password, verify_password
-from app.core.response import success_response, raise_http_error
+from app.common import raise_http_error, success_response
 from app.media.model import MediaModel
 from app.users.model import UsersModel
 
@@ -17,11 +17,16 @@ def signup_user(data: SignUpRequest, db: Session) -> dict:
         raise_http_error(409, ApiCode.EMAIL_ALREADY_EXISTS)
     if UsersModel.nickname_exists(data.nickname, db=db):
         raise_http_error(409, ApiCode.NICKNAME_ALREADY_EXISTS)
-    profile_image_url = None
-    if data.profile_image_id:
-        profile_image_url = MediaModel.get_url_by_id(data.profile_image_id, db=db)
     hashed = hash_password(data.password)
-    UsersModel.create_user(data.email, hashed, data.nickname, profile_image_url, db=db)
+    created = UsersModel.create_user(data.email, hashed, data.nickname, None, db=db)
+    if data.profile_image_id is not None and data.signup_token:
+        file_url, err = MediaModel.attach_signup_image_to_user(
+            data.signup_token, data.profile_image_id, created["id"], db=db
+        )
+        if err:
+            raise_http_error(400, ApiCode[err])
+        if file_url:
+            UsersModel.update_profile_image_url(created["id"], file_url, db=db)
     return success_response(ApiCode.SIGNUP_SUCCESS)
 
 

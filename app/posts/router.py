@@ -5,8 +5,8 @@ from fastapi.responses import JSONResponse, Response
 from app.posts.schema import PostCreateRequest, PostUpdateRequest
 from app.posts import controller
 from app.core.database import get_db
+from app.common import ApiResponse
 from app.core.dependencies import CurrentUser, get_current_user, require_post_author
-from app.core.response import ApiResponse
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 

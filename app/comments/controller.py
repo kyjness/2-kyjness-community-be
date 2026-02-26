@@ -5,9 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.comments.model import CommentsModel
 from app.comments.schema import CommentResponse, CommentUpsertRequest
+from app.common import ApiCode, raise_http_error, success_response
 from app.core.dependencies import CurrentUser
-from app.core.codes import ApiCode
-from app.core.response import raise_http_error, success_response
 from app.posts.model import PostsModel
 
 logger = logging.getLogger(__name__)

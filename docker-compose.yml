@@ -13,7 +13,8 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
       MYSQL_DATABASE: ${DB_NAME:-puppytalk}
-    # 로컬에서는 DB 포트 노출 생략 (윈도우 등에 이미 MySQL이 있으면 3306 충돌 방지)
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./2-kyjness-community-be/docs/puppytalkdb.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro

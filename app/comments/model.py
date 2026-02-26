@@ -82,6 +82,8 @@ class CommentsModel:
     @classmethod
     def withdraw_comment(cls, post_id: int, comment_id: int, db: Session) -> bool:
         r = db.execute(
-            update(Comment).where(Comment.id == comment_id, Comment.post_id == post_id).values(deleted_at=datetime.now())
+            update(Comment)
+            .where(Comment.id == comment_id, Comment.post_id == post_id, Comment.deleted_at.is_(None))
+            .values(deleted_at=datetime.now())
         )
         return r.rowcount > 0

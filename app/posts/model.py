@@ -182,10 +182,12 @@ class PostLikesModel:
     def add_like(cls, post_id: int, user_id: int, *, db: Session) -> Optional[dict]:
         try:
             now = datetime.now()
-            db.add(Like(post_id=post_id, user_id=user_id, created_at=now))
+            like = Like(post_id=post_id, user_id=user_id, created_at=now)
+            db.add(like)
             db.flush()
             return {"post_id": post_id, "user_id": user_id}
         except IntegrityError:
+            db.expunge(like)
             return None
         except Exception as e:
             logger.exception("likes INSERT 실패: %s", e)

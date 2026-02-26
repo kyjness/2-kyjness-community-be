@@ -6,10 +6,20 @@ from fastapi.responses import Response
 
 from app.media import controller
 from app.core.database import get_db
+from app.common import ApiResponse
 from app.core.dependencies import CurrentUser, get_current_user
-from app.core.response import ApiResponse
+from app.core.middleware import check_signup_upload_rate_limit
 
 router = APIRouter(prefix="/media", tags=["media"])
+
+
+@router.post("/images/signup", status_code=201, response_model=ApiResponse)
+async def upload_image_signup(
+    image: UploadFile = File(..., description="회원가입용 프로필 이미지"),
+    _: None = Depends(check_signup_upload_rate_limit),
+    db: Session = Depends(get_db),
+):
+    return await controller.upload_image_for_signup(file=image, db=db)
 
 
 @router.post("/images", status_code=201, response_model=ApiResponse)

@@ -1,8 +1,5 @@
 import logging
 import threading
-import time
-import uuid
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from contextlib import asynccontextmanager
@@ -10,112 +7,40 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.requests import Request
 
+from app.core.cleanup import run_once as cleanup_once, run_loop as cleanup_loop
 from app.core.config import settings
 from app.api.v1 import v1_router
-from app.core.codes import ApiCode
+from app.common import ApiCode, ApiResponse, setup_logging
 from app.core.exception_handlers import register_exception_handlers
-from app.core.rate_limit import get_client_ip, rate_limit_middleware
-from app.core.response import ApiResponse
-
-_LOG_FMT = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-_LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
-
-
-def _setup_logging() -> None:
-    level = getattr(logging, settings.LOG_LEVEL, logging.INFO)
-    root = logging.getLogger()
-    root.setLevel(level)
-    root.handlers.clear()
-    console = logging.StreamHandler()
-    console.setFormatter(logging.Formatter(_LOG_FMT, datefmt=_LOG_DATEFMT))
-    root.addHandler(console)
-    if settings.LOG_FILE_PATH:
-        log_path = Path(settings.LOG_FILE_PATH)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = RotatingFileHandler(
-            log_path,
-            maxBytes=5 * 1024 * 1024,
-            backupCount=5,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(logging.Formatter(_LOG_FMT, datefmt=_LOG_DATEFMT))
-        logging.getLogger().addHandler(file_handler)
-
-
-_setup_logging()
-_access_logger = logging.getLogger("app.access")
-
-
-async def request_id_middleware(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    request.state.request_id = request_id
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request_id
-    return response
-
-
-async def access_log_middleware(request: Request, call_next):
-    start = time.perf_counter()
-    response = await call_next(request)
-    duration_ms = (time.perf_counter() - start) * 1000
-    request_id = getattr(request.state, "request_id", "")
-    if settings.DEBUG:
-        response.headers["X-Process-Time"] = f"{duration_ms:.2f}"
-    if response.status_code >= 400:
-        _access_logger.info(
-            "request_id=%s %s %s %s %.2fms %s",
-            request_id,
-            request.method,
-            request.url.path,
-            response.status_code,
-            duration_ms,
-            get_client_ip(request),
-        )
-    return response
-
-
-async def add_security_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    return response
-
-
-def _run_session_cleanup():
-    try:
-        from app.auth.model import AuthModel
-        AuthModel.cleanup_expired_sessions()
-    except Exception as e:
-        logging.getLogger(__name__).warning("Session cleanup failed: %s", e)
-
-
-def _session_cleanup_loop(shutdown_event: threading.Event) -> None:
-    interval = max(60, settings.SESSION_CLEANUP_INTERVAL)
-    while not shutdown_event.is_set():
-        _run_session_cleanup()
-        if shutdown_event.wait(timeout=interval):
-            break
-    _run_session_cleanup()
+from app.core.middleware import (
+    access_log_middleware,
+    rate_limit_middleware,
+    request_id_middleware,
+    security_headers_middleware,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.core.database import init_database, close_database
+    setup_logging()
+    log = logging.getLogger(__name__)
     if not init_database():
-        logging.getLogger(__name__).critical("DB 연결 실패로 시작 시 검증 실패. 요청 시점에 재시도됨.")
+        log.critical("DB 연결 실패로 시작 시 검증 실패. 요청 시점에 재시도됨.")
+    else:
+        log.info("MySQL 연결 성공.")
 
-    _run_session_cleanup()
-    shutdown_event = threading.Event()
+    cleanup_once()
+    stop_event = threading.Event()
     cleanup_thread = None
     if settings.SESSION_CLEANUP_INTERVAL > 0:
-        cleanup_thread = threading.Thread(target=_session_cleanup_loop, args=(shutdown_event,), daemon=False)
+        cleanup_thread = threading.Thread(target=cleanup_loop, args=(stop_event,), daemon=False)
         cleanup_thread.start()
 
     yield
 
-    shutdown_event.set()
+    stop_event.set()
     if cleanup_thread is not None:
         cleanup_thread.join(timeout=10)
     close_database()
@@ -128,10 +53,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.middleware("http")(request_id_middleware)
+app.middleware("http")(security_headers_middleware)
 app.middleware("http")(rate_limit_middleware)
 app.middleware("http")(access_log_middleware)
-app.middleware("http")(add_security_headers)
+app.middleware("http")(request_id_middleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -176,4 +101,3 @@ def health():
         status_code=503,
         content={"code": ApiCode.DB_ERROR.value, "data": {"status": "degraded", "database": "disconnected"}},
     )
-
