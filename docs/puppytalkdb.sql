@@ -1,5 +1,4 @@
--- puppytalk DB 스키마 (복붙 후 그대로 실행 가능, 재실행 시 기존 테이블 삭제 후 재생성)
--- 사용: mysql -u root -p < docs/puppytalkdb.sql  또는 클라이언트에서 전체 선택 후 실행
+-- puppytalk DB 스키마. 수동: mysql -u root -p puppytalk < docs/puppytalkdb.sql
 
 CREATE DATABASE IF NOT EXISTS puppytalk
   DEFAULT CHARACTER SET utf8mb4
@@ -7,7 +6,6 @@ CREATE DATABASE IF NOT EXISTS puppytalk
 
 USE puppytalk;
 
--- 기존 테이블 제거 (FK 때문에 순서 무관하도록 체크 비활성화)
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS likes;
@@ -20,19 +18,19 @@ DROP TABLE IF EXISTS users;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 1. users
+-- users
 CREATE TABLE users (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     email               VARCHAR(255) NOT NULL UNIQUE,
     password            VARCHAR(999) NOT NULL,
     nickname            VARCHAR(255) NOT NULL UNIQUE,
-    profile_image_url   VARCHAR(999) NULL,
+    profile_image_id    INT UNSIGNED NULL,
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at          TIMESTAMP NULL DEFAULT NULL
 );
 
--- 2. posts
+-- posts
 CREATE TABLE posts (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id         INT UNSIGNED NOT NULL,
@@ -50,7 +48,7 @@ CREATE TABLE posts (
       ON DELETE CASCADE
 );
 
--- 3. comments
+-- comments
 CREATE TABLE comments (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     post_id     INT UNSIGNED NOT NULL,
@@ -68,8 +66,7 @@ CREATE TABLE comments (
       ON DELETE CASCADE
 );
 
--- 4. 이미지 업로드 통합. 프로필/게시글 업로드 시 모두 이 테이블에 저장. 게시글 연결은 post_images로.
--- signup_token_hash/signup_expires_at: 회원가입 전 프로필 업로드용. attach 시 NULL로 초기화.
+-- images (프로필/게시글 업로드, post_images로 게시글 연결)
 CREATE TABLE images (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     file_key            VARCHAR(255) NOT NULL COMMENT '저장 경로(profile/xxx.jpg 또는 post/xxx.jpg)',
@@ -85,7 +82,12 @@ CREATE TABLE images (
     CONSTRAINT fk_images_uploader FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
--- 5. post_images (게시글-이미지 연결 테이블)
+-- users.profile_image_id FK (순환참조로 images 생성 후 추가)
+ALTER TABLE users
+  ADD CONSTRAINT fk_users_profile_image
+  FOREIGN KEY (profile_image_id) REFERENCES images(id) ON DELETE SET NULL;
+
+-- post_images (게시글당 최대 5장)
 CREATE TABLE post_images (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     post_id     INT UNSIGNED NOT NULL,
@@ -100,7 +102,6 @@ CREATE TABLE post_images (
       ON DELETE CASCADE
 );
 
--- post_images: 게시글당 최대 5개 제한 (API 검증 + DB 방어)
 DROP TRIGGER IF EXISTS tr_post_images_max_five;
 DELIMITER //
 CREATE TRIGGER tr_post_images_max_five
@@ -114,7 +115,7 @@ BEGIN
 END//
 DELIMITER ;
 
--- 6. likes (로그인 유저만 좋아요, UNIQUE(post_id, user_id))
+-- likes
 CREATE TABLE likes (
     post_id     INT UNSIGNED NOT NULL,
     user_id     INT UNSIGNED NOT NULL,
@@ -129,7 +130,7 @@ CREATE TABLE likes (
       ON DELETE CASCADE
 );
 
--- 7. sessions (로그인 세션)
+-- sessions
 CREATE TABLE sessions (
     session_id  VARCHAR(255) NOT NULL PRIMARY KEY,
     user_id     INT UNSIGNED NOT NULL,
@@ -140,10 +141,7 @@ CREATE TABLE sessions (
       FOREIGN KEY (user_id) REFERENCES users(id)
       ON DELETE CASCADE
 );
--- 확장 시: revoked_at TIMESTAMP NULL 추가 후 로그아웃 시 soft revoke (DELETE 대신 UPDATE).
---         만료(expires_at) 또는 철회(revoked_at)된 세션 주기적 삭제(cleanup)는 앱에서 이미 실행 중.
 
--- 인덱스 (조회/조인 성능)
 CREATE INDEX idx_posts_user_id ON posts(user_id);
 CREATE INDEX idx_posts_deleted_at_id ON posts(deleted_at, id DESC);
 CREATE INDEX idx_comments_post_id ON comments(post_id);

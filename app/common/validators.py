@@ -1,3 +1,4 @@
+# 닉네임·비밀번호 형식 검증 (ensure_nickname_format, ensure_password_format).
 import re
 from typing import Optional
 
@@ -6,7 +7,6 @@ NICKNAME_PATTERN = re.compile(r"^[가-힣a-zA-Z0-9]{1,10}$")
 
 
 def normalize_image_content_type(ct: Optional[str]) -> str:
-    """이미지 업로드 시 브라우저/환경별 content_type 통일. 빈 값·jpeg 별칭 허용."""
     if not (ct or "").strip():
         return "image/jpeg"
     ct = (ct or "").strip().lower()

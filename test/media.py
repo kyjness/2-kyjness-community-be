@@ -7,7 +7,7 @@ def test_upload_requires_auth(client):
     res = client.post(
         "/v1/media/images",
         files={"image": ("x.jpg", MINIMAL_JPEG, "image/jpeg")},
-        params={"type": "post"},
+        params={"purpose": "post"},
     )
     assert res.status_code == 401
 
@@ -16,7 +16,7 @@ def test_upload_success(client, auth_cookies):
     res = client.post(
         "/v1/media/images",
         files={"image": ("test.jpg", MINIMAL_JPEG, "image/jpeg")},
-        params={"type": "post"},
+        params={"purpose": "post"},
         cookies=auth_cookies,
     )
     assert res.status_code == 201
@@ -31,7 +31,7 @@ def test_upload_profile_type(client, auth_cookies):
     res = client.post(
         "/v1/media/images",
         files={"image": ("p.jpg", MINIMAL_JPEG, "image/jpeg")},
-        params={"type": "profile"},
+        params={"purpose": "profile"},
         cookies=auth_cookies,
     )
     assert res.status_code == 201
@@ -53,7 +53,7 @@ def test_delete_success(client, auth_cookies):
     upload = client.post(
         "/v1/media/images",
         files={"image": ("del.jpg", MINIMAL_JPEG, "image/jpeg")},
-        params={"type": "post"},
+        params={"purpose": "post"},
         cookies=auth_cookies,
     )
     assert upload.status_code == 201

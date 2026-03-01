@@ -1,5 +1,9 @@
-# API 응답 code · HTTP status 매핑 (내부용)
+# API 응답 code · HTTP status 매핑
 
+API 응답 body의 `code` 값과 HTTP 상태 코드 매핑을 정리한 문서입니다.  
+프론트엔드·백엔드 협의용이며, Swagger/ReDoc 에서도 동일한 코드가 사용됩니다.
+
+---
 
 ## 공통
 

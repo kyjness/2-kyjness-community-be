@@ -1,3 +1,4 @@
+# IP당 요청 수 제한. 전역 rate limit, 로그인 API 별도 제한.
 import asyncio
 import time
 from collections import deque

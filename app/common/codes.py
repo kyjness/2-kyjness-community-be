@@ -1,3 +1,4 @@
+# API 응답 code 상수 (ApiCode enum). HTTP 상태·메시지 매핑은 docs/api-codes.md 참고.
 from enum import Enum
 
 

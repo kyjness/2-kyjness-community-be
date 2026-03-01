@@ -1,3 +1,4 @@
+# 공통 API 응답 포맷 (ApiResponse), success_response, raise_http_error.
 from typing import Any, Optional, Union
 
 from fastapi import HTTPException
@@ -21,7 +22,11 @@ def success_response(code: Union[str, ApiCode], data=None) -> dict:
     return {"code": code_str, "data": _serialize_data(data) if data is not None else data}
 
 
-def raise_http_error(status_code: int, error_code: Union[str, ApiCode], message: Optional[str] = None) -> None:
+def raise_http_error(
+    status_code: int,
+    error_code: Union[str, ApiCode],
+    message: Optional[str] = None,
+) -> None:
     code_str = error_code.value if isinstance(error_code, ApiCode) else error_code
     detail: dict = {"code": code_str, "data": None}
     if message is not None:

@@ -1,3 +1,4 @@
+# /v1 prefix 라우터. auth, users, media, posts, comments 라우터를 include.
 from fastapi import APIRouter
 
 from app.auth.router import router as auth_router

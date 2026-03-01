@@ -1,3 +1,4 @@
+# 보안 헤더. X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy.
 from starlette.requests import Request
 
 from app.core.config import settings

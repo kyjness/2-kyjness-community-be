@@ -1,10 +1,10 @@
+# 비밀번호 해시·검증(bcrypt), 세션 ID 생성.
 import hashlib
 
 import bcrypt
 
 
 def hash_token(token: str) -> str:
-    """토큰 원문을 DB 저장용 해시로 변환 (예: signup 이미지 소유권 검증)."""
     return hashlib.sha256(token.encode()).hexdigest()
 
 

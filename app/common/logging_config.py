@@ -1,3 +1,4 @@
+# 로깅 설정. setup_logging으로 레벨·파일·포맷 설정.
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path

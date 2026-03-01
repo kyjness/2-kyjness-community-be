@@ -1,3 +1,4 @@
+# 4xx/5xx 접근 로그. request_id, Method, Path, Status, 소요 시간.
 import logging
 import time
 

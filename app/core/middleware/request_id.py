@@ -1,3 +1,4 @@
+# X-Request-ID 생성·전달. 응답 헤더·로그 추적용.
 import uuid
 
 from starlette.requests import Request

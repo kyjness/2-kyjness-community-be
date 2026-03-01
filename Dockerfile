@@ -22,7 +22,6 @@ COPY pyproject.toml poetry.lock* ./
 RUN poetry install --no-root --no-dev --no-interaction
 
 COPY app/ ./app/
-COPY main.py ./
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime (최소 패키지, 비루트 사용자)
@@ -37,7 +36,6 @@ RUN groupadd -r appgroup && useradd -r -g appgroup -u 1000 appuser
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /app/app ./app
-COPY --from=builder /app/main.py ./
 
 RUN mkdir -p /app/upload && chown -R appuser:appgroup /app
 
@@ -46,4 +44,4 @@ EXPOSE 8000
 
 USER appuser
 
-CMD ["gunicorn", "main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000"]
+CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000"]

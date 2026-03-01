@@ -169,17 +169,17 @@ def test_add_like_already_liked(client, auth_cookies):
     assert res.json()["code"] == "ALREADY_LIKED"
 
 
-def test_remove_like_requires_auth(client):
+def test_delete_like_requires_auth(client):
     res = client.delete("/v1/posts/1/likes")
     assert res.status_code == 401
 
 
-def test_remove_like_not_found(client, auth_cookies):
+def test_delete_like_not_found(client, auth_cookies):
     res = client.delete("/v1/posts/99999/likes", cookies=auth_cookies)
     assert res.status_code == 404
 
 
-def test_remove_like_success(client, auth_cookies):
+def test_delete_like_success(client, auth_cookies):
     create = client.post(
         "/v1/posts",
         json={"title": "Unlike post", "content": "x"},
@@ -191,7 +191,7 @@ def test_remove_like_success(client, auth_cookies):
     assert res.status_code == 204
 
 
-def test_remove_like_when_not_liked(client, auth_cookies):
+def test_delete_like_when_not_liked(client, auth_cookies):
     """이미 좋아요 없을 때 DELETE → 멱등하게 204"""
     create = client.post(
         "/v1/posts",

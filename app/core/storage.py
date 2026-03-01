@@ -1,3 +1,4 @@
+# 로컬/S3 파일 업로드. STORAGE_BACKEND에 따라 저장소 분기.
 from pathlib import Path
 
 from app.core.config import settings

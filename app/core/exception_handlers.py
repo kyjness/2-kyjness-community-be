@@ -1,3 +1,4 @@
+# 전역 예외 핸들러. RequestValidationError, HTTPException, DB 예외 → { code, data } 통일.
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
@@ -6,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from app.common import ApiCode
-from app.core.database import get_connection
+from app.db import get_connection
 from app.posts.model import PostsModel
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,12 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def integrity_error_handler(request: Request, exc: IntegrityError):
+        logger.error(
+            "DB IntegrityError: Path=%s, Exception=%s: %s",
+            request.url.path,
+            type(exc).__name__,
+            str(exc),
+        )
         orig = getattr(exc, "orig", None)
         errno = (orig.args[0] if orig and getattr(orig, "args", None) else 0) or 0
         err_msg = (orig.args[1] if orig and len(getattr(orig, "args", ())) > 1 else str(exc)) or ""
@@ -101,9 +108,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(OperationalError)
     async def operational_error_handler(request: Request, exc: OperationalError):
         logger.error(
-            "DB OperationalError: Path=%s, Exception=%s",
+            "DB OperationalError: Path=%s, Exception=%s: %s",
             request.url.path,
             type(exc).__name__,
+            str(exc),
         )
         return JSONResponse(status_code=500, content={"code": ApiCode.DB_ERROR.value, "data": None})
 

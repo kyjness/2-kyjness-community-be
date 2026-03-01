@@ -121,14 +121,14 @@ def test_update_password_success(client):
     assert login_new.status_code == 200
 
 
-def test_withdraw_me_unauthorized(client):
+def test_delete_me_unauthorized(client):
     res = client.delete("/v1/users/me")
     assert res.status_code == 401
 
 
-def test_withdraw_me_success(client):
+def test_delete_me_success(client):
     from test.conftest import _login
-    cookies = _login(client, "withdraw_user@example.com", "password12")
+    cookies = _login(client, "delete_user@example.com", "password12")
     res = client.delete("/v1/users/me", cookies=cookies)
     assert res.status_code == 204
     me_res = client.get("/v1/users/me", cookies=cookies)

@@ -1,3 +1,4 @@
+# 환경 변수 설정 (Settings). ENV에 따라 .env.development / .env.production 로드.
 import os
 from pathlib import Path
 from typing import List
@@ -8,8 +9,7 @@ _root = Path(__file__).resolve().parent.parent.parent
 _env_file = _root / f".env.{_env}"
 if _env_file.exists():
     load_dotenv(_env_file)
-else:
-    load_dotenv(_root / ".env")
+# 단일 .env 미사용. .env.development / .env.production 만 사용.
 
 
 class Settings:
@@ -37,7 +37,7 @@ class Settings:
     RATE_LIMIT_MAX_REQUESTS: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "100"))
     LOGIN_RATE_LIMIT_WINDOW: int = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW", "60"))
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int = int(os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "5"))
-    # 회원가입용 이미지 (토큰 TTL 초, IP당 업로드 rate limit)
+    # 회원가입용 이미지 (토큰 TTL 초, IP당 업로드 rate limit; MAX=1이면 두 번째 signup 시 업로드만 429되고 /auth/signup 요청 안 나감)
     SIGNUP_IMAGE_TOKEN_TTL_SECONDS: int = int(os.getenv("SIGNUP_IMAGE_TOKEN_TTL_SECONDS", "3600"))
     SIGNUP_UPLOAD_RATE_LIMIT_WINDOW: int = int(os.getenv("SIGNUP_UPLOAD_RATE_LIMIT_WINDOW", "3600"))
     SIGNUP_UPLOAD_RATE_LIMIT_MAX: int = int(os.getenv("SIGNUP_UPLOAD_RATE_LIMIT_MAX", "10"))

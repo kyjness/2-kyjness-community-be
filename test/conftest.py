@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("ENV", "development")
 
-from main import app
+from app.main import app
 
 
 @pytest.fixture(scope="module")

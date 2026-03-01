@@ -1,9 +1,4 @@
-# PuppyTalk / kyjness-community - EC2 운영용 Docker Compose
-# - 도메인 없이 EC2 퍼블릭 IP로 접속, 외부 노출 포트 80만 사용
-# - nginx: 80 → / 는 frontend, /v1·/docs·/redoc·/openapi.json 은 backend
-# 사용: .env 에 MYSQL_ROOT_PASSWORD, DB_PASSWORD 등 설정 후
-#       docker compose -f docker-compose.ec2.yml up -d
-# 빌드: docker compose -f docker-compose.ec2.yml up --build -d
+# EC2 운영용. 사용: .env.production 설정 후 docker compose -f docker-compose.ec2.yml up -d
 
 name: puppytalk
 
@@ -49,14 +44,13 @@ services:
     container_name: puppytalk-backend
     restart: unless-stopped
     env_file:
-      - ./2-kyjness-community-be/.env
+      - ./2-kyjness-community-be/.env.production
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-puppytalk}
-      # BE_API_URL: nginx reverse proxy 사용 시 불필요 (필요 시 .env에서만 설정)
       CORS_ORIGINS: ${CORS_ORIGINS:-}
     volumes:
       - backend_upload:/app/upload
