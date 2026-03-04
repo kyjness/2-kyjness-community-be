@@ -145,7 +145,7 @@ class MediaModel:
     def decrement_ref_count(cls, image_id: int, db: Session) -> bool:
         image = db.execute(
             select(Image).where(Image.id == image_id).with_for_update()
-        ).scalar_one_or_none()
+        ).scalars().one_or_none()
         if not image:
             return False
         image.ref_count = max(0, image.ref_count - 1)
@@ -156,6 +156,21 @@ class MediaModel:
             except Exception as e:
                 logger.warning("Image file delete failed image_id=%s file_key=%s: %s", image_id, image.file_key, e)
             db.delete(image)
+        return True
+
+    @classmethod
+    def delete_image_by_owner(cls, image_id: int, uploader_id: int, db: Session) -> bool:
+        image = cls.get_image_by_id(image_id, db)
+        if not image or image.uploader_id != uploader_id:
+            return False
+        if image.ref_count > 0:
+            raise ValueError("IMAGE_IN_USE")
+        try:
+            storage_delete(image.file_key)
+        except Exception as e:
+            logger.warning("Image file delete failed image_id=%s file_key=%s: %s", image_id, image.file_key, e)
+        db.delete(image)
+        db.flush()
         return True
 
     @classmethod

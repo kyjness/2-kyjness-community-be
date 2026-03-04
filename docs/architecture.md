@@ -1,226 +1,206 @@
-# 아키텍처
+# 아키텍처 (Architecture)
 
-이 문서는 PuppyTalk 백엔드의 **도메인 레이어 역할**, **폴더 구조**, **요청·인증 흐름**을 정리합니다.
-
----
-
-## 도메인 레이어 역할
-
-`app/domain` 아래 각 기능 폴더(auth, users, posts, comments, media)는 같은 패턴을 따릅니다.  
-요청이 들어오면 **router → controller → model** 순으로 처리되고, 요청·응답은 **schema(Pydantic)** 로 검증·직렬화합니다.
-
-| 파일 | 역할 |
-|------|------|
-| **router** | HTTP 엔드포인트 정의. `Depends(get_db, get_current_user)` 등으로 DB 세션·로그인 유저 주입. controller 호출 후 schema로 응답 매핑. |
-| **controller** | 비즈니스 로직(유효성 검사·권한 확인·트랜잭션 흐름). DB 접근은 model에 위임. |
-| **model** | DB 접근(CRUD·쿼리). `Depends(get_db)` 로 받은 Session만 사용. commit/rollback은 세션을 제공하는 `get_db` 스코프에서 처리. |
-| **schema** | 요청/응답 DTO. Pydantic v2로 검증·alias. 400 에러 시 공통 형식으로 반환. |
-
-- **의존성 방향**: router는 controller를 호출하고, controller는 model을 호출. model은 `app.db`의 Session만 사용. 도메인끼리는 직접 import하지 않고, 공통·인프라(common, core, db)만 공유.
+이 문서는 **새로 합류한 개발자**가 PuppyTalk 백엔드의 **내부 동작 원리**를 깊이 이해할 수 있도록, 설계 의도(Why)와 실제 코드 흐름(How)을 단계별로 정리한 딥다이브 가이드입니다.  
+기능 나열이 아니라 **요청이 어떻게 검증·제한·라우팅되는지**, **DB·인증·정합성·성능이 어떤 이유로 설계되었는지**를 중심으로 서술합니다.
 
 ---
 
-## 폴더 구조
+## 1. 요청 흐름 (Request Lifecycle)
 
-`app` 하위는 **공통/인프라**(api, common, core, db)와 **도메인**(domain)으로 구분됩니다.  
-(마이그레이션 스크립트는 프로젝트 루트 `alembic/`에 두는 것이 관례입니다.)
+모든 HTTP 요청은 **미들웨어 파이프라인**을 거친 뒤 라우터·컨트롤러·모델로 전달됩니다. Starlette는 **나중에 등록한 미들웨어가 요청 시 먼저** 실행되므로, 아래 순서는 “요청이 들어올 때” 통과하는 순서입니다.
 
-```
-2-kyjness-community-be/
-├── app/
-│   ├── api/
-│   │   └── v1.py            # /v1 경로에 라우터 묶어서 등록
-│   ├── common/
-│   │   ├── codes.py         # API 응답 코드 상수
-│   │   ├── response.py      # 공통 응답 포맷·에러 처리
-│   │   ├── validators.py    # 닉네임·비밀번호 형식 검증
-│   │   └── logging_config.py # 로깅 설정
-│   ├── core/
-│   │   ├── config.py        # 환경 변수 설정 (ENV에 따라 .env.development / .env.production)
-│   │   ├── cleanup.py       # 만료 세션·회원가입용 이미지 TTL 정리
-│   │   ├── exception_handlers.py  # 전역 예외 → { code, data } 통일
-│   │   ├── security.py      # 비밀번호 해시·세션 ID 생성
-│   │   ├── storage.py       # 로컬/S3 파일 업로드
-│   │   ├── dependencies/
-│   │   │   ├── availability.py    # 쿼리 파싱 (가용성 등)
-│   │   │   ├── comment_author.py  # 댓글 작성자 검증
-│   │   │   ├── current_user.py   # 쿠키 세션 → CurrentUser
-│   │   │   └── post_author.py    # 게시글 작성자 검증
-│   │   └── middleware/
-│   │       ├── access_log.py     # 4xx/5xx 접근 로그
-│   │       ├── rate_limit.py     # IP당 요청 제한
-│   │       ├── request_id.py     # X-Request-ID 생성·전달
-│   │       └── security_headers.py # 보안 헤더
-│   ├── db/
-│   │   ├── base.py          # SQLAlchemy DeclarativeBase
-│   │   ├── connection.py    # init_database, check_database, close_database
-│   │   ├── engine.py        # DB 엔진·SessionLocal
-│   │   └── session.py       # get_db, get_connection
-│   └── domain/
-│       ├── auth/            # 로그인·로그아웃·회원가입
-│       │   ├── controller.py     # 인증 비즈니스 로직 (회원가입·로그인·로그아웃)
-│       │   ├── model.py          # 세션 CRUD, AuthSession 모델
-│       │   ├── router.py         # 인증 엔드포인트 (login, logout, signup, /me)
-│       │   └── schema.py         # 인증 요청/응답 DTO
-│       ├── users/            # 프로필 조회·수정
-│       │   ├── controller.py     # 사용자 비즈니스 로직 (프로필·비밀번호)
-│       │   ├── model.py          # 사용자 CRUD, User 모델
-│       │   ├── router.py         # 사용자 엔드포인트 (/users/me)
-│       │   └── schema.py         # 사용자 요청/응답 DTO
-│       ├── media/            # 이미지 업로드
-│       │   ├── controller.py     # 이미지 업로드 비즈니스 로직
-│       │   ├── image_policy.py   # 회원가입용/일반 업로드 정책·signup token 검증
-│       │   ├── model.py          # 이미지 CRUD, Image 모델
-│       │   └── router.py         # 이미지 업로드 (POST /media/images, ?purpose=profile|post / POST /media/images/signup)
-│       ├── posts/            # 게시글 CRUD·피드·좋아요
-│       │   ├── controller.py     # 게시글 비즈니스 로직 (생성·수정·삭제·피드·좋아요·조회수)
-│       │   ├── mapper.py          # 모델 → PostResponse 변환
-│       │   ├── model.py          # 게시글·좋아요·post_images CRUD
-│       │   ├── router.py         # 게시글 엔드포인트 (CRUD, 피드, 상세, 댓글 목록)
-│       │   └── schema.py         # 게시글 요청/응답 DTO
-│       └── comments/         # 댓글 CRUD
-│           ├── controller.py     # 댓글 비즈니스 로직 (생성·수정·삭제·목록)
-│           ├── model.py          # 댓글 CRUD, Comment 모델
-│           ├── router.py         # 댓글 엔드포인트 (CRUD, 목록 페이지네이션)
-│           └── schema.py         # 댓글 요청/응답 DTO
-│   └── main.py               # 앱 진입점·미들웨어·라우터 등록
-├── alembic/                 # DB 스키마 마이그레이션
-│   ├── env.py               # 마이그레이션 환경 (DB URL·모델 로드)
-│   ├── README               # Alembic 사용법 요약
-│   ├── script.py.mako       # 리비전 스크립트 템플릿
-│   └── versions/            # 마이그레이션 리비전 파일
-├── docs/                    # 상세 문서·참고용 SQL
-│   ├── api-codes.md         # API 응답 code · HTTP 상태 매핑
-│   ├── architecture.md     # 이 문서 (아키텍처·폴더 구조·요청·인증 흐름)
-│   ├── clear_db.sql         # 데이터만 비우기
-│   └── puppytalkdb.sql      # 참고용 DDL
-├── test/                    # pytest
-│   ├── auth.py              # 인증 API 테스트
-│   ├── comments.py          # 댓글 API 테스트
-│   ├── conftest.py          # pytest 픽스처·공통 설정
-│   ├── health.py            # /health 엔드포인트 테스트
-│   ├── media.py             # 미디어(이미지 업로드) API 테스트
-│   ├── posts.py             # 게시글 API 테스트
-│   └── users.py             # 사용자 API 테스트
-├── alembic.ini              # Alembic 설정
-├── pyproject.toml           # Poetry 의존성·스크립트
-├── poetry.lock              # 의존성 잠금
-├── Dockerfile               # 프로덕션 이미지 빌드
-├── docker-compose.yml       # 로컬·배포용 Compose
-├── docker-compose.ec2.yml   # EC2 배포용 Compose
-└── .env.example             # 환경 변수 예시
+### 1.1 파이프라인 순서
+
+| 순서 | 단계 | 의도(Why) |
+|------|------|-----------|
+| 1 | **Proxy Headers** | Nginx/ALB 뒤에서 실제 클라이언트 IP를 쓰기 위해 `X-Forwarded-For`를 사용할 수 있으나, **직접 파싱하면 IP 스푸핑**에 취약하다. 이 미들웨어는 **신뢰할 수 있는 프록시 IP**(`TRUSTED_PROXY_IPS`)에서 온 요청일 때만 첫 번째 값을 `request.scope["client"]`에 반영한다. Rate Limit·접근 로그는 **이후 항상 `request.client.host`만** 사용해, 한 번 검증된 IP만 신뢰한다. |
+| 2 | **Request ID** | `X-Request-ID` 생성 후 `request.state`·contextvars에 설정. 이후 모든 로그에 `[%(request_id)s]`가 자동 포함되어 **요청 단위 추적**이 가능해진다. |
+| 3 | **Access Log** | 요청 전 구간 시간 측정 → `call_next` 실행. 4xx는 WARNING, 5xx·미처리 예외는 ERROR·traceback 기록. DEBUG 시 응답에 `X-Process-Time` 헤더 추가. |
+| 4 | **Rate Limit** | Redis 기반 **Fixed Window**. 경로별로 전역(`rl:global:{ip}`), 로그인(`rl:login:{ip}`), 회원가입 업로드(`rl:signup_upload:{ip}`) 키를 두고, **Lua 스크립트**(INCR + EXPIRE + TTL)로 원자적으로 카운트·TTL을 처리한다. Redis 미설정·예외 시 **Fail-open**(요청 허용)으로 가용성을 우선한다. OPTIONS·`/health`는 제외. |
+| 5 | **Security Headers** | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, CSP(설정 시) 등으로 클릭재킹·MIME 스니핑 등을 완화한다. |
+
+이후 **라우터 매칭** → **의존성 주입**(get_master_db / get_slave_db, get_current_user, 권한 체크) → **Route 핸들러** → **Controller** → **Model** 순으로 진행합니다.
+
+### 1.2 요청 흐름 다이어그램
+
+```mermaid
+flowchart LR
+    subgraph 미들웨어
+        A[proxy_headers] --> B[request_id]
+        B --> C[access_log]
+        C --> D[rate_limit]
+        D --> E[security_headers]
+    end
+    E --> F[라우터]
+    F --> G[의존성: DB·CurrentUser·권한]
+    G --> H[Controller]
+    H --> I[Model]
+    I --> J[응답]
 ```
 
+- **IP 일관성**: Rate Limit·Access Log 모두 **proxy_headers에서 검증된 `request.client.host`**만 사용하므로, 헤더를 직접 파싱하는 코드는 두지 않는다(스푸핑 방어).
+
 ---
 
-## 미들웨어 순서 (바깥 → 안)
+## 2. 데이터베이스 아키텍처
 
-`app/main.py`에 등록된 순서대로, **요청**은 아래에서 위로, **응답**은 위에서 아래로 통과합니다.
+### 2.1 Master / Slave 분리 원리
 
-| 순서 | 이름 | 설명 |
+| 구분 | 의존성 | URL | 용도 |
+|------|--------|-----|------|
+| **쓰기(CUD)** | `get_master_db()` | `WRITER_DB_URL` (미설정 시 `DB_*` 단일 URL) | 회원가입·로그인 제외한 모든 생성·수정·삭제 |
+| **읽기(Read)** | `get_slave_db()` | `READER_DB_URL` (미설정 시 Writer와 동일) | 목록·상세·가용성 조회 등 읽기 전용 |
+
+- **의도**: 조회 부하를 Reader 풀으로 분산하고, Writer 풀은 쓰기 전용으로 유지한다. 단일 URL 구성 시에도 **의존성만 나누어** 추후 Read Replica 도입 시 URL만 바꾸면 된다.
+
+### 2.2 READ ONLY 세션 적용 메커니즘
+
+Reader 엔진에서는 **연결 시점**에 MySQL 세션을 읽기 전용으로 고정한다. `app/db/engine.py`에서 `@event.listens_for(engine, "connect")`로 **connect 이벤트**를 구독하고, 커넥션이 풀에서 만들어질 때마다 다음을 실행한다.
+
+- `SET SESSION time_zone = '+00:00'` — **UTC 타임존 강제**. 모든 `created_at`·`updated_at`·`deleted_at`을 서버·클라이언트와 일관되게 다룬다.
+- `SET SESSION TRANSACTION READ ONLY` — **Slave 세션에서의 쓰기 시도**를 DB가 거부하므로, 실수로 Reader 세션으로 INSERT/UPDATE/DELETE를 날리는 것을 방지한다.
+
+Writer 엔진에는 `time_zone`만 설정하고 `READ ONLY`는 적용하지 않는다.
+
+### 2.3 풀 및 세션
+
+- 풀 설정(`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE`, `pool_pre_ping`)은 `app/core/config`에서 환경 변수로 조정한다.
+- 요청 스코프의 세션은 `app/api/dependencies/db.py`의 `get_master_db`·`get_slave_db`에서 yield 후 commit/rollback/close를 보장한다.
+- **비요청 스코프**(cleanup, exception_handlers 등)에서는 `app/db/session.py`의 **`get_connection()`** 컨텍스트 매니저만 사용한다. (요청 스코프용 세션은 `app.api.dependencies`의 get_master_db/get_slave_db 사용.)
+
+---
+
+## 3. 인증·보안
+
+### 3.1 JWT + Redis를 조합한 토큰 무효화(Revocation) 전략
+
+- **Access Token**: Stateless. `Authorization: Bearer <token>`으로 전달. 서버에 저장하지 않아 **수평 확장·멀티 인스턴스**에 유리하다. 만료 시 401 + `TOKEN_EXPIRED`로 프론트에서 Refresh 호출을 유도한다.
+- **Refresh Token**: HttpOnly 쿠키 + **Redis** `rt:{user_id}` 저장. XSS로부터 토큰 값을 읽기 어렵게 하고, **로그아웃·탈퇴·비밀번호 변경 시** Redis에서 해당 키를 삭제해 **즉시 무효화**할 수 있다.
+- 로그인 시 Access는 JSON body, Refresh는 쿠키(HttpOnly, Secure, SameSite=Lax)로 내려준다. Refresh 요청 시 쿠키의 토큰과 Redis 값을 비교한 뒤, 통과 시 새 Access Token만 JSON으로 반환한다.
+
+### 3.2 Magic Byte 기반 이미지 업로드 검증
+
+업로드 파일의 **Content-Type 헤더만 믿으면** 악의적으로 조작된 파일이 이미지로 저장될 수 있다. `app/domain/media/image_policy.py`에서는 **파일 시그니처(매직 바이트)**로 실제 포맷을 판별한다.
+
+- JPEG: `\xff\xd8\xff`
+- PNG: `\x89PNG\r\n\x1a\n`
+- WebP: `RIFF....WEBP`
+
+헤더가 허용 타입이어도 **바이트 스트림 앞부분**이 위 시그니처와 일치하지 않으면 `INVALID_IMAGE_FILE`로 거부한다. 용량은 청크 단위로 읽으며 `MAX_FILE_SIZE`를 초과하면 중단한다.
+
+### 3.3 Pydantic을 활용한 XSS 방어
+
+요청·응답 DTO는 **Pydantic v2** 스키마로 검증·직렬화된다. 문자열 필드는 이스케이프 등으로 안전하게 다루며, 응답은 항상 스키마를 거쳐 내려가므로 **임의 HTML/스크립트 주입**을 줄이는 데 기여한다. (추가로 CSP 등 보안 헤더는 security_headers 미들웨어에서 설정한다.)
+
+---
+
+## 4. 데이터 정합성
+
+### 4.1 게시글(Soft Delete)과 좋아요(Hard Delete)의 연관 관계
+
+- **게시글(Post)**: `deleted_at`으로 **Soft Delete**. 목록·상세 조회 시 `deleted_at IS NULL`만 노출하며, 삭제 시 댓글(Comment)·좋아요(Like)·post_images·이미지 ref_count를 함께 정리한다.
+- **좋아요(Like)**: 게시글 삭제 시 **Hard Delete**로 행을 제거한다. 게시글과 1:N이므로, 게시글 삭제 트랜잭션 안에서 Like 삭제·Comment soft delete·PostImage 삭제·Image ref_count 감소를 한 블록으로 처리한다.
+
+### 4.2 트랜잭션을 활용한 회원가입–이미지 참조 무결성(ref_count) 보장
+
+회원가입 시 **유저 생성**과 **프로필 이미지 소유권 이전**은 하나의 트랜잭션으로 묶는다. `app/domain/auth/controller.py`의 `signup_user`에서는:
+
+1. `UsersModel.create_user(...)` 로 유저 생성.
+2. `profile_image_id`가 있으면 `MediaModel.attach_signup_image(profile_image_id, created.id, db=db)` 호출 — 이미지의 `uploader_id` 설정, `ref_count` 1 증가, `signup_token_hash`·`signup_expires_at` NULL 처리.
+
+이 전체를 **`with db.begin():`** 블록 안에 넣어, 이미지 연결 실패 시 유저 생성까지 **롤백**되도록 한다. 이미지가 없을 때(`has_image == False`)는 `attach_signup_image`를 호출하지 않아 트랜잭션만으로 정상 가입된다.
+
+### 4.3 기타 복수 모델 조작
+
+게시글 삭제·댓글/좋아요/이미지 ref_count 변경 등 **여러 테이블을 건드리는 로직**은 controller에서 **`with db.begin():`** 한 블록으로 묶어, 실패 시 전체 롤백되도록 한다. (예: `app/domain/posts/controller.py`의 `delete_post`.)
+
+---
+
+## 5. 성능 최적화
+
+### 5.1 selectinload를 활용한 N+1 쿼리 방어
+
+게시글 목록처럼 **1:N 컬렉션**(예: `post_images`)을 함께 불러올 때, **joinedload**만 쓰면 LIMIT이 “행 기준”으로 적용되어, 조인 결과 행이 폭증한 뒤 애플리케이션에서 unique로 줄이는 형태가 된다.  
+**`selectinload(Post.post_images)`**를 사용하면:
+
+- 메인 쿼리: Post에 **LIMIT/OFFSET**이 정확히 적용되고, N:1인 `Post.user`는 **joinedload**로 유지해도 행 수를 부풀리지 않는다.
+- 보조 쿼리 1회: `post_id IN (...)`으로 해당 포스트들의 `post_images`(및 필요 시 `PostImage.image`)만 추가 로드한다.
+
+따라서 **N+1**을 막으면서도 **페이지네이션**이 DB 레벨에서 올바르게 동작한다. (구현: `app/domain/posts/model.py`의 `get_all_posts`.)
+
+### 5.2 Boto3 S3 클라이언트 싱글톤 패턴
+
+`app/core/storage.py`에서는 S3 사용 시 **매 요청마다 `boto3.client("s3", ...)`를 생성하지 않는다**.  
+**Lazy-loading 싱글톤** `_get_s3_client()`를 두고, 첫 호출 시에만 인증 검사 후 클라이언트를 생성해 모듈 전역에 캐시한다. 이후 `_s3_save`·`_s3_delete`는 모두 이 클라이언트를 재사용해 **연결·인증 오버헤드**를 줄인다.  
+`STORAGE_BACKEND=local`인 환경에서는 S3 경로를 타지 않으므로, boto3는 **`_get_s3_client()`가 호출될 때만** import되어 불필요한 의존성이 생기지 않는다.
+
+---
+
+## 6. 이미지: signupToken·ref_count
+
+이미지는 **미리 업로드한 뒤** 본문·가입과 연결하는 방식이다. 가입 전 이미지는 **signupToken**으로 소유를 증명하고, **ref_count**로 참조 수를 관리해 0이 되면 파일·DB 레코드를 정리한다.
+
+- **signupToken**: 업로드 시 토큰 발급, DB에는 해시만 저장. 회원가입 요청 시 `profileImageId`·`signupToken`을 보내 서버가 검증한 뒤 `attach_signup_image`로 `uploader_id`·ref_count 갱신 및 토큰 필드 NULL 처리.
+- **ref_count**: 게시글 첨부·프로필·가입 시 +1, 제거·삭제 시 -1. **0 이하가 되면** `storage_delete` 후 Image 레코드 삭제. 사용 중인 이미지(`ref_count > 0`)는 `delete_image_by_owner`에서 삭제를 거부(409 CONFLICT)하여 **엑스박스·정합성 깨짐**을 방지한다.
+
+저장소는 `STORAGE_BACKEND=local`이면 프로젝트 `upload/`, `s3`이면 S3이며 `build_url`로 URL을 만든다.
+
+---
+
+## 7. 폴더 구조 및 의존성
+
+### 7.1 의존성 단일화 (app/api/dependencies)
+
+요청 스코프에서 쓰는 **인증(CurrentUser, get_current_user)·DB 세션(get_master_db, get_slave_db)·권한(require_post_author, require_comment_author)·쿼리 파싱**은 **`app/api/dependencies`** 한 곳에서 제공한다. 라우터·핸들러는 여기서만 import하여, “어디서 DB·유저가 주입되는지”를 한눈에 파악할 수 있다.  
+비요청 스코프(cleanup, exception_handlers)용 동기 세션은 **`app/db/session.py`의 `get_connection()`**만 사용한다.
+
+### 7.2 폴더 구조 요약
+
+```
+app/
+├── api/
+│   ├── dependencies/     # get_master_db, get_slave_db, get_current_user, 권한, 쿼리 파싱
+│   └── v1.py             # /v1 prefix 라우터 묶음
+├── common/               # ApiCode, response, validators, logging_config
+├── core/
+│   ├── config.py
+│   ├── middleware/       # request_id, proxy_headers, access_log, rate_limit, security_headers
+│   ├── security.py       # JWT, 비밀번호 해시
+│   ├── storage.py        # 로컬/S3, _get_s3_client() 싱글톤
+│   ├── exception_handlers.py
+│   └── cleanup.py        # 만료 세션·회원가입용 이미지 TTL 정리
+├── db/                   # engine(Writer/Reader, READ ONLY·UTC), session(get_connection)
+└── domain/               # auth, users, media, posts, comments (router → controller → model → schema)
+```
+
+도메인 레이어는 **router → controller → model → schema** 패턴을 따른다. Controller에서 복합 연산 시 `with db.begin():` 사용, Model은 Session만 사용하며 commit/rollback은 의존성 세션 스코프에서 처리한다.
+
+---
+
+## 8. 요청 흐름 요약
+
+1. **Lifespan**: DB 초기화 → Redis(Rate Limit·Refresh Token) 연결 → cleanup asyncio 태스크 시작. 종료 시 cleanup 대기 → Redis aclose → close_database.
+2. **GET /health**: DB ping. 성공 200, 실패 503.
+3. **미들웨어**: proxy_headers → request_id → access_log → rate_limit → security_headers.
+4. **라우터**: v1 prefix 하위에 auth, users, media, posts, comments include.
+5. **의존성**: get_master_db / get_slave_db → 요청마다 Session 주입, 성공 시 commit·예외 시 rollback·finally close. get_current_user → Bearer 검증·CurrentUser(만료 시 TOKEN_EXPIRED). require_post_author / require_comment_author → 작성자 본인 여부.
+6. **Route 핸들러 → Controller → Model** → Model은 Session만 사용.
+7. **예외 핸들러**: RequestValidationError, HTTPException, DB 예외 → `{ code, data [, message] }` 통일.
+
+---
+
+## 9. 핵심 코드 위치
+
+| 구분 | 파일 | 설명 |
 |------|------|------|
-| 1 | **CORS** | 허용 Origin 검사. `allow_credentials=True`로 쿠키 전송 허용. |
-| 2 | **security_headers** | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy. HSTS는 설정으로 켜기. |
-| 3 | **rate_limit** | IP당 요청 수 제한. 초과 시 429. 로그인 API는 별도 제한(IP당 분당 5회). |
-| 4 | **access_log** | 4xx/5xx 응답 시 request_id, Method, Path, Status, 소요 시간 로깅. DEBUG 시 X-Process-Time 헤더. |
-| 5 | **request_id** | X-Request-ID 생성·전달. 응답 헤더·로그에 포함해 요청 추적. |
+| DB 엔진 | app/db/engine.py | WRITER/READER URL, pool 설정, Reader `@event.listens_for` READ ONLY·UTC |
+| 세션 의존성 | app/api/dependencies/db.py | get_master_db, get_slave_db |
+| 비요청용 세션 | app/db/session.py | get_connection() |
+| Request ID | app/core/middleware/request_id.py | contextvars set/reset |
+| Proxy·IP 검증 | app/core/middleware/proxy_headers.py | TRUSTED_PROXY_IPS, scope["client"] |
+| Rate Limit | app/core/middleware/rate_limit.py | Redis Lua, get_client_ip는 request.client.host만 사용 |
+| 스토리지 | app/core/storage.py | _get_s3_client() 싱글톤, local/S3 분기 |
+| 이미지 정책 | app/domain/media/image_policy.py | 매직 바이트 검증, purpose, 용량 |
+| 로깅 | app/common/logging_config.py | RequestIdFilter, [%(request_id)s] |
 
----
-
-## 요청 흐름
-
-```
-[클라이언트]  HTTP 요청 (JSON body, Cookie)
-    │
-    ▼
-① Lifespan (앱 시작 1회)
-   → init_database() 로 DB 연결 확인
-   → cleanup run_once + run_loop (만료 세션·회원가입용 이미지 TTL 정리). 종료 시 stop_event 후 close_database()
-
-② GET /health
-   → DB ping. 성공 200, 실패 503 (로드밸런서·배포 검사용)
-
-③ 미들웨어 (요청마다, 위 순서)
-   CORS → security_headers → rate_limit → access_log → request_id
-
-④ 라우터 매칭 (v1_router prefix=/v1)
-   auth, users, media, posts, comments 순으로 include. 예: /v1/auth/login, /v1/users/me, /v1/posts, /v1/posts/{id}/comments
-
-⑤ 의존성 (Depends)
-   → get_db: 요청마다 Session 주입. 성공 시 commit, 예외 시 rollback (session.py)
-   → get_current_user: Cookie session_id → 세션 조회 → CurrentUser 반환
-   → require_post_author / require_comment_author: 게시글·댓글 수정/삭제 시 작성자 본인 여부
-
-⑥ Pydantic (Schema)
-   요청 body·쿼리 검증. 실패 시 400 + code
-
-⑦ Route 핸들러 → Controller → Model
-   Model은 Session만 사용. commit/rollback은 get_db 스코프
-
-⑧ 예외 핸들러 (전역)
-   RequestValidationError, HTTPException, DB 예외 → { code, data } 통일
-    │
-    ▼
-HTTP 응답  { "code": "...", "data": { ... } }
-```
-
----
-
-## 인증 흐름
-
-| 단계 | 설명 |
-|------|------|
-| **로그인** | POST /v1/auth/login → 세션 생성 후 `session_id` 쿠키 설정 (HttpOnly, SameSite) |
-| **이후 요청** | Cookie로 `session_id` 전송 → `get_current_user`에서 세션 조회 → CurrentUser 주입 |
-| **로그아웃** | POST /v1/auth/logout → 해당 세션 삭제 |
-
-세션 저장소는 MySQL(`sessions` 테이블).
-
----
-
-## 이미지 (업로드·회원가입·생명주기)
-
-이미지는 **미리 업로드**, **회원가입 시 소유 묶기(signupToken)**, **참조 카운팅(ref_count)** 세 가지 흐름으로 설계되어 있습니다. 관련 코드는 `app/domain/media/`(router, controller, model, image_policy), 게시글/사용자 도메인에서 `MediaModel.increment_ref_count` / `decrement_ref_count` 호출로 생명주기에 관여합니다.
-
-### 1. 미리 업로드 (파일 먼저, 본문/가입 나중)
-
-- **목적**: DB 트랜잭션 점유를 줄이고, 본문 작성·회원가입 실패 시에도 업로드된 파일만 재사용할 수 있게 합니다.
-- **흐름**:
-  - **회원가입용**: 비로그인 상태에서 `POST /v1/media/images/signup`으로 업로드 → 스토리지 저장 + `images` 테이블에 `uploader_id=NULL`, `signup_token_hash`, `signup_expires_at` 저장. 응답에 `imageId`, `signupToken` 반환.
-  - **로그인 후**: `POST /v1/media/images?purpose=profile|post`로 업로드 → 스토리지 저장 + `images`에 `uploader_id=현재 사용자`, `ref_count`는 이후 프로필/게시글 첨부 시 증가.
-- **정책**: `image_policy.save_image_for_media`에서 purpose 검증, 매직 바이트로 JPEG/PNG/WebP 판별, 크기 제한(`MAX_FILE_SIZE`), `storage_save`(로컬 또는 S3) 호출. 회원가입용 업로드는 rate limit 별도 적용(`check_signup_upload_rate_limit`).
-
-### 2. 회원가입·signupToken (가입 전 이미지 소유 증명)
-
-- **상황**: 가입 전에는 계정이 없어 프로필 이미지는 `uploader_id=NULL`로만 저장됩니다. 가입 폼에서 "이미 업로드한 imageId"를 넘기면, 제3자가 그 imageId만 알아서 남의 이미지를 자기 프로필로 가져가는 것을 막아야 합니다.
-- **방식**: 업로드 시에만 발급되는 **signupToken**(일회성, TTL 있음)으로 소유를 증명합니다.
-  - 업로드 응답: `imageId` + **signupToken**(평문, 클라이언트가 보관).
-  - 가입 요청: `profile_image_id` + **signupToken**을 함께 보냄.
-  - 서버: `MediaModel.verify_signup_token(image_id, token)`으로 동일 이미지·토큰 해시 일치·미만료·아직 미첨부(`uploader_id IS NULL`)인지 검증. 통과 시 `attach_signup_image`로 해당 이미지에 `uploader_id=신규 사용자`, `ref_count+=1`, `signup_token_hash`/`signup_expires_at` NULL 처리해 회원가입용 상태를 해제합니다.
-- **만료 미첨부 이미지**: 주기적으로 `cleanup_expired_signup_images`가 `uploader_id IS NULL`이고 `signup_token_hash`/`signup_expires_at`가 있으며 만료된 로우를 찾아 스토리지 삭제 후 DB에서 삭제합니다(`app/core/cleanup.py` 연동).
-
-### 3. 생명주기 (Reference Counting, ref_count)
-
-- **의미**: 한 이미지가 "프로필 사진" 또는 "게시글 첨부"로 몇 번 참조되는지 `images.ref_count`로 관리합니다. 참조가 0이 되면 해당 로우와 스토리지 파일을 삭제하는 **즉시 처리** 방식을 쓰며, 향후 비동기 배치(Batch GC)로 바꿀 수 있도록 한 곳(`decrement_ref_count`)에서만 삭제 판단을 합니다.
-- **증가(ref_count += 1)**:
-  - 회원가입 시 프로필 이미지로 묶을 때: `attach_signup_image` 내부에서 `ref_count+1`.
-  - 게시글 생성/수정 시 첨부 이미지로 추가할 때: `PostsModel`에서 `MediaModel.increment_ref_count(image_id)`.
-  - 프로필 이미지 변경 시 새 이미지 선택: `UsersModel` 업데이트 후 `MediaModel.increment_ref_count(새 profile_image_id)`.
-- **감소(ref_count -= 1)**:
-  - 게시글 수정 시 특정 이미지를 첨부에서 뺄 때, 게시글 삭제 시 해당 글의 모든 첨부 이미지: `MediaModel.decrement_ref_count(image_id)`.
-  - 프로필 이미지 변경/삭제 시 이전 이미지: `decrement_ref_count(이전 profile_image_id)`.
-  - 회원 탈퇴 시 프로필 이미지: `decrement_ref_count(profile_image_id)`.
-- **삭제 판단**: `decrement_ref_count` 안에서 `ref_count`를 1 줄인 뒤 `ref_count <= 0`이면 스토리지 파일 삭제(`storage_delete`) 후 해당 `images` 로우 `DELETE`. 동시성은 `with_for_update()`로 해당 로우 락 후 감소·판단합니다.
-- **FK 정책**: `post_images`는 `posts`에 대해 `ON DELETE RESTRICT`로 두어, 게시글 삭제 시 앱에서 먼저 `post_images` 정리 및 각 `image_id`에 대해 `decrement_ref_count`를 호출한 뒤 게시글을 삭제하도록 합니다.
-
-### 4. API·코드 위치 요약
-
-| 구분 | 엔드포인트/동작 | 코드 위치 |
-|------|-----------------|-----------|
-| 회원가입용 업로드 | POST /v1/media/images/signup | media/router.py, controller.upload_image_for_signup, MediaModel.create_signup_image |
-| 로그인 후 업로드 | POST /v1/media/images?purpose=profile\|post | media/router, controller.upload_image, MediaModel.create_image |
-| 가입 시 이미지 소유 묶기 | signup 시 profile_image_id + signupToken | auth/controller.signup_user → MediaModel.verify_signup_token, attach_signup_image |
-| ref_count 증가 | 게시글 첨부, 프로필 설정/변경 | posts/model(create_post, update_post), users/controller(update_me), auth(attach_signup_image) |
-| ref_count 감소·삭제 | 게시글 첨부 해제/삭제, 프로필 변경/탈퇴 | posts/model(update_post, delete_post), users/controller(update_me, delete_me), MediaModel.decrement_ref_count |
-| 만료 회원가입용 이미지 정리 | 주기 작업 | core/cleanup.py → MediaModel.cleanup_expired_signup_images |
-
+이 문서는 현재 코드 동작과 일치하도록 유지한다. 폐기된 로직(예: 댓글 수를 매번 COUNT(*) 하던 방식, 요청마다 Boto3 클라이언트를 생성하던 방식)은 반영하지 않는다.

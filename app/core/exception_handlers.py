@@ -46,23 +46,28 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
+        """detail이 dict가 아니면 code·message로 변환해 클라이언트 응답 형식 통일."""
+        headers = dict(exc.headers) if exc.headers else {}
         if isinstance(exc.detail, dict) and "code" in exc.detail:
-            return JSONResponse(status_code=exc.status_code, content=exc.detail)
-        code = HTTP_STATUS_TO_CODE.get(exc.status_code)
-        if not code and isinstance(exc.detail, dict):
-            code = exc.detail.get("code", ApiCode.HTTP_ERROR.value)
-        if code is None:
-            code = str(exc.detail) if exc.detail else ApiCode.HTTP_ERROR.value
+            return JSONResponse(status_code=exc.status_code, content=exc.detail, headers=headers)
+        code = HTTP_STATUS_TO_CODE.get(exc.status_code) or ApiCode.HTTP_ERROR
         code_str = code.value if isinstance(code, ApiCode) else code
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"code": code_str, "data": None},
-        )
+        message = None
+        if isinstance(exc.detail, str):
+            message = exc.detail
+        elif isinstance(exc.detail, dict) and "message" in exc.detail:
+            message = exc.detail.get("message")
+        content = {"code": code_str, "data": None}
+        if message is not None:
+            content["message"] = message
+        return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
     @app.exception_handler(IntegrityError)
     async def integrity_error_handler(request: Request, exc: IntegrityError):
+        request_id = getattr(request.state, "request_id", "")
         logger.error(
-            "DB IntegrityError: Path=%s, Exception=%s: %s",
+            "request_id=%s DB IntegrityError: path=%s exception=%s: %s",
+            request_id,
             request.url.path,
             type(exc).__name__,
             str(exc),
@@ -94,8 +99,10 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(OperationalError)
     async def operational_error_handler(request: Request, exc: OperationalError):
-        logger.error(
-            "DB OperationalError: Path=%s, Exception=%s: %s",
+        request_id = getattr(request.state, "request_id", "")
+        logger.exception(
+            "request_id=%s DB OperationalError: path=%s exception=%s: %s",
+            request_id,
             request.url.path,
             type(exc).__name__,
             str(exc),
@@ -104,12 +111,12 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
-        logger.error(
-            "Unhandled exception: Path=%s, Exception=%s: %s",
+        request_id = getattr(request.state, "request_id", "")
+        logger.exception(
+            "request_id=%s path=%s status=500 unhandled exception: %s",
+            request_id,
             request.url.path,
-            type(exc).__name__,
-            str(exc),
-            exc_info=True,
+            exc,
         )
         return JSONResponse(
             status_code=500,

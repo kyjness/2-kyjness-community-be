@@ -6,6 +6,28 @@ from app.core.config import settings
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 UPLOAD_DIR = PROJECT_ROOT / "upload"
 
+# S3 클라이언트 Lazy-loading 싱글톤 (S3 사용 시점에만 boto3 로드, local 백엔드에서는 미사용)
+_s3_client = None
+
+
+def _get_s3_client():
+    """S3 클라이언트를 한 번만 생성해 재사용. 인증 정보 누락 시 기존과 동일하게 ValueError."""
+    global _s3_client
+    if _s3_client is not None:
+        return _s3_client
+    if not settings.S3_BUCKET_NAME or not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+        raise ValueError(
+            "S3_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY must be set when STORAGE_BACKEND=s3"
+        )
+    import boto3
+    _s3_client = boto3.client(
+        "s3",
+        region_name=settings.AWS_REGION,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    )
+    return _s3_client
+
 
 def storage_save(key: str, content: bytes, content_type: str) -> str:
     if settings.STORAGE_BACKEND == "s3":
@@ -30,17 +52,7 @@ def build_url(key: str) -> str:
 
 
 def _s3_save(key: str, content: bytes, content_type: str) -> str:
-    import boto3
-    if not settings.S3_BUCKET_NAME or not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
-        raise ValueError(
-            "S3_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY must be set when STORAGE_BACKEND=s3"
-        )
-    client = boto3.client(
-        "s3",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    )
+    client = _get_s3_client()
     client.put_object(
         Bucket=settings.S3_BUCKET_NAME,
         Key=key,
@@ -51,17 +63,7 @@ def _s3_save(key: str, content: bytes, content_type: str) -> str:
 
 
 def _s3_delete(key: str) -> None:
-    import boto3
-    if not settings.S3_BUCKET_NAME or not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
-        raise ValueError(
-            "S3_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY must be set when STORAGE_BACKEND=s3"
-        )
-    client = boto3.client(
-        "s3",
-        region_name=settings.AWS_REGION,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    )
+    client = _get_s3_client()
     client.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=key)
 
 

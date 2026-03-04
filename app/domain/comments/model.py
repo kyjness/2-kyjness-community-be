@@ -1,7 +1,7 @@
 # 댓글 CRUD. Comment ORM 반환, Controller/매퍼에서 Schema로 직렬화.
 from typing import List, Optional
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, mapped_column, relationship, joinedload
 from sqlalchemy import Integer, Text, DateTime, ForeignKey
 
@@ -60,16 +60,6 @@ class CommentsModel:
             .offset(offset)
         )
         return list(db.execute(stmt).unique().scalars().all())
-
-    @classmethod
-    def get_comment_count_by_post_id(cls, post_id: int, db: Session) -> int:
-        stmt = (
-            select(func.count(Comment.id))
-            .select_from(Comment)
-            .where(Comment.post_id == post_id, Comment.deleted_at.is_(None))
-        )
-        row = db.execute(stmt).scalar()
-        return row or 0
 
     @classmethod
     def update_comment(cls, post_id: int, comment_id: int, content: str, db: Session) -> int:

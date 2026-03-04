@@ -20,11 +20,14 @@ config = context.config
 
 if config.config_file_name is not None:
     from urllib.parse import quote_plus
-    database_url = (
-        f"mysql+pymysql://{settings.DB_USER}:{quote_plus(settings.DB_PASSWORD)}"
-        f"@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
-        "?charset=utf8mb4"
-    )
+    if settings.WRITER_DB_URL:
+        database_url = settings.WRITER_DB_URL
+    else:
+        database_url = (
+            f"mysql+pymysql://{settings.DB_USER}:{quote_plus(settings.DB_PASSWORD)}"
+            f"@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
+            "?charset=utf8mb4"
+        )
     config.set_main_option("sqlalchemy.url", database_url)
 
 

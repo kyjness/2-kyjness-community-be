@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.common import ApiCode, raise_http_error, success_response
-from app.core.dependencies import CurrentUser
+from app.api.dependencies import CurrentUser
 from app.media.model import MediaModel
 from app.posts.model import PostsModel, PostLikesModel
 from app.posts.schema import PostCreateRequest, PostResponse, PostUpdateRequest
@@ -80,8 +80,10 @@ def update_post(
 
 
 def delete_post(post_id: int, db: Session) -> None:
-    if not PostsModel.delete_post(post_id, db=db):
-        raise_http_error(404, ApiCode.POST_NOT_FOUND)
+    """복수 모델 조작 원자성: 실패 시 전체 롤백. 상세는 docs/architecture.md 참고."""
+    with db.begin():
+        if not PostsModel.delete_post(post_id, db=db):
+            raise_http_error(404, ApiCode.POST_NOT_FOUND)
 
 
 def add_like(post_id: int, user: CurrentUser, db: Session) -> tuple[dict, int]:

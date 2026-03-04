@@ -18,7 +18,7 @@ DROP TABLE IF EXISTS users;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- users
+-- users (탈퇴 시 애플리케이션 단에서 email/nickname에 suffix를 추가하여 UNIQUE 충돌을 방지함)
 CREATE TABLE users (
     id                  INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     email               VARCHAR(255) NOT NULL UNIQUE,
@@ -31,7 +31,7 @@ CREATE TABLE users (
     deleted_at          TIMESTAMP NULL DEFAULT NULL
 );
 
--- posts
+-- posts (카운트 필드 UNSIGNED로 음수 방어)
 CREATE TABLE posts (
     id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id         INT UNSIGNED NOT NULL,
@@ -75,7 +75,7 @@ CREATE TABLE images (
     content_type        VARCHAR(255) NULL,
     size                INT UNSIGNED NULL,
     uploader_id          INT UNSIGNED NULL COMMENT '업로더(비회원 가입 전이면 NULL)',
-    ref_count            INT NOT NULL DEFAULT 0 COMMENT '참조 수(프로필/게시글). 0이면 삭제',
+    ref_count            INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '참조 수(프로필/게시글). 0이면 삭제',
     signup_token_hash   VARCHAR(64) NULL COMMENT '회원가입용 토큰 해시. attach 시 NULL',
     signup_expires_at   TIMESTAMP NULL COMMENT '회원가입용 만료. attach 시 NULL',
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -88,7 +88,7 @@ ALTER TABLE users
   ADD CONSTRAINT fk_users_profile_image
   FOREIGN KEY (profile_image_id) REFERENCES images(id) ON DELETE SET NULL;
 
--- post_images (게시글당 최대 5장)
+-- post_images (게시글당 최대 5장. image_id UNIQUE로 한 이미지가 여러 포스트에 중복 등록되지 않도록 함)
 CREATE TABLE post_images (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     post_id     INT UNSIGNED NOT NULL,
@@ -100,7 +100,8 @@ CREATE TABLE post_images (
       ON DELETE RESTRICT,
     CONSTRAINT fk_post_images_image
       FOREIGN KEY (image_id) REFERENCES images(id)
-      ON DELETE CASCADE
+      ON DELETE CASCADE,
+    CONSTRAINT uq_post_images_image_id UNIQUE (image_id)
 );
 
 DROP TRIGGER IF EXISTS tr_post_images_max_five;
@@ -116,7 +117,7 @@ BEGIN
 END//
 DELIMITER ;
 
--- likes
+-- likes (게시글 Soft Delete 시 해당 post의 like 행은 물리 삭제. 복구 기능 없음.)
 CREATE TABLE likes (
     post_id     INT UNSIGNED NOT NULL,
     user_id     INT UNSIGNED NOT NULL,

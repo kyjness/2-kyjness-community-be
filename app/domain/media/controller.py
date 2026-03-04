@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.common import ApiCode, raise_http_error, success_response
 from app.core.config import settings
 from app.db import utc_now
-from app.core.dependencies import CurrentUser
+from app.api.dependencies import CurrentUser
 from app.core.storage import storage_delete
 from app.media.model import MediaModel
 from app.media.schema import ImageUploadResponse
@@ -68,5 +68,10 @@ async def upload_image(
 
 
 def delete_image(image_id: int, user: CurrentUser, db: Session) -> None:
-    if not MediaModel.delete_image_by_owner(image_id, user.id, db=db):
-        raise_http_error(404, ApiCode.IMAGE_NOT_FOUND)
+    try:
+        if not MediaModel.delete_image_by_owner(image_id, user.id, db=db):
+            raise_http_error(404, ApiCode.IMAGE_NOT_FOUND)
+    except ValueError as e:
+        if "IMAGE_IN_USE" in str(e):
+            raise_http_error(409, ApiCode.CONFLICT)
+        raise

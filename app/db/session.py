@@ -1,26 +1,12 @@
-# 요청별 세션 주입. get_db(Generator), get_connection(contextmanager). commit/rollback 스코프.
+# 비요청 스코프용 세션. get_connection(cleanup/exception 등). 요청 스코프용 get_master_db/get_slave_db는 app.api.dependencies.db.
 from contextlib import contextmanager
-from typing import Generator
-
-from sqlalchemy.orm import Session
 
 from app.db.engine import SessionLocal
 
 
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
 @contextmanager
 def get_connection():
+    """cleanup·exception_handlers 등 비요청 스코프용. commit/rollback/close 보장."""
     db = SessionLocal()
     try:
         yield db

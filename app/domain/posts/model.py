@@ -2,7 +2,7 @@
 from typing import List, Optional
 
 from sqlalchemy import select, update, delete, func
-from sqlalchemy.orm import Session, relationship, joinedload, mapped_column
+from sqlalchemy.orm import Session, relationship, joinedload, selectinload, mapped_column
 from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 
@@ -120,7 +120,7 @@ class PostsModel:
             .offset(offset)
             .options(
                 joinedload(Post.user).joinedload(User.profile_image),
-                joinedload(Post.post_images).joinedload(PostImage.image),
+                selectinload(Post.post_images).joinedload(PostImage.image),
             )
         )
         posts = db.execute(stmt).unique().scalars().all()
@@ -167,8 +167,7 @@ class PostsModel:
         from app.comments.model import Comment
         db.execute(update(Comment).where(Comment.post_id == post_id, Comment.deleted_at.is_(None)).values(deleted_at=utc_now()))
         db.execute(delete(Like).where(Like.post_id == post_id))
-        img_rows = db.execute(select(PostImage.image_id).where(PostImage.post_id == post_id)).scalars().all()
-        image_ids = list(img_rows)
+        image_ids = db.execute(select(PostImage.image_id).where(PostImage.post_id == post_id)).scalars().all()
         db.execute(delete(PostImage).where(PostImage.post_id == post_id))
         for iid in image_ids:
             MediaModel.decrement_ref_count(iid, db=db)

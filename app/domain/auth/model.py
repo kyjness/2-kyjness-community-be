@@ -1,13 +1,8 @@
-# 세션 CRUD. AuthSession 모델, 세션 생성·조회·삭제.
-from datetime import timedelta
-from typing import Optional
-
-import secrets
-from sqlalchemy import select, delete
+# 레거시 세션 테이블. 대규모 무효화(탈퇴)·만료 정리용. revoke_sessions_for_user, cleanup_expired_sessions 만 사용.
+from sqlalchemy import delete
 from sqlalchemy.orm import Session, mapped_column
 from sqlalchemy import String, Integer, DateTime, ForeignKey
 
-from app.core.config import settings
 from app.db import Base, get_connection, utc_now
 
 
@@ -21,36 +16,6 @@ class AuthSession(Base):
 
 
 class AuthModel:
-    SESSION_EXPIRY_TIME = settings.SESSION_EXPIRY_TIME
-
-    @classmethod
-    def create_session(cls, user_id: int, db: Session) -> str:
-        session_id = secrets.token_urlsafe(32)
-        now = utc_now()
-        expires_at = now + timedelta(seconds=cls.SESSION_EXPIRY_TIME)
-        s = AuthSession(session_id=session_id, user_id=user_id, created_at=now, expires_at=expires_at)
-        db.add(s)
-        return session_id
-
-    @classmethod
-    def get_user_id_by_session(cls, session_id: Optional[str], db: Session) -> Optional[int]:
-        if not session_id:
-            return None
-        row = db.execute(
-            select(AuthSession.user_id).where(
-                AuthSession.session_id == session_id,
-                AuthSession.expires_at > utc_now(),
-            )
-        ).scalar_one_or_none()
-        return row
-
-    @classmethod
-    def revoke_session(cls, session_id: Optional[str], db: Session) -> bool:
-        if not session_id:
-            return False
-        r = db.execute(delete(AuthSession).where(AuthSession.session_id == session_id))
-        return r.rowcount > 0
-
     @classmethod
     def revoke_sessions_for_user(cls, user_id: int, db: Session) -> None:
         db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))

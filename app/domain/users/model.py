@@ -115,11 +115,21 @@ class UsersModel:
 
     @classmethod
     def delete_user(cls, user_id: int, db: Session) -> bool:
+        """탈퇴(Soft Delete). email/nickname에 suffix 추가해 UNIQUE 재가입 충돌 방지(puppytalkdb.sql 주석 참고)."""
+        user = cls.get_user_by_id(user_id, db=db)
+        if not user:
+            return False
+        ts = int(utc_now().timestamp())
+        suffix = f"_deleted_{user_id}_{ts}"
+        max_prefix = max(0, 255 - len(suffix))
+        new_email = (user.email[:max_prefix] + suffix)[:255]
+        new_nickname = (user.nickname[:max_prefix] + suffix)[:255]
         r = db.execute(
             update(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
             .values(
-                nickname=f"withdrawn_{user_id}",
+                email=new_email,
+                nickname=new_nickname,
                 is_active=False,
                 profile_image_id=None,
                 deleted_at=utc_now(),
