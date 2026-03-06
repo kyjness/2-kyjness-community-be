@@ -1,20 +1,22 @@
 # 이미지 업로드 비즈니스 로직. Model은 Image ORM 반환, Controller에서 Schema로 직렬화.
+from __future__ import annotations
+
 from datetime import timedelta
 
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
-from app.common import ApiCode, raise_http_error, success_response
+from app.common import ApiCode, ApiResponse, raise_http_error
 from app.core.config import settings
 from app.db import utc_now
 from app.api.dependencies import CurrentUser
-from app.core.storage import storage_delete
+from app.infra.storage import storage_delete
 from app.media.model import MediaModel
-from app.media.schema import ImageUploadResponse
+from app.media.schema import ImageUploadResponse, SignupImageUploadData
 from app.media.image_policy import save_image_for_media
 
 
-async def upload_image_for_signup(file: UploadFile, db: Session) -> dict:
+async def upload_image_for_signup(file: UploadFile, db: Session) -> ApiResponse[SignupImageUploadData]:
     file_key, file_url, content_type, size = await save_image_for_media(
         file, purpose="signup"
     )
@@ -28,15 +30,20 @@ async def upload_image_for_signup(file: UploadFile, db: Session) -> dict:
             expires_at=expires_at,
             db=db,
         )
+        data = SignupImageUploadData(
+            id=image.id,
+            file_url=image.file_url,
+            signup_token=signup_token,
+        )
+        db.commit()
     except Exception:
+        db.rollback()
         try:
             storage_delete(file_key)
         except Exception:
             pass
         raise
-    payload = ImageUploadResponse.model_validate(image).model_dump(by_alias=True)
-    payload["signupToken"] = signup_token
-    return success_response(ApiCode.IMAGE_UPLOADED, payload)
+    return ApiResponse(code=ApiCode.IMAGE_UPLOADED.value, data=data)
 
 
 async def upload_image(
@@ -44,7 +51,7 @@ async def upload_image(
     user: CurrentUser,
     purpose: str,
     db: Session,
-) -> dict:
+) -> ApiResponse[ImageUploadResponse]:
     if purpose not in ("profile", "post"):
         raise_http_error(400, ApiCode.INVALID_REQUEST)
     file_key, file_url, content_type, size = await save_image_for_media(file, purpose=purpose)
@@ -57,14 +64,15 @@ async def upload_image(
             uploader_id=user.id,
             db=db,
         )
+        db.commit()
     except Exception:
+        db.rollback()
         try:
             storage_delete(file_key)
         except Exception:
             pass
         raise
-    payload = ImageUploadResponse.model_validate(image).model_dump(by_alias=True)
-    return success_response(ApiCode.IMAGE_UPLOADED, payload)
+    return ApiResponse(code=ApiCode.IMAGE_UPLOADED.value, data=ImageUploadResponse.model_validate(image))
 
 
 def delete_image(image_id: int, user: CurrentUser, db: Session) -> None:

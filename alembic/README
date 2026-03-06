@@ -1,6 +1,0 @@
-# 마이그레이션 URL: WRITER_DB_URL 있으면 Writer DB에 적용. 초기 스키마가 puppytalkdb.sql로 이미 적용된 경우 `alembic stamp head`로 동기화.
-
-alembic revision --autogenerate -m "initial"
-alembic upgrade head
-alembic downgrade -1
-alembic history

@@ -1,9 +1,16 @@
 # 이미지 업로드 응답 DTO. Image ORM → Controller에서 Schema로 직렬화.
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
+
+from app.common import BaseSchema
 
 
-class ImageUploadResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class ImageUploadResponse(BaseSchema):
+    id: int
+    file_url: str = Field(..., description="이미지 URL")
 
-    id: int = Field(serialization_alias="imageId")
-    file_url: str = Field(serialization_alias="url")
+
+class SignupImageUploadData(BaseSchema):
+
+    id: int
+    file_url: str = Field(..., description="이미지 URL")
+    signup_token: str = Field(..., description="회원가입 시 소유권 검증 토큰")

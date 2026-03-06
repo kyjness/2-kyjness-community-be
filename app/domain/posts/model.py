@@ -3,12 +3,12 @@ from typing import List, Optional
 
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.orm import Session, relationship, joinedload, selectinload, mapped_column
-from sqlalchemy import String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import String, Integer, DateTime, ForeignKey
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 
 from app.db import Base, utc_now
 from app.media.model import Image, MediaModel
-from app.users.model import User
+from app.users.model import User, DogProfile
 
 
 class Post(Base):
@@ -92,6 +92,7 @@ class PostsModel:
             .where(Post.id == post_id, Post.deleted_at.is_(None))
             .options(
                 joinedload(Post.user).joinedload(User.profile_image),
+                joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_image),
                 joinedload(Post.post_images).joinedload(PostImage.image),
             )
         )
@@ -120,6 +121,7 @@ class PostsModel:
             .offset(offset)
             .options(
                 joinedload(Post.user).joinedload(User.profile_image),
+                joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_image),
                 selectinload(Post.post_images).joinedload(PostImage.image),
             )
         )
@@ -127,6 +129,14 @@ class PostsModel:
         has_more = len(posts) > size
         posts = posts[:size]
         return posts, has_more
+
+    @classmethod
+    def get_posts_count(cls, *, db: Session) -> int:
+        """삭제되지 않은 게시글 전체 개수 (페이지네이션 total용)."""
+        row = db.execute(
+            select(func.count(Post.id)).where(Post.deleted_at.is_(None))
+        ).scalar_one_or_none()
+        return row or 0
 
     @classmethod
     def update_post(

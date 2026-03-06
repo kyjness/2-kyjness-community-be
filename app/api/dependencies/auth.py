@@ -6,7 +6,7 @@ from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.common import ApiCode, UtcDatetime, raise_http_error
+from app.common import ApiCode, UserStatus, UtcDatetime, raise_http_error
 from app.core.security import verify_access_token
 from app.db import utc_now
 from app.users.model import UsersModel
@@ -56,4 +56,6 @@ def get_current_user(
     user = UsersModel.get_user_by_id(user_id, db=db)
     if not user:
         raise_http_error(401, ApiCode.UNAUTHORIZED)
+    if not UserStatus.is_active_value(user.status):
+        raise_http_error(403, ApiCode.FORBIDDEN, UserStatus.inactive_message_ko(user.status))
     return CurrentUser.model_validate(user)

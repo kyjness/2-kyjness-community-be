@@ -6,13 +6,14 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.media import controller
+from app.media.schema import ImageUploadResponse, SignupImageUploadData
 from app.common import ApiResponse
 from app.api.dependencies import CurrentUser, get_current_user, get_master_db
 
 router = APIRouter(prefix="/media", tags=["media"])
 
 
-@router.post("/images/signup", status_code=201, response_model=ApiResponse)
+@router.post("/images/signup", status_code=201, response_model=ApiResponse[SignupImageUploadData])
 async def upload_image_signup(
     image: UploadFile = File(..., description="회원가입용 프로필 이미지"),
     db: Session = Depends(get_master_db),
@@ -20,7 +21,7 @@ async def upload_image_signup(
     return await controller.upload_image_for_signup(file=image, db=db)
 
 
-@router.post("/images", status_code=201, response_model=ApiResponse)
+@router.post("/images", status_code=201, response_model=ApiResponse[ImageUploadResponse])
 async def upload_image(
     image: UploadFile = File(..., description="이미지 파일"),
     purpose: Literal["profile", "post"] = Query("post", description="profile | post"),

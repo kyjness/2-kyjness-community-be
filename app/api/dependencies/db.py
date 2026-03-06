@@ -1,5 +1,5 @@
 # DB 세션 의존성. get_master_db(CUD) / get_slave_db(Read). yield 후 commit/rollback/close.
-# 복수 모델 원자성은 controller에서 with db.begin(): 블록 사용.
+# 주의: 세션은 이미 트랜잭션 중이므로 controller에서 db.begin() 사용 시 InvalidRequestError 발생.
 from typing import Generator
 
 from sqlalchemy.orm import Session

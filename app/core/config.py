@@ -1,4 +1,5 @@
 # 환경 변수 (Settings). ENV에 따라 .env.{ENV} 만 로드. 단일 .env 미사용.
+# 주의: app.common 등 상위 패키지 import 시 Alembic env 로드 시 순환 참조 발생 → config는 독립 유지.
 import os
 from pathlib import Path
 from typing import List
@@ -16,12 +17,12 @@ class Settings:
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
-    # CORS (허용 Origin 목록, 쉼표 구분)
+    # CORS (허용 Origin 목록, 쉼표 구분. Vite(React) 개발 서버 5173)
     CORS_ORIGINS: List[str] = [
         origin.strip()
         for origin in os.getenv(
             "CORS_ORIGINS",
-            "http://127.0.0.1:5500",
+            "http://127.0.0.1:5173,http://localhost:5173",
         ).split(",")
         if origin.strip()
     ]

@@ -13,12 +13,18 @@ from app.api.dependencies import (
 from app.auth import controller as auth_controller
 from app.common import ApiResponse
 from app.users import controller
-from app.users.schema import UpdateUserRequest, UpdatePasswordRequest, UserAvailabilityQuery
+from app.users.schema import (
+    AvailabilityData,
+    UpdatePasswordRequest,
+    UpdateUserRequest,
+    UserAvailabilityQuery,
+    UserProfileResponse,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-@router.get("/availability", status_code=200, response_model=ApiResponse)
+@router.get("/availability", status_code=200, response_model=ApiResponse[AvailabilityData])
 def check_availability(
     query: UserAvailabilityQuery = Depends(parse_availability_query),
     db: Session = Depends(get_slave_db),
@@ -26,12 +32,15 @@ def check_availability(
     return controller.check_availability(query, db=db)
 
 
-@router.get("/me", status_code=200, response_model=ApiResponse)
-def get_me(user: CurrentUser = Depends(get_current_user)):
-    return controller.get_me(user)
+@router.get("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
+def get_me(
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_slave_db),
+):
+    return controller.get_me(user, db=db)
 
 
-@router.patch("/me", status_code=200, response_model=ApiResponse)
+@router.patch("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
 def update_me(
     user_data: UpdateUserRequest,
     user: CurrentUser = Depends(get_current_user),
@@ -40,7 +49,7 @@ def update_me(
     return controller.update_me(user=user, data=user_data, db=db)
 
 
-@router.patch("/me/password", status_code=200, response_model=ApiResponse)
+@router.patch("/me/password", status_code=200, response_model=ApiResponse[None])
 async def update_password(
     request: Request,
     password_data: UpdatePasswordRequest,

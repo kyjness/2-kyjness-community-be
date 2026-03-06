@@ -10,11 +10,6 @@ log = logging.getLogger(__name__)
 
 def run_once() -> None:
     try:
-        from app.auth.model import AuthModel
-        AuthModel.cleanup_expired_sessions()
-    except Exception as e:
-        log.warning("Session cleanup failed: %s", e)
-    try:
         from app.media.model import MediaModel
         with get_connection() as db:
             deleted_count, failed_file_keys = MediaModel.cleanup_expired_signup_images(db)

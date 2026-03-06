@@ -12,6 +12,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import v1_router
 from app.common import ApiCode, ApiResponse, setup_logging
+from app.common.schema import RootData
 from app.core.cleanup import run_loop_async, run_once as cleanup_once
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
@@ -26,31 +27,17 @@ from app.core.middleware import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """앱 시작: DB·Redis·cleanup 태스크. 종료 시 cleanup 대기 → Redis aclose → close_database 순."""
     from app.db import init_database, close_database
-    from redis.asyncio import Redis, ConnectionPool
+    from app.infra.redis import close_redis, init_redis
 
     setup_logging()
     log = logging.getLogger(__name__)
-    app.state.redis = None
     if not init_database():
         log.critical("DB 연결 실패로 시작 시 검증 실패. 요청 시점에 재시도됨.")
     else:
         log.info("MySQL 연결 성공.")
 
-    if settings.REDIS_URL:
-        try:
-            pool = ConnectionPool.from_url(
-                settings.REDIS_URL,
-                max_connections=settings.REDIS_MAX_CONNECTIONS,
-                decode_responses=True,
-            )
-            app.state.redis = Redis(connection_pool=pool)
-            await app.state.redis.ping()
-            log.info("Redis connection pool initialized.")
-        except Exception as e:
-            log.warning("Redis 연결 실패: %s. Rate limit 미들웨어는 Fail-open.", e)
-            app.state.redis = None
+    await init_redis(app)
 
     cleanup_once()
     stop_event = asyncio.Event()
@@ -60,7 +47,6 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Graceful Shutdown: cleanup 태스크 대기 → Redis aclose → close_database 순으로 정리.
     stop_event.set()
     if cleanup_task is not None:
         try:
@@ -71,10 +57,7 @@ async def lifespan(app: FastAPI):
                 await cleanup_task
             except asyncio.CancelledError:
                 pass
-    if getattr(app.state, "redis", None) is not None:
-        await app.state.redis.aclose()
-        app.state.redis = None
-        log.info("Redis connection closed.")
+    await close_redis(app)
     close_database()
 
 
@@ -113,16 +96,16 @@ if settings.STORAGE_BACKEND == "local":
 app.include_router(v1_router)
 
 
-@app.get("/", response_model=ApiResponse)
+@app.get("/", response_model=ApiResponse[RootData])
 def root():
-    return {
-        "code": ApiCode.OK.value,
-        "data": {
-            "message": "PuppyTalk API is running!",
-            "version": "1.0.0",
-            "docs": "/docs",
-        },
-    }
+    return ApiResponse(
+        code=ApiCode.OK.value,
+        data=RootData(
+            message="PuppyTalk API is running!",
+            version="1.0.0",
+            docs="/docs",
+        ),
+    )
 
 
 @app.get("/health")

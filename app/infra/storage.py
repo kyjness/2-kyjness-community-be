@@ -1,4 +1,4 @@
-# 로컬/S3 파일 업로드. STORAGE_BACKEND에 따라 저장소 분기.
+# 로컬/S3 파일 스토리지. STORAGE_BACKEND에 따라 분기.
 from pathlib import Path
 
 from app.core.config import settings
@@ -6,12 +6,11 @@ from app.core.config import settings
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 UPLOAD_DIR = PROJECT_ROOT / "upload"
 
-# S3 클라이언트 Lazy-loading 싱글톤 (S3 사용 시점에만 boto3 로드, local 백엔드에서는 미사용)
 _s3_client = None
 
 
 def _get_s3_client():
-    """S3 클라이언트를 한 번만 생성해 재사용. 인증 정보 누락 시 기존과 동일하게 ValueError."""
+    """S3 클라이언트 Lazy-loading. 인증 정보 누락 시 ValueError."""
     global _s3_client
     if _s3_client is not None:
         return _s3_client
@@ -42,13 +41,21 @@ def storage_delete(key: str) -> None:
         _local_delete(key)
 
 
+def _be_base_url() -> str:
+    raw = (settings.BE_API_URL or "").strip()
+    if "," in raw:
+        raw = raw.split(",")[0].strip()
+    return raw or "http://127.0.0.1:8000"
+
+
 def build_url(key: str) -> str:
     if settings.STORAGE_BACKEND == "s3":
         if settings.S3_PUBLIC_BASE_URL:
             base = settings.S3_PUBLIC_BASE_URL.rstrip("/")
             return f"{base}/{key}"
         return f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{key}"
-    return f"{settings.BE_API_URL}/upload/{key}"
+    base = _be_base_url().rstrip("/")
+    return f"{base}/upload/{key}"
 
 
 def _s3_save(key: str, content: bytes, content_type: str) -> str:

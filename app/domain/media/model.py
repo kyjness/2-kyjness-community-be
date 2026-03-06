@@ -11,7 +11,7 @@ from sqlalchemy import String, Integer, DateTime, ForeignKey
 
 from app.db import Base, utc_now
 from app.core.security import hash_token
-from app.core.storage import storage_delete
+from app.infra.storage import storage_delete
 
 logger = logging.getLogger(__name__)
 

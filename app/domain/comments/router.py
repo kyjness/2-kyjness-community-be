@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.orm import Session
 from fastapi.responses import Response
 
-from app.comments.schema import CommentUpsertRequest
+from app.comments.schema import CommentIdData, CommentUpsertRequest, CommentsPageData
 from app.comments import controller
 from app.common import ApiResponse
 from app.api.dependencies import (
@@ -18,7 +18,7 @@ from app.api.dependencies import (
 router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
 
 
-@router.post("", status_code=201, response_model=ApiResponse)
+@router.post("", status_code=201, response_model=ApiResponse[CommentIdData])
 def create_comment(
     comment_data: CommentUpsertRequest,
     post_id: int = Path(..., ge=1, description="게시글 ID"),
@@ -28,7 +28,7 @@ def create_comment(
     return controller.create_comment(post_id=post_id, user=user, data=comment_data, db=db)
 
 
-@router.get("", status_code=200, response_model=ApiResponse)
+@router.get("", status_code=200, response_model=ApiResponse[CommentsPageData])
 def get_comments(  # 인증 불필요. 비로그인·다른 유저도 전체 댓글 목록 조회 가능.
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     page: int = Query(1, ge=1, description="페이지 번호"),
@@ -38,7 +38,7 @@ def get_comments(  # 인증 불필요. 비로그인·다른 유저도 전체 댓
     return controller.get_comments(post_id=post_id, page=page, size=size, db=db)
 
 
-@router.patch("/{comment_id}", status_code=200, response_model=ApiResponse)
+@router.patch("/{comment_id}", status_code=200, response_model=ApiResponse[None])
 def update_comment(
     comment_data: CommentUpsertRequest,
     author_ctx: CommentAuthorContext = Depends(require_comment_author),

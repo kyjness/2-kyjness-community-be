@@ -14,7 +14,6 @@ def client():
 
 
 def _login(client: TestClient, email: str, password: str) -> dict:
-    """회원가입 후 로그인해 쿠키 반환."""
     client.post(
         "/v1/auth/signup",
         json={"email": email, "password": password, "nickname": email.split("@")[0][:20]},

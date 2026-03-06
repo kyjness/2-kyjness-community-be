@@ -5,33 +5,39 @@ from alembic import context
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# 프로젝트 루트를 path에 추가 (script_location이 app/db/alembic 이므로 상위 3단계)
+_root = Path(__file__).resolve().parent.parent.parent.parent
+sys.path.insert(0, str(_root))
 
-from app.core.config import settings
 from app.db.base import Base
 
-from app.auth.model import AuthSession  # noqa: F401
-from app.users.model import User  # noqa: F401
+from app.users.model import User, DogProfile  # noqa: F401
 from app.media.model import Image  # noqa: F401
 from app.posts.model import Post, PostImage, Like  # noqa: F401
 from app.comments.model import Comment  # noqa: F401
 
 config = context.config
 
-if config.config_file_name is not None:
-    from urllib.parse import quote_plus
-    if settings.WRITER_DB_URL:
-        database_url = settings.WRITER_DB_URL
-    else:
-        database_url = (
-            f"mysql+pymysql://{settings.DB_USER}:{quote_plus(settings.DB_PASSWORD)}"
-            f"@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
-            "?charset=utf8mb4"
-        )
-    config.set_main_option("sqlalchemy.url", database_url)
+
+def _set_database_url_if_needed() -> None:
+    """순환 import 방지: settings는 마이그레이션 실행 시점에만 로드."""
+    url = config.get_main_option("sqlalchemy.url", "")
+    if not url or url.startswith("driver://"):
+        from urllib.parse import quote_plus
+        from app.core.config import settings
+        if settings.WRITER_DB_URL:
+            url = settings.WRITER_DB_URL
+        else:
+            url = (
+                f"mysql+pymysql://{settings.DB_USER}:{quote_plus(settings.DB_PASSWORD)}"
+                f"@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
+                "?charset=utf8mb4"
+            )
+        config.set_main_option("sqlalchemy.url", url)
 
 
 def run_migrations_offline() -> None:
+    _set_database_url_if_needed()
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -45,6 +51,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    _set_database_url_if_needed()
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

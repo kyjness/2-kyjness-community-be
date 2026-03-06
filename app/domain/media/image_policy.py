@@ -7,7 +7,7 @@ from fastapi import UploadFile
 
 from app.core.config import settings
 from app.common import ApiCode, raise_http_error
-from app.core.storage import storage_save
+from app.infra.storage import storage_save
 
 ImagePurpose = Literal["signup", "profile", "post"]
 IMAGE_PURPOSES: tuple[ImagePurpose, ...] = ("signup", "profile", "post")

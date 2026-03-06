@@ -192,7 +192,6 @@ def test_delete_like_success(client, auth_cookies):
 
 
 def test_delete_like_when_not_liked(client, auth_cookies):
-    """이미 좋아요 없을 때 DELETE → 멱등하게 204"""
     create = client.post(
         "/v1/posts",
         json={"title": "No like", "content": "x"},

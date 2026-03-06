@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, mapped_column, relationship, joinedload
 from sqlalchemy import Integer, Text, DateTime, ForeignKey
 
 from app.db import Base, utc_now
-from app.users.model import User
+from app.users.model import User, DogProfile
 
 
 class Comment(Base):
@@ -37,7 +37,10 @@ class CommentsModel:
         stmt = (
             select(Comment)
             .where(Comment.id == comment_id, Comment.deleted_at.is_(None))
-            .options(joinedload(Comment.author).joinedload(User.profile_image))
+            .options(
+            joinedload(Comment.author).joinedload(User.profile_image),
+            joinedload(Comment.author).selectinload(User.dogs).joinedload(DogProfile.profile_image),
+        )
         )
         return db.execute(stmt).unique().scalars().one_or_none()
 
@@ -54,7 +57,10 @@ class CommentsModel:
         stmt = (
             select(Comment)
             .where(Comment.post_id == post_id, Comment.deleted_at.is_(None))
-            .options(joinedload(Comment.author).joinedload(User.profile_image))
+            .options(
+            joinedload(Comment.author).joinedload(User.profile_image),
+            joinedload(Comment.author).selectinload(User.dogs).joinedload(DogProfile.profile_image),
+        )
             .order_by(Comment.id.desc())
             .limit(size)
             .offset(offset)
