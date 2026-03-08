@@ -131,7 +131,9 @@ def test_update_success(client, auth_cookies):
     assert res.status_code == 200
     assert res.json()["code"] == "COMMENT_UPDATED"
     list_res = client.get(f"/v1/posts/{post_id}/comments?page=1&size=10")
-    found = next(c for c in list_res.json()["data"]["list"] if c["commentId"] == comment_id)
+    found = next(
+        c for c in list_res.json()["data"]["list"] if c["commentId"] == comment_id
+    )
     assert found["content"] == "edited"
 
 

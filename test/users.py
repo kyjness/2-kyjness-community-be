@@ -15,7 +15,11 @@ def test_availability_email_available(client):
 def test_availability_email_taken(client):
     client.post(
         "/v1/auth/signup",
-        json={"email": "taken_email@example.com", "password": "password12", "nickname": "takenemail"},
+        json={
+            "email": "taken_email@example.com",
+            "password": "password12",
+            "nickname": "takenemail",
+        },
     )
     res = client.get("/v1/users/availability?email=taken_email@example.com")
     assert res.status_code == 200
@@ -31,7 +35,11 @@ def test_availability_nickname_available(client):
 def test_availability_nickname_taken(client):
     client.post(
         "/v1/auth/signup",
-        json={"email": "nick_taken@example.com", "password": "password12", "nickname": "taken_nick"},
+        json={
+            "email": "nick_taken@example.com",
+            "password": "password12",
+            "nickname": "taken_nick",
+        },
     )
     res = client.get("/v1/users/availability?nickname=taken_nick")
     assert res.status_code == 200
@@ -76,7 +84,11 @@ def test_update_me_success(client, auth_cookies):
 def test_update_me_duplicate_nickname(client, auth_cookies):
     client.post(
         "/v1/auth/signup",
-        json={"email": "other@example.com", "password": "password12", "nickname": "taken_nick"},
+        json={
+            "email": "other@example.com",
+            "password": "password12",
+            "nickname": "taken_nick",
+        },
     )
     res = client.patch(
         "/v1/users/me",
@@ -106,6 +118,7 @@ def test_update_password_wrong_current(client, auth_cookies):
 
 def test_update_password_success(client):
     from test.conftest import _login
+
     cookies = _login(client, "pw_user@example.com", "oldpass12")
     res = client.patch(
         "/v1/users/me/password",
@@ -115,9 +128,13 @@ def test_update_password_success(client):
     assert res.status_code == 200
     assert res.json()["code"] == "PASSWORD_UPDATED"
     client.post("/v1/auth/logout", cookies=cookies)
-    login_old = client.post("/v1/auth/login", json={"email": "pw_user@example.com", "password": "oldpass12"})
+    login_old = client.post(
+        "/v1/auth/login", json={"email": "pw_user@example.com", "password": "oldpass12"}
+    )
     assert login_old.status_code == 401
-    login_new = client.post("/v1/auth/login", json={"email": "pw_user@example.com", "password": "newpass12"})
+    login_new = client.post(
+        "/v1/auth/login", json={"email": "pw_user@example.com", "password": "newpass12"}
+    )
     assert login_new.status_code == 200
 
 
@@ -128,6 +145,7 @@ def test_delete_me_unauthorized(client):
 
 def test_delete_me_success(client):
     from test.conftest import _login
+
     cookies = _login(client, "delete_user@example.com", "password12")
     res = client.delete("/v1/users/me", cookies=cookies)
     assert res.status_code == 204

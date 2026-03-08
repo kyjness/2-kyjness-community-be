@@ -2,15 +2,28 @@ from typing import Optional
 
 from pydantic import EmailStr, Field, field_validator, model_validator
 
-from app.common import BaseSchema, UserStatus, ensure_nickname_format, ensure_password_format
+from app.common import (
+    BaseSchema,
+    UserStatus,
+    ensure_nickname_format,
+    ensure_password_format,
+)
 
 
 class SignUpRequest(BaseSchema):
     email: EmailStr = Field(..., description="사용자 이메일")
-    password: str = Field(..., min_length=8, max_length=20, description="비밀번호 (8-20자)")
-    nickname: str = Field(..., min_length=1, max_length=10, description="닉네임 (1-10자)")
-    profile_image_id: Optional[int] = Field(default=None, description="프로필 이미지 ID")
-    signup_token: Optional[str] = Field(default=None, description="프로필 이미지 소유권 검증 토큰")
+    password: str = Field(
+        ..., min_length=8, max_length=20, description="비밀번호 (8-20자)"
+    )
+    nickname: str = Field(
+        ..., min_length=1, max_length=10, description="닉네임 (1-10자)"
+    )
+    profile_image_id: Optional[int] = Field(
+        default=None, description="프로필 이미지 ID"
+    )
+    signup_token: Optional[str] = Field(
+        default=None, description="프로필 이미지 소유권 검증 토큰"
+    )
 
     @model_validator(mode="after")
     def profile_image_requires_token(self):
@@ -42,7 +55,6 @@ class LoginRequest(BaseSchema):
 
 
 class LoginSuccessData(BaseSchema):
-
     id: int
     email: str
     nickname: str
@@ -53,14 +65,4 @@ class LoginSuccessData(BaseSchema):
 
 
 class AccessTokenData(BaseSchema):
-
     access_token: str
-
-
-class SessionUserResponse(BaseSchema):
-    id: int
-    email: str
-    nickname: str
-    status: UserStatus = UserStatus.ACTIVE
-    profile_image_id: Optional[int] = None
-    profile_image_url: Optional[str] = None

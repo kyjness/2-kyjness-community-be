@@ -1,17 +1,27 @@
 # API 의존성 단일 진입점. 라우터/핸들러에서는 여기서만 import.
-# 예: from app.api.dependencies import get_master_db, get_slave_db, get_current_user, CurrentUser, require_post_author, ...
-from .auth import CurrentUser, get_current_user
+from .auth import CurrentUser, get_current_user, get_current_user_optional
+from .client import get_client_identifier
 from .db import get_master_db, get_slave_db
-from .permissions import CommentAuthorContext, require_comment_author, require_post_author
+from .permissions import (
+    CommentAuthorContext,
+    require_comment_author,
+    require_comment_author_for_delete,
+    require_post_author,
+)
 from .query import parse_availability_query
+from .upload import check_upload_content_length
 
 __all__ = [
+    "check_upload_content_length",
     "CommentAuthorContext",
     "CurrentUser",
+    "get_client_identifier",
     "get_current_user",
+    "get_current_user_optional",
     "get_master_db",
     "get_slave_db",
     "parse_availability_query",
     "require_comment_author",
+    "require_comment_author_for_delete",
     "require_post_author",
 ]

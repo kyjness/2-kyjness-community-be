@@ -1,7 +1,7 @@
-# 사용자 라우터. GET/PATCH /users/me, PATCH /users/me/password.
+# 사용자 라우터. Router → Service. 예외는 전역 handler 처리.
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
     CurrentUser,
@@ -10,9 +10,8 @@ from app.api.dependencies import (
     get_slave_db,
     parse_availability_query,
 )
-from app.auth import controller as auth_controller
-from app.common import ApiResponse
-from app.users import controller
+from app.auth.service import AuthService
+from app.common import ApiCode, ApiResponse
 from app.users.schema import (
     AvailabilityData,
     UpdatePasswordRequest,
@@ -20,33 +19,39 @@ from app.users.schema import (
     UserAvailabilityQuery,
     UserProfileResponse,
 )
+from app.users.service import UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-@router.get("/availability", status_code=200, response_model=ApiResponse[AvailabilityData])
-def check_availability(
+@router.get(
+    "/availability", status_code=200, response_model=ApiResponse[AvailabilityData]
+)
+async def check_availability(
     query: UserAvailabilityQuery = Depends(parse_availability_query),
-    db: Session = Depends(get_slave_db),
+    db: AsyncSession = Depends(get_slave_db),
 ):
-    return controller.check_availability(query, db=db)
+    data = await UserService.check_availability(query, db=db)
+    return ApiResponse(code=ApiCode.OK.value, data=data)
 
 
 @router.get("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
-def get_me(
+async def get_me(
     user: CurrentUser = Depends(get_current_user),
-    db: Session = Depends(get_slave_db),
+    db: AsyncSession = Depends(get_slave_db),
 ):
-    return controller.get_me(user, db=db)
+    data = await UserService.get_user_profile(user.id, db=db)
+    return ApiResponse(code=ApiCode.USER_RETRIEVED.value, data=data)
 
 
 @router.patch("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
-def update_me(
+async def update_me(
     user_data: UpdateUserRequest,
     user: CurrentUser = Depends(get_current_user),
-    db: Session = Depends(get_master_db),
+    db: AsyncSession = Depends(get_master_db),
 ):
-    return controller.update_me(user=user, data=user_data, db=db)
+    data = await UserService.update_user_profile(user.id, user_data, db=db)
+    return ApiResponse(code=ApiCode.USER_UPDATED.value, data=data)
 
 
 @router.patch("/me/password", status_code=200, response_model=ApiResponse[None])
@@ -54,22 +59,21 @@ async def update_password(
     request: Request,
     password_data: UpdatePasswordRequest,
     user: CurrentUser = Depends(get_current_user),
-    db: Session = Depends(get_master_db),
+    db: AsyncSession = Depends(get_master_db),
 ):
-    result = controller.update_password(user=user, data=password_data, db=db)
+    await UserService.update_password(user.id, password_data, db=db)
     redis = getattr(request.app.state, "redis", None)
-    await auth_controller.revoke_refresh_for_user(user.id, redis)
-    return result
+    await AuthService.revoke_refresh_for_user(user.id, redis)
+    return ApiResponse(code=ApiCode.PASSWORD_UPDATED.value, data=None)
 
 
 @router.delete("/me", status_code=204)
 async def delete_me(
     request: Request,
     user: CurrentUser = Depends(get_current_user),
-    db: Session = Depends(get_master_db),
+    db: AsyncSession = Depends(get_master_db),
 ):
     redis = getattr(request.app.state, "redis", None)
-    if redis:
-        await redis.delete(f"rt:{user.id}")
-    controller.delete_me(user=user, db=db)
+    await AuthService.revoke_refresh_for_user(user.id, redis)
+    await UserService.delete_user(user.id, db=db)
     return Response(status_code=204)

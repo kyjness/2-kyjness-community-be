@@ -9,12 +9,12 @@ from sqlalchemy import pool
 _root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(_root))
 
-from app.db.base import Base
-
-from app.users.model import User, DogProfile  # noqa: F401
-from app.media.model import Image  # noqa: F401
-from app.posts.model import Post, PostImage, Like  # noqa: F401
-from app.comments.model import Comment  # noqa: F401
+from app.db.base import Base  # noqa: E402
+from app.users.model import User, DogProfile  # noqa: E402, F401
+from app.media.model import Image  # noqa: E402, F401
+from app.posts.model import Post, PostImage  # noqa: E402, F401
+from app.domain.likes.model import PostLike  # noqa: E402, F401
+from app.comments.model import Comment, CommentLike  # noqa: E402, F401
 
 config = context.config
 
@@ -25,13 +25,13 @@ def _set_database_url_if_needed() -> None:
     if not url or url.startswith("driver://"):
         from urllib.parse import quote_plus
         from app.core.config import settings
+
         if settings.WRITER_DB_URL:
             url = settings.WRITER_DB_URL
         else:
             url = (
-                f"mysql+pymysql://{settings.DB_USER}:{quote_plus(settings.DB_PASSWORD)}"
+                f"postgresql+psycopg://{settings.DB_USER}:{quote_plus(settings.DB_PASSWORD)}"
                 f"@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
-                "?charset=utf8mb4"
             )
         config.set_main_option("sqlalchemy.url", url)
 

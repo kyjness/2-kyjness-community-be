@@ -40,7 +40,9 @@ async def proxy_headers_middleware(
     direct_client = (request.scope.get("client") or ("", 0))[0]
     if not _is_trusted_proxy(direct_client, settings.TRUSTED_PROXY_IPS):
         return await call_next(request)
-    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+    forwarded = request.headers.get("x-forwarded-for") or request.headers.get(
+        "X-Forwarded-For"
+    )
     if forwarded:
         client_ip = forwarded.split(",")[0].strip()
         request.scope["client"] = (client_ip, 0)

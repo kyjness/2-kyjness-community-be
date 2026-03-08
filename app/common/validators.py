@@ -5,6 +5,8 @@ from typing import Annotated, Optional
 
 from pydantic import AfterValidator
 
+from app.common.codes import ApiCode
+
 
 def ensure_utc_datetime(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
@@ -34,18 +36,20 @@ def validate_password_format(password: str) -> bool:
 
 
 def validate_nickname_format(nickname: str) -> bool:
-    return bool(nickname and isinstance(nickname, str) and NICKNAME_PATTERN.match(nickname))
+    return bool(
+        nickname and isinstance(nickname, str) and NICKNAME_PATTERN.match(nickname)
+    )
 
 
 def ensure_password_format(v: str) -> str:
     if not validate_password_format(v):
-        raise ValueError("INVALID_REQUEST_BODY")
+        raise ValueError(ApiCode.INVALID_REQUEST_BODY.name)
     return v
 
 
 def ensure_nickname_format(v: str) -> str:
     if not v or not v.strip():
-        raise ValueError("INVALID_REQUEST_BODY")
+        raise ValueError(ApiCode.INVALID_REQUEST_BODY.name)
     if not validate_nickname_format(v.strip()):
-        raise ValueError("INVALID_REQUEST_BODY")
+        raise ValueError(ApiCode.INVALID_REQUEST_BODY.name)
     return v.strip()

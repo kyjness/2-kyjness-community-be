@@ -16,7 +16,11 @@ def client():
 def _login(client: TestClient, email: str, password: str) -> dict:
     client.post(
         "/v1/auth/signup",
-        json={"email": email, "password": password, "nickname": email.split("@")[0][:20]},
+        json={
+            "email": email,
+            "password": password,
+            "nickname": email.split("@")[0][:20],
+        },
     )
     res = client.post("/v1/auth/login", json={"email": email, "password": password})
     assert res.status_code == 200

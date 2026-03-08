@@ -1,14 +1,15 @@
-# 전역 예외 핸들러. RequestValidationError, HTTPException, DB 예외 → { code, data } 통일.
+# 전역 예외 핸들러. RequestValidationError, HTTPException, DB 예외, 도메인 예외 → { code, data, message? } 통일.
+# core는 특정 Model을 import하지 않음. 도메인 예외는 Service에서 던지고, 예외 객체만으로 응답 구성.
 import logging
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DatabaseError, IntegrityError, OperationalError
 
 from app.common import ApiCode
-from app.db import get_connection
-from app.posts.model import PostsModel
+from app.common.exceptions import BaseProjectException
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ HTTP_STATUS_TO_CODE = {
     404: ApiCode.NOT_FOUND,
     405: ApiCode.METHOD_NOT_ALLOWED,
     409: ApiCode.CONFLICT,
+    413: ApiCode.PAYLOAD_TOO_LARGE,
     422: ApiCode.UNPROCESSABLE_ENTITY,
     429: ApiCode.RATE_LIMIT_EXCEEDED,
     500: ApiCode.INTERNAL_SERVER_ERROR,
@@ -26,30 +28,54 @@ HTTP_STATUS_TO_CODE = {
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    _KNOWN_CODES = frozenset({
-        "INVALID_REQUEST_BODY", "INVALID_REQUEST", "INVALID_FILE_FORMAT",
-        "MISSING_REQUIRED_FIELD", "POST_FILE_LIMIT_EXCEEDED",
-    })
+    _VALIDATION_CODE_NAMES = frozenset(
+        {
+            ApiCode.INVALID_REQUEST_BODY.name,
+            ApiCode.INVALID_REQUEST.name,
+            ApiCode.INVALID_FILE_FORMAT.name,
+            ApiCode.MISSING_REQUIRED_FIELD.name,
+            ApiCode.POST_FILE_LIMIT_EXCEEDED.name,
+        }
+    )
 
     def _pick_validation_code(request: Request, errors: list) -> str:
         for err in errors:
             msg = err.get("msg", "") if isinstance(err.get("msg"), str) else ""
-            for known in _KNOWN_CODES:
-                if known in msg or msg == known:
-                    return known
+            for name in _VALIDATION_CODE_NAMES:
+                if name in msg or msg == name:
+                    return getattr(ApiCode, name).value
         return ApiCode.INVALID_REQUEST_BODY.value
 
+    def _first_validation_message(errors: list) -> Optional[str]:
+        if not errors:
+            return None
+        first = errors[0]
+        if isinstance(first, dict):
+            msg = first.get("msg")
+            if isinstance(msg, str) and msg:
+                return msg
+        return None
+
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        code = _pick_validation_code(request, exc.errors())
-        return JSONResponse(status_code=400, content={"code": code, "data": None})
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
+        errors = exc.errors()
+        code = _pick_validation_code(request, errors)
+        content: dict = {"code": code, "data": None}
+        message = _first_validation_message(errors)
+        if message:
+            content["message"] = message
+        return JSONResponse(status_code=400, content=content)
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         """detail이 dict가 아니면 code·message로 변환해 클라이언트 응답 형식 통일."""
         headers = dict(exc.headers) if exc.headers else {}
         if isinstance(exc.detail, dict) and "code" in exc.detail:
-            return JSONResponse(status_code=exc.status_code, content=exc.detail, headers=headers)
+            return JSONResponse(
+                status_code=exc.status_code, content=exc.detail, headers=headers
+            )
         code = HTTP_STATUS_TO_CODE.get(exc.status_code) or ApiCode.HTTP_ERROR
         code_str = code.value if isinstance(code, ApiCode) else code
         message = None
@@ -60,7 +86,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         content = {"code": code_str, "data": None}
         if message is not None:
             content["message"] = message
-        return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
+        return JSONResponse(
+            status_code=exc.status_code, content=content, headers=headers
+        )
 
     @app.exception_handler(IntegrityError)
     async def integrity_error_handler(request: Request, exc: IntegrityError):
@@ -74,28 +102,42 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         orig = getattr(exc, "orig", None)
         errno = (orig.args[0] if orig and getattr(orig, "args", None) else 0) or 0
-        err_msg = (orig.args[1] if orig and len(getattr(orig, "args", ())) > 1 else str(exc)) or ""
-        if errno == 1062:
+        pgcode = (
+            getattr(orig, "pgcode", None) if orig else None
+        )  # PostgreSQL: 23505 = UniqueViolation
+        err_msg = (
+            orig.args[1] if orig and len(getattr(orig, "args", ())) > 1 else str(exc)
+        ) or ""
+        is_duplicate_key = errno == 1062 or pgcode == "23505"
+        if is_duplicate_key:
             msg_lower = err_msg.lower() if isinstance(err_msg, str) else ""
             if "email" in msg_lower or "key 'email'" in msg_lower:
-                return JSONResponse(status_code=409, content={"code": ApiCode.EMAIL_ALREADY_EXISTS.value, "data": None})
+                return JSONResponse(
+                    status_code=409,
+                    content={"code": ApiCode.EMAIL_ALREADY_EXISTS.value, "data": None},
+                )
             if "nickname" in msg_lower or "key 'nickname'" in msg_lower:
-                return JSONResponse(status_code=409, content={"code": ApiCode.NICKNAME_ALREADY_EXISTS.value, "data": None})
-            parts = request.url.path.rstrip("/").split("/")
-            if "posts" in parts and "likes" in parts:
-                try:
-                    idx = parts.index("posts")
-                    if idx + 1 < len(parts) and parts[idx + 1].isdigit():
-                        post_id = int(parts[idx + 1])
-                        with get_connection() as db:
-                            like_count = PostsModel.get_like_count(post_id, db=db)
-                        return JSONResponse(status_code=200, content={"code": ApiCode.ALREADY_LIKED.value, "data": {"likeCount": like_count}})
-                except (ValueError, IndexError):
-                    pass
-            return JSONResponse(status_code=409, content={"code": ApiCode.CONFLICT.value, "data": None})
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "code": ApiCode.NICKNAME_ALREADY_EXISTS.value,
+                        "data": None,
+                    },
+                )
+            # 좋아요 중복 등: Service에서 IntegrityError를 catch하여 AlreadyLikedException(data=...)으로 변환.
+            # 여기서는 Model을 참조하지 않고 409 CONFLICT만 반환.
+            return JSONResponse(
+                status_code=409, content={"code": ApiCode.CONFLICT.value, "data": None}
+            )
         if errno in (1451, 1452):
-            return JSONResponse(status_code=409, content={"code": ApiCode.CONSTRAINT_ERROR.value, "data": None})
-        return JSONResponse(status_code=400, content={"code": ApiCode.INVALID_REQUEST.value, "data": None})
+            return JSONResponse(
+                status_code=409,
+                content={"code": ApiCode.CONSTRAINT_ERROR.value, "data": None},
+            )
+        return JSONResponse(
+            status_code=400,
+            content={"code": ApiCode.INVALID_REQUEST.value, "data": None},
+        )
 
     @app.exception_handler(OperationalError)
     async def operational_error_handler(request: Request, exc: OperationalError):
@@ -107,7 +149,33 @@ def register_exception_handlers(app: FastAPI) -> None:
             type(exc).__name__,
             str(exc),
         )
-        return JSONResponse(status_code=500, content={"code": ApiCode.DB_ERROR.value, "data": None})
+        return JSONResponse(
+            status_code=500, content={"code": ApiCode.DB_ERROR.value, "data": None}
+        )
+
+    @app.exception_handler(DatabaseError)
+    async def database_error_handler(request: Request, exc: DatabaseError):
+        """IntegrityError/OperationalError 외 DB 예외(InterfaceError, DataError, ProgrammingError 등) → DB_ERROR."""
+        request_id = getattr(request.state, "request_id", "")
+        logger.exception(
+            "request_id=%s DB DatabaseError: path=%s exception=%s: %s",
+            request_id,
+            request.url.path,
+            type(exc).__name__,
+            str(exc),
+        )
+        return JSONResponse(
+            status_code=500, content={"code": ApiCode.DB_ERROR.value, "data": None}
+        )
+
+    @app.exception_handler(BaseProjectException)
+    async def project_exception_handler(request: Request, exc: BaseProjectException):
+        """도메인 커스텀 예외 → ApiResponse 규격 { code, data, message? }. 예외 객체만 사용, Model 미참조."""
+        code_val = exc.code.value if isinstance(exc.code, ApiCode) else str(exc.code)
+        content: dict = {"code": code_val, "data": getattr(exc, "data", None)}
+        if getattr(exc, "message", None) is not None:
+            content["message"] = exc.message
+        return JSONResponse(status_code=exc.status_code, content=content)
 
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
@@ -122,4 +190,3 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=500,
             content={"code": ApiCode.INTERNAL_SERVER_ERROR.value, "data": None},
         )
-

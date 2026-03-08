@@ -1,12 +1,19 @@
 # 이미지 업로드 정책. purpose 검증, 매직바이트 포맷 판별, 청크 읽기, 저장(스레드).
+# 커스텀 예외 사용 → 전역 handler가 400 응답 처리.
 import asyncio
 import uuid
 from typing import List, Literal, Optional
 
 from fastapi import UploadFile
 
+from app.common.exceptions import (
+    FileSizeExceededException,
+    InvalidFileTypeException,
+    InvalidImageFileException,
+    InvalidRequestException,
+    MissingRequiredFieldException,
+)
 from app.core.config import settings
-from app.common import ApiCode, raise_http_error
 from app.infra.storage import storage_save
 
 ImagePurpose = Literal["signup", "profile", "post"]
@@ -15,7 +22,7 @@ IMAGE_PURPOSES: tuple[ImagePurpose, ...] = ("signup", "profile", "post")
 
 def validate_purpose(purpose: ImagePurpose) -> None:
     if purpose not in IMAGE_PURPOSES:
-        raise_http_error(400, ApiCode.INVALID_REQUEST)
+        raise InvalidRequestException()
 
 
 def sniff_image_type(content_start: bytes) -> tuple[str, str]:
@@ -23,14 +30,18 @@ def sniff_image_type(content_start: bytes) -> tuple[str, str]:
     PNG_HEADER = b"\x89PNG\r\n\x1a\n"
 
     if len(content_start) < 3:
-        raise_http_error(400, ApiCode.INVALID_IMAGE_FILE)
+        raise InvalidImageFileException()
     if content_start[:3] == JPEG_HEADER:
         return "image/jpeg", "jpg"
     if len(content_start) >= 8 and content_start[:8] == PNG_HEADER:
         return "image/png", "png"
-    if len(content_start) >= 12 and content_start[:4] == b"RIFF" and content_start[8:12] == b"WEBP":
+    if (
+        len(content_start) >= 12
+        and content_start[:4] == b"RIFF"
+        and content_start[8:12] == b"WEBP"
+    ):
         return "image/webp", "webp"
-    raise_http_error(400, ApiCode.INVALID_IMAGE_FILE)
+    raise InvalidImageFileException()
 
 
 async def read_limited(file: UploadFile, max_bytes: int) -> bytes:
@@ -43,10 +54,10 @@ async def read_limited(file: UploadFile, max_bytes: int) -> bytes:
             break
         total += len(chunk)
         if total > max_bytes:
-            raise_http_error(400, ApiCode.FILE_SIZE_EXCEEDED)
+            raise FileSizeExceededException()
         buf.extend(chunk)
     if not buf:
-        raise_http_error(400, ApiCode.INVALID_IMAGE_FILE)
+        raise InvalidImageFileException()
     return bytes(buf)
 
 
@@ -63,7 +74,7 @@ async def save_image_for_media(
 ) -> tuple[str, str, str, int]:
     validate_purpose(purpose)
     if not file:
-        raise_http_error(400, ApiCode.MISSING_REQUIRED_FIELD)
+        raise MissingRequiredFieldException()
     if max_size is None:
         max_size = settings.MAX_FILE_SIZE
     types = allowed_types or settings.ALLOWED_IMAGE_TYPES
@@ -74,7 +85,7 @@ async def save_image_for_media(
     header = content[:SNIFF_HEADER_SIZE]
     ct, ext = sniff_image_type(header)
     if ct not in allowed_set:
-        raise_http_error(400, ApiCode.INVALID_FILE_TYPE)
+        raise InvalidFileTypeException()
 
     key = _generate_key(purpose, ext)
     url = await asyncio.to_thread(storage_save, key, content, ct)

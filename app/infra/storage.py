@@ -14,11 +14,16 @@ def _get_s3_client():
     global _s3_client
     if _s3_client is not None:
         return _s3_client
-    if not settings.S3_BUCKET_NAME or not settings.AWS_ACCESS_KEY_ID or not settings.AWS_SECRET_ACCESS_KEY:
+    if (
+        not settings.S3_BUCKET_NAME
+        or not settings.AWS_ACCESS_KEY_ID
+        or not settings.AWS_SECRET_ACCESS_KEY
+    ):
         raise ValueError(
             "S3_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY must be set when STORAGE_BACKEND=s3"
         )
     import boto3
+
     _s3_client = boto3.client(
         "s3",
         region_name=settings.AWS_REGION,

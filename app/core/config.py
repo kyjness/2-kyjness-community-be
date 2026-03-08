@@ -33,17 +33,25 @@ class Settings:
     # JWT (Access/Refresh). 배포 시 JWT_SECRET_KEY 반드시 변경.
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_SECONDS: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_SECONDS", "900"))
+    ACCESS_TOKEN_EXPIRE_SECONDS: int = int(
+        os.getenv("ACCESS_TOKEN_EXPIRE_SECONDS", "900")
+    )
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
-    REFRESH_TOKEN_COOKIE_NAME: str = os.getenv("REFRESH_TOKEN_COOKIE_NAME", "refresh_token")
+    REFRESH_TOKEN_COOKIE_NAME: str = os.getenv(
+        "REFRESH_TOKEN_COOKIE_NAME", "refresh_token"
+    )
     # Redis (Rate Limit 분산. 비우면 연결 시도 안 함, 미들웨어는 Fail-open)
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()
     REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "20"))
     # Proxy·Trusted Host. TRUST_X_FORWARDED_FOR=True면 X-Forwarded-For 첫 값으로 request.client 보정. TRUSTED_HOSTS=* 이면 미등록
-    TRUST_X_FORWARDED_FOR: bool = os.getenv("TRUST_X_FORWARDED_FOR", "false").lower() == "true"
+    TRUST_X_FORWARDED_FOR: bool = (
+        os.getenv("TRUST_X_FORWARDED_FOR", "false").lower() == "true"
+    )
     # 신뢰 프록시 IP/CIDR. 비어 있으면 TRUST_X_FORWARDED_FOR=True일 때 모든 요청에서 X-Forwarded-For 파싱. 설정 시 해당 대역에서 온 요청만 파싱(IP 스푸핑 방어). 예: 10.0.0.0/8,172.16.0.0/12
     TRUSTED_PROXY_IPS: List[str] = [
-        h.strip() for h in os.getenv("TRUSTED_PROXY_IPS", "").strip().split(",") if h.strip()
+        h.strip()
+        for h in os.getenv("TRUSTED_PROXY_IPS", "").strip().split(",")
+        if h.strip()
     ]
     TRUSTED_HOSTS: List[str] = [
         h.strip() for h in os.getenv("TRUSTED_HOSTS", "*").split(",") if h.strip()
@@ -52,16 +60,26 @@ class Settings:
     RATE_LIMIT_WINDOW: int = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
     RATE_LIMIT_MAX_REQUESTS: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "100"))
     LOGIN_RATE_LIMIT_WINDOW: int = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW", "60"))
-    LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int = int(os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "5"))
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS: int = int(
+        os.getenv("LOGIN_RATE_LIMIT_MAX_ATTEMPTS", "5")
+    )
     # 회원가입용 이미지 (토큰 TTL 초, IP당 업로드 rate limit; MAX=1이면 두 번째 signup 시 업로드만 429되고 /auth/signup 요청 안 나감)
-    SIGNUP_IMAGE_TOKEN_TTL_SECONDS: int = int(os.getenv("SIGNUP_IMAGE_TOKEN_TTL_SECONDS", "3600"))
-    SIGNUP_UPLOAD_RATE_LIMIT_WINDOW: int = int(os.getenv("SIGNUP_UPLOAD_RATE_LIMIT_WINDOW", "3600"))
-    SIGNUP_UPLOAD_RATE_LIMIT_MAX: int = int(os.getenv("SIGNUP_UPLOAD_RATE_LIMIT_MAX", "10"))
+    SIGNUP_IMAGE_TOKEN_TTL_SECONDS: int = int(
+        os.getenv("SIGNUP_IMAGE_TOKEN_TTL_SECONDS", "3600")
+    )
+    SIGNUP_UPLOAD_RATE_LIMIT_WINDOW: int = int(
+        os.getenv("SIGNUP_UPLOAD_RATE_LIMIT_WINDOW", "3600")
+    )
+    SIGNUP_UPLOAD_RATE_LIMIT_MAX: int = int(
+        os.getenv("SIGNUP_UPLOAD_RATE_LIMIT_MAX", "10")
+    )
     # 파일 업로드 (최대 바이트, 허용 content-type)
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "10485760"))
     ALLOWED_IMAGE_TYPES: List[str] = [
         img_type.strip()
-        for img_type in os.getenv("ALLOWED_IMAGE_TYPES", "image/jpeg,image/png").split(",")
+        for img_type in os.getenv("ALLOWED_IMAGE_TYPES", "image/jpeg,image/png").split(
+            ","
+        )
         if img_type.strip()
     ]
     BE_API_URL: str = os.getenv("BE_API_URL", "http://127.0.0.1:8000")
@@ -79,8 +97,12 @@ class Settings:
     # 보안 헤더 (HSTS, Referrer-Policy, Permissions-Policy, CSP)
     HSTS_ENABLED: bool = os.getenv("HSTS_ENABLED", "false").lower() == "true"
     HSTS_MAX_AGE: int = int(os.getenv("HSTS_MAX_AGE", "31536000"))
-    REFERRER_POLICY: str = os.getenv("REFERRER_POLICY", "strict-origin-when-cross-origin")
-    PERMISSIONS_POLICY: str = os.getenv("PERMISSIONS_POLICY", "geolocation=(), microphone=(), camera=()")
+    REFERRER_POLICY: str = os.getenv(
+        "REFERRER_POLICY", "strict-origin-when-cross-origin"
+    )
+    PERMISSIONS_POLICY: str = os.getenv(
+        "PERMISSIONS_POLICY", "geolocation=(), microphone=(), camera=()"
+    )
     CONTENT_SECURITY_POLICY: str = os.getenv(
         "CONTENT_SECURITY_POLICY",
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
@@ -90,9 +112,9 @@ class Settings:
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "3600"))
-    DB_HOST: str = os.getenv("DB_HOST", "localhost")
-    DB_PORT: int = int(os.getenv("DB_PORT", "3306"))
-    DB_USER: str = os.getenv("DB_USER", "root")
+    DB_HOST: str = os.getenv("DB_HOST", "postgres")
+    DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
+    DB_USER: str = os.getenv("DB_USER", "postgres")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
     DB_NAME: str = os.getenv("DB_NAME", "puppytalk")
     WRITER_DB_URL: str = os.getenv("WRITER_DB_URL", "").strip()

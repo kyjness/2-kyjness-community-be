@@ -4,17 +4,12 @@ from typing import List, Optional
 from pydantic import Field, field_validator, model_validator
 
 from app.common import BaseSchema, UserStatus, UtcDatetime
+from app.common.codes import ApiCode
 from app.users.schema import RepresentativeDogInfo
 
 
 class PostIdData(BaseSchema):
-
     id: int
-
-
-class LikeCountData(BaseSchema):
-
-    like_count: int
 
 
 class PostCreateRequest(BaseSchema):
@@ -26,7 +21,7 @@ class PostCreateRequest(BaseSchema):
     @classmethod
     def image_ids_max_five_create(cls, v: Optional[List[int]]) -> Optional[List[int]]:
         if v is not None and len(v) > 5:
-            raise ValueError("POST_FILE_LIMIT_EXCEEDED")
+            raise ValueError(ApiCode.POST_FILE_LIMIT_EXCEEDED.name)
         return v
 
 
@@ -39,7 +34,7 @@ class PostUpdateRequest(BaseSchema):
     @classmethod
     def image_ids_max_five_update(cls, v: Optional[List[int]]) -> Optional[List[int]]:
         if v is not None and len(v) > 5:
-            raise ValueError("POST_FILE_LIMIT_EXCEEDED")
+            raise ValueError(ApiCode.POST_FILE_LIMIT_EXCEEDED.name)
         return v
 
 
@@ -56,13 +51,15 @@ class AuthorInfo(BaseSchema):
         status = getattr(data, "status", None)
         if status is not None and not UserStatus.is_active_value(status):
             if hasattr(data, "id"):
-                return handler({
-                    "id": data.id,
-                    "nickname": "알수없음",
-                    "profile_image_id": None,
-                    "profile_image_url": None,
-                    "representative_dog": None,
-                })
+                return handler(
+                    {
+                        "id": data.id,
+                        "nickname": "알수없음",
+                        "profile_image_id": None,
+                        "profile_image_url": None,
+                        "representative_dog": None,
+                    }
+                )
         return handler(data)
 
 
@@ -79,6 +76,7 @@ class PostResponse(BaseSchema):
     view_count: int = 0
     like_count: int = 0
     comment_count: int = 0
+    is_liked: bool = False
     author: AuthorInfo
     files: List[FileInfo] = Field(default_factory=list)
     created_at: UtcDatetime

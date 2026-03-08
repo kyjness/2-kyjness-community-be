@@ -98,7 +98,9 @@ async def rate_limit_middleware(
         max_count = settings.RATE_LIMIT_MAX_REQUESTS
         code = ApiCode.RATE_LIMIT_EXCEEDED
 
-    allowed, retry_after_seconds = await _check_fixed_window(redis, key, window, max_count)
+    allowed, retry_after_seconds = await _check_fixed_window(
+        redis, key, window, max_count
+    )
     if allowed:
         return await call_next(request)
 

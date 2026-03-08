@@ -6,7 +6,9 @@ from typing import Awaitable, Callable
 from starlette.requests import Request
 from starlette.responses import Response
 
-request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
+request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default=""
+)
 
 
 async def request_id_middleware(

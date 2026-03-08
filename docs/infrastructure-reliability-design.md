@@ -33,9 +33,9 @@
 | **언어·패키지**     | Python 3.8+, Poetry 2.x                                | `pyproject.toml`, `poetry.lock`; 의존성·스크립트 정의                                        |
 | **클라이언트**      | Vanilla JS (ES Module), HTML/CSS                       | SPA (`index.html`, `js/main.js`), `js/config.js`의 `BASE_URL`로 API 호스트 설정            |
 | **WAS**        | FastAPI, Uvicorn(개발) / Gunicorn + Uvicorn worker(프로덕션) | `Dockerfile`: `-w 4`, `UvicornWorker`; `app/main.py` 진입                             |
-| **DB**         | MySQL (pymysql)                                        | `app/db/engine.py`, SQLAlchemy 2.x, Alembic; RDS 배포 시 동일 스택                         |
+| **DB**         | PostgreSQL (psycopg2)                                  | `app/db/engine.py`, SQLAlchemy 2.x, Alembic; RDS 배포 시 동일 스택                         |
 | **ORM·마이그레이션** | SQLAlchemy 2.x, Alembic                                | `app/db/` 하위; 스키마 변경은 `alembic/versions/` 리비전으로 관리                                  |
-| **캐시/세션**      | **현재** MySQL 세션 테이블 / **확장 시** Redis (ElastiCache)     | README·`.env.example`: 세션은 MySQL, `REDIS_URL` 주석 상태; `pyproject.toml`에 redis 의존성 있음 |
+| **캐시/세션**      | **현재** JWT + Redis(Refresh Token·Rate Limit) / 세션 테이블 없음     | README·`.env.example`: `REDIS_URL` 설정 시 Redis; `pyproject.toml`에 redis 의존성 있음 |
 | **스토리지**       | 로컬 파일 / S3 (boto3)                                     | `app/core/storage.py`: `STORAGE_BACKEND=local                                       |
 | **검증·암호화**     | Pydantic v2, bcrypt(비밀번호)                              | 요청·응답 DTO 검증; `app/core/security.py`                                                |
 | **외부 연동**      | 동일 백엔드 REST API, S3 API                                | 프론트는 `js/api.js`에서 `fetch(BASE_URL + endpoint)`, `credentials: 'include'`로 쿠키 전송    |
@@ -66,7 +66,7 @@ graph TD
     end
 
     subgraph Data_Plane["데이터 영역 - 현재"]
-        RDS[(RDS MySQL<br/>세션+비즈니스 데이터)]
+        RDS[(RDS PostgreSQL<br/>비즈니스 데이터)]
         S3[(S3<br/>이미지/정적자산)]
     end
 
@@ -91,7 +91,7 @@ graph TD
 | 2      | **CloudFront**               | HTTPS 종료, 정적 자산(JS/CSS/이미지) 캐시, DDoS 완화, ALB로 동적 요청 전달 | -                         |
 | 3      | **ALB**                      | Multi-AZ 트래픽 분산, 헬스체크, SSL/TLS, 타겟 그룹(EC2) 라우팅         | -                         |
 | 4      | **Auto Scaling Group (WAS)** | Gunicorn+Uvicorn 실행, CPU/요청 수 기반 스케일 아웃, Multi-AZ 배치   | -                         |
-| 5      | **RDS MySQL**                | 쓰기·읽기·세션 저장. (확장 시 Multi-AZ·Read Replica 분리)           | **현재** 단일 DB로 세션+비즈니스 데이터 |
+| 5      | **RDS PostgreSQL**           | 쓰기·읽기. (확장 시 Multi-AZ·Read Replica 분리)                     | **현재** 단일 DB로 비즈니스 데이터 |
 | 6      | **S3**                       | 업로드 이미지, 정적 웹 자산(선택), 버전·수명 주기로 백업                     | -                         |
 | (확장 시) | **RDS Read Replica**         | 읽기 부하 분산(피드·조회)                                        | 현재 미사용                    |
 | (확장 시) | **ElastiCache Redis**        | 세션·캐시·Rate Limit 통합                                    | README: 확장 시 이전 가능        |
@@ -99,7 +99,7 @@ graph TD
 
 ### 1.4 요청 흐름 (단계별)
 
-- **도메인**: `app/domain` — auth, users, media, posts, comments. 각각 router → controller → model → schema 패턴.
+- **도메인**: `app/domain` — auth, users, media, posts, comments, likes. 각각 router → service → model → schema 4계층 패턴.
 - **주요 API 경로**: `v1_router` prefix `/v1`. 예: `/v1/auth/login`, `/v1/auth/logout`, `/v1/users/me`, `/v1/posts`, `/v1/posts/{id}`, `/v1/posts/{id}/comments`, `/v1/media/images` 등.
 - **미들웨어 순서** (요청 방향): CORS → security_headers → rate_limit → access_log → request_id.  
   - CORS: `allow_credentials=True`로 쿠키 전송.  
@@ -113,7 +113,7 @@ graph TD
 3. **미들웨어** — 위 순서대로 통과.
 4. **라우터 매칭** — `/v1/`* → 해당 도메인 router.
 5. **의존성** — `get_db`(Session), `get_current_user`(Cookie → 세션 조회), 작성자 검증 등.
-6. **핸들러 → Controller → Model** — DB/스토리지 접근 후 응답.
+6. **핸들러 → Service → Model** — DB/스토리지 접근 후 응답.
 
 아래 시퀀스 다이어그램은 클라이언트부터 DB·S3까지의 흐름을 요약한다.
 
@@ -123,7 +123,7 @@ sequenceDiagram
     participant CF as CloudFront
     participant ALB as ALB
     participant WAS as WAS (FastAPI)
-    participant RDS as RDS MySQL
+    participant RDS as RDS PostgreSQL
     participant S3 as S3
 
     C->>CF: GET / (HTML/JS/CSS)
@@ -131,7 +131,7 @@ sequenceDiagram
 
     C->>ALB: GET /v1/posts (Cookie)
     ALB->>WAS: 라운드로빈/최소 연결
-    WAS->>RDS: 세션 조회 (sessions 테이블) + 피드 조회
+    WAS->>RDS: 피드 조회 (JWT 검증 후 DB)
     RDS-->>WAS: 결과
     WAS-->>ALB: JSON
     ALB-->>C: 200 OK
@@ -159,7 +159,7 @@ sequenceDiagram
 | **헬스체크**       | `app/main.py` L92–106                | `GET /health` → `check_database()` 호출. 성공 시 200 + `{"status":"ok","database":"connected"}`, 실패 시 **503** + `database: disconnected`. ALB 타겟 그룹 헬스체크 경로로 사용 가능                                                                    |
 | **DB 연결·풀**    | `app/db/engine.py`                   | `create_engine`에 `pool_pre_ping=True`, `pool_recycle=3600`, `connect_timeout=settings.DB_PING_TIMEOUT`(기본 1초). **pool_size 미설정** → SQLAlchemy 기본값 5. 워커 4개 시 프로세스당 5개, 인스턴스당 최대 20 커넥션                                           |
 | **DB 상태 확인**   | `app/db/connection.py`               | `check_database()`: `SELECT 1` 실행으로 연결 검사. `init_database()` 실패 시에도 앱은 기동하며, 요청 시점에 재시도됨(`main.py` 로그 메시지)                                                                                                                       |
-| **세션**         | 설계상 MySQL                            | Redis 미사용. 세션 테이블 + `SESSION_EXPIRY_TIME`, `SESSION_CLEANUP_INTERVAL`로 정리(`app/core/cleanup.py` 연동)                                                                                                                              |
+| **세션**         | JWT + Redis (Refresh Token)             | 세션 테이블 없음. `SESSION_EXPIRY_TIME`, `SESSION_CLEANUP_INTERVAL`은 회원가입 이미지 등 클린업용(`app/core/cleanup.py`)                                                                      |
 | **Rate Limit** | `app/core/middleware/rate_limit.py`  | **인메모리** (워커별 `deque`). `/health` 제외. 전역: `RATE_LIMIT_WINDOW`(60초), `RATE_LIMIT_MAX_REQUESTS`(100). 로그인: `LOGIN_RATE_LIMIT_`*(60초, 5회). 회원가입 업로드: `SIGNUP_UPLOAD_RATE_LIMIT_*`(3600초, 10회). `.env.example`: `REDIS_URL` 비우면 인메모리 |
 | **미들웨어 순서**    | `app/main.py` L57–69                 | CORS → `security_headers` → `rate_limit` → `access_log` → `request_id`                                                                                                                                                           |
 | **설정**         | `app/core/config.py`, `.env.example` | `ENV`별 `.env.{ENV}` 로드. CORS, 세션 TTL, Rate Limit, S3/로컬 스토리지, `DB_PING_TIMEOUT`, `BE_API_URL` 등 환경 변수로 제어                                                                                                                        |
@@ -181,7 +181,7 @@ sequenceDiagram
 
 | 구분         | 현재 구현        | 확장 시 권장 (본 문서 1.2~~1.4, 3~~4절)                  |
 | ---------- | ------------ | ----------------------------------------------- |
-| 세션         | MySQL 테이블    | Redis(ElastiCache)로 이전 시 워커/인스턴스 간 공유, HA 용이    |
+| 세션         | JWT + Redis     | 이미 Redis 사용(Refresh·Rate Limit). 세션 테이블 없음           |
 | Rate Limit | 인메모리(워커별)    | `REDIS_URL` 설정 시 Redis 기반으로 통합 제한 가능            |
 | DB 풀       | 기본 5 (설정 없음) | RDS·워커 수에 맞춰 `pool_size`/`max_overflow` 명시 권장   |
 | 헬스체크       | DB만 검사       | Redis 사용 시 `/health`에서 Redis 연결도 검사해 ALB와 일치시키기 |
@@ -210,7 +210,7 @@ sequenceDiagram
 | ----------------- | -------------------------------- | ------------------------------ | --------- | ------------------------------------------------------------------------------------------ |
 | **DB 커넥션 풀 고갈**   | SQLAlchemy 풀 크기 고정, 장시간 쿼리·락 대기  | `Too many connections`, 5xx 증가 | **높음**    | `engine.py`에 **pool_size 미설정** → 기본 5. 워커 4개면 인스턴스당 20 커넥션. RDS 시 max_connections 내로 조정 필요 |
 | **WAS 스레드/워커 고갈** | Gunicorn worker 수 제한, 블로킹 I/O 대기 | 요청 큐잉·타임아웃, ALB 5xx            | **높음**    | `Dockerfile`: **-w 4** 고정. 스케일 아웃 또는 워커 수 증가 필요                                            |
-| **MySQL 쓰기 한계**   | Single Primary, 인덱스 부족·풀스캔       | 쓰기 지연, 복제 지연(Lag) 증가           | **중간**    | 단일 DB 구성 시 쓰기 집중                                                                           |
+| **PostgreSQL 쓰기 한계** | Single Primary, 인덱스 부족·풀스캔       | 쓰기 지연, 복제 지연(Lag) 증가           | **중간**    | 단일 DB 구성 시 쓰기 집중                                                                           |
 | **네트워크 대역폭**      | EC2 인스턴스 타입별 제한                  | 패킷 드롭, 지연 증가                   | 중간        | -                                                                                          |
 | **Rate Limit 분산** | 인메모리 시 워커별 제한                    | 워커 4개면 IP당 실질 한도가 워커별로 따로 적용됨  | **중간**    | `rate_limit.py`: 워커마다 별도 `deque`. Redis 도입 시 통합 제한 가능                                      |
 | **Redis 연결 수**    | (확장 시) maxclients, 단일 노드         | 연결 거부, 세션/캐시 조회 실패             | **중간**    | 현재 미사용. 확장 시 고려                                                                            |
@@ -265,7 +265,7 @@ graph LR
 | ------- | ------------------------------- | --------------- |
 | **1단계** | DB 풀·WAS 워커 한도 도달               | 새 요청이 대기열에 쌓임   |
 | **2단계** | 응답 지연 증가 → 클라이언트·ALB 재시도 증가     | 동일 자원에 부하 가중    |
-| **3단계** | 타임아웃·5xx 발생, 세션(MySQL) 조회 지연/실패 | 로그인 불가·일부 기능 오류 |
+| **3단계** | 타임아웃·5xx 발생, DB/Redis 조회 지연·실패 | 로그인 불가·일부 기능 오류 |
 | **4단계** | 사용자 이탈·문의 증가, 일부 API 완전 불통      | 서비스 신뢰도 하락      |
 
 
@@ -282,7 +282,7 @@ graph LR
 | ---------------- | ------------------------------------- | --------------------------- |
 | **ALB**          | Multi-AZ 기본 동작                        | AZ 장애 시에도 로드밸런싱 유지          |
 | **EC2 (WAS)**    | 최소 2 AZ, ASG에서 AZ 균등 분배               | 단일 AZ 장애 시 나머지 AZ에서 서비스     |
-| **RDS MySQL**    | Multi-AZ 배포 (Primary + Standby)       | DB 장애 시 자동 페일오버, 데이터 유실 최소화 |
+| **RDS PostgreSQL** | Multi-AZ 배포 (Primary + Standby)     | DB 장애 시 자동 페일오버, 데이터 유실 최소화 |
 | **Read Replica** | 다른 AZ (예: Primary AZ-a, Replica AZ-b) | 읽기 분산 + AZ 격리               |
 | **ElastiCache**  | 복제 그룹 Multi-AZ                        | 프라이머리 장애 시 리드 레플리카 승격       |
 
@@ -386,7 +386,7 @@ CloudWatch (및 RDS/ALB 메트릭) + SNS로 온콜 담당자에게 알림 설정
 
 | 영역           | 핵심 조치                                                                                                                         |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| **아키텍처**     | Client → CloudFront → ALB → WAS(Multi-AZ) → RDS(Multi-AZ + Read Replica), (확장 시) Redis, S3. **현재**: 세션·Rate Limit은 MySQL·인메모리 |
+| **아키텍처**     | Client → CloudFront → ALB → WAS(Multi-AZ) → RDS PostgreSQL(Multi-AZ + Read Replica), Redis, S3. **현재**: Rate Limit은 Redis/인메모리 |
 | **병목 대비**    | DB 풀(`engine.py` pool_size)·WAS 워커(`Dockerfile` -w 4) 정량화, 확장 시 Redis 연결 수 상한, 스케일 아웃으로 수평 확장                                 |
 | **장애 전파 억제** | Circuit Breaker, Throttling(전역·로그인·회원가입 업로드 제한은 코드에 구현됨), 적절한 타임아웃·재시도 정책                                                     |
 | **고가용성**     | Multi-AZ 배치, ALB–ASG 연동, RDS Multi-AZ + Replica, 자동 백업                                                                        |
@@ -407,6 +407,6 @@ CloudWatch (및 RDS/ALB 메트릭) + SNS로 온콜 담당자에게 알림 설정
   - 알림: 내 게시글에 댓글 등록 시 알림 목록 제공.  
   - 관리자: 신고 누적 게시글 숨김, 사용자 제재(ROLE 기반).  
   - 비밀번호 찾기·이메일 인증: 이메일 재설정 링크 발송, 가입 시 이메일 인증 — 도입 시 auth·users 도메인 확장 예정.
-- **인프라 확장(규모 확대 시)**: 세션 저장소는 현재 MySQL이며, 확장 시 Redis(ElastiCache) 등으로 이전 가능하다. 로드밸런서·캐시·메시지 큐 등은 필요 시 단계적으로 도입한다.
+- **인프라 확장(규모 확대 시)**: 세션은 JWT+Redis 사용. 로드밸런서·캐시·메시지 큐 등은 필요 시 단계적으로 도입한다.
 
 

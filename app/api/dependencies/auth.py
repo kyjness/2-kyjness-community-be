@@ -1,10 +1,10 @@
-# 인증 의존성. Authorization Bearer 검증 → CurrentUser. 만료 시 TOKEN_EXPIRED, 무효 시 UNAUTHORIZED.
+# 인증 의존성. Authorization Bearer 검증 → CurrentUser. Full-Async.
 from typing import Optional
 
 import jwt
 from fastapi import Depends, Request
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common import ApiCode, UserStatus, UtcDatetime, raise_http_error
 from app.core.security import verify_access_token
@@ -32,9 +32,35 @@ def _bearer_token(request: Request) -> Optional[str]:
     return auth[7:].strip() or None
 
 
-def get_current_user(
+async def get_current_user_optional(
     request: Request,
-    db: Session = Depends(get_slave_db),
+    db: AsyncSession = Depends(get_slave_db),
+) -> Optional[CurrentUser]:
+    """Bearer 없거나 무효면 None. 로그인 선택 시(예: 댓글 목록 is_liked) 사용."""
+    token = _bearer_token(request)
+    if not token:
+        return None
+    try:
+        payload = verify_access_token(token)
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+    sub = payload.get("sub")
+    if sub is None:
+        return None
+    try:
+        user_id = int(sub)
+    except (TypeError, ValueError):
+        return None
+    async with db.begin():
+        user = await UsersModel.get_user_by_id(user_id, db=db)
+        if not user or not UserStatus.is_active_value(user.status):
+            return None
+        return CurrentUser.model_validate(user)
+
+
+async def get_current_user(
+    request: Request,
+    db: AsyncSession = Depends(get_slave_db),
 ) -> CurrentUser:
     """Bearer 파싱 → verify_access_token → DB 조회. 만료 시 TOKEN_EXPIRED, 무효 시 UNAUTHORIZED."""
     token = _bearer_token(request)
@@ -53,9 +79,12 @@ def get_current_user(
         user_id = int(sub)
     except (TypeError, ValueError):
         raise_http_error(401, ApiCode.UNAUTHORIZED)
-    user = UsersModel.get_user_by_id(user_id, db=db)
-    if not user:
-        raise_http_error(401, ApiCode.UNAUTHORIZED)
-    if not UserStatus.is_active_value(user.status):
-        raise_http_error(403, ApiCode.FORBIDDEN, UserStatus.inactive_message_ko(user.status))
-    return CurrentUser.model_validate(user)
+    async with db.begin():
+        user = await UsersModel.get_user_by_id(user_id, db=db)
+        if not user:
+            raise_http_error(401, ApiCode.UNAUTHORIZED)
+        if not UserStatus.is_active_value(user.status):
+            raise_http_error(
+                403, ApiCode.FORBIDDEN, UserStatus.inactive_message_ko(user.status)
+            )
+        return CurrentUser.model_validate(user)

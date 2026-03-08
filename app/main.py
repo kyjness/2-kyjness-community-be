@@ -32,14 +32,14 @@ async def lifespan(app: FastAPI):
 
     setup_logging()
     log = logging.getLogger(__name__)
-    if not init_database():
+    if not await init_database():
         log.critical("DB 연결 실패로 시작 시 검증 실패. 요청 시점에 재시도됨.")
     else:
-        log.info("MySQL 연결 성공.")
+        log.info("PostgreSQL 연결 성공.")
 
     await init_redis(app)
 
-    cleanup_once()
+    await cleanup_once()
     stop_event = asyncio.Event()
     cleanup_task = None
     if settings.SESSION_CLEANUP_INTERVAL > 0:
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 pass
     await close_redis(app)
-    close_database()
+    await close_database()
 
 
 app = FastAPI(
@@ -109,16 +109,23 @@ def root():
 
 
 @app.get("/health")
-def health():
+async def health():
     from fastapi.responses import JSONResponse
     from app.db import check_database
-    ok = check_database()
+
+    ok = await check_database()
     if ok:
         return JSONResponse(
             status_code=200,
-            content={"code": ApiCode.OK.value, "data": {"status": "ok", "database": "connected"}},
+            content={
+                "code": ApiCode.OK.value,
+                "data": {"status": "ok", "database": "connected"},
+            },
         )
     return JSONResponse(
         status_code=503,
-        content={"code": ApiCode.DB_ERROR.value, "data": {"status": "degraded", "database": "disconnected"}},
+        content={
+            "code": ApiCode.DB_ERROR.value,
+            "data": {"status": "degraded", "database": "disconnected"},
+        },
     )

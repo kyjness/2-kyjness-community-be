@@ -8,7 +8,6 @@ class DogGender(str, Enum):
 
 
 class UserStatus(str, Enum):
-
     ACTIVE = "ACTIVE"  # 정상 이용
     SUSPENDED = "SUSPENDED"  # 정지
     WITHDRAWN = "WITHDRAWN"  # 탈퇴(soft delete)

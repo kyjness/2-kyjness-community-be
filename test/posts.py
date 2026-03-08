@@ -134,12 +134,12 @@ def test_delete_success(client, auth_cookies):
 
 
 def test_add_like_requires_auth(client):
-    res = client.post("/v1/posts/1/likes")
+    res = client.post("/v1/likes/posts/1")
     assert res.status_code == 401
 
 
 def test_add_like_not_found(client, auth_cookies):
-    res = client.post("/v1/posts/99999/likes", cookies=auth_cookies)
+    res = client.post("/v1/likes/posts/99999", cookies=auth_cookies)
     assert res.status_code == 404
 
 
@@ -150,10 +150,11 @@ def test_add_like_success(client, auth_cookies):
         cookies=auth_cookies,
     )
     post_id = create.json()["data"]["postId"]
-    res = client.post(f"/v1/posts/{post_id}/likes", cookies=auth_cookies)
-    assert res.status_code == 201
+    res = client.post(f"/v1/likes/posts/{post_id}", cookies=auth_cookies)
+    assert res.status_code == 200
     assert res.json()["code"] == "LIKE_SUCCESS"
     assert "likeCount" in res.json()["data"]
+    assert res.json()["data"]["isLiked"] is True
 
 
 def test_add_like_already_liked(client, auth_cookies):
@@ -163,19 +164,20 @@ def test_add_like_already_liked(client, auth_cookies):
         cookies=auth_cookies,
     )
     post_id = create.json()["data"]["postId"]
-    client.post(f"/v1/posts/{post_id}/likes", cookies=auth_cookies)
-    res = client.post(f"/v1/posts/{post_id}/likes", cookies=auth_cookies)
+    client.post(f"/v1/likes/posts/{post_id}", cookies=auth_cookies)
+    res = client.post(f"/v1/likes/posts/{post_id}", cookies=auth_cookies)
     assert res.status_code == 200
     assert res.json()["code"] == "ALREADY_LIKED"
+    assert res.json()["data"]["isLiked"] is True
 
 
 def test_delete_like_requires_auth(client):
-    res = client.delete("/v1/posts/1/likes")
+    res = client.delete("/v1/likes/posts/1")
     assert res.status_code == 401
 
 
 def test_delete_like_not_found(client, auth_cookies):
-    res = client.delete("/v1/posts/99999/likes", cookies=auth_cookies)
+    res = client.delete("/v1/likes/posts/99999", cookies=auth_cookies)
     assert res.status_code == 404
 
 
@@ -186,9 +188,10 @@ def test_delete_like_success(client, auth_cookies):
         cookies=auth_cookies,
     )
     post_id = create.json()["data"]["postId"]
-    client.post(f"/v1/posts/{post_id}/likes", cookies=auth_cookies)
-    res = client.delete(f"/v1/posts/{post_id}/likes", cookies=auth_cookies)
-    assert res.status_code == 204
+    client.post(f"/v1/likes/posts/{post_id}", cookies=auth_cookies)
+    res = client.delete(f"/v1/likes/posts/{post_id}", cookies=auth_cookies)
+    assert res.status_code == 200
+    assert res.json()["data"]["isLiked"] is False
 
 
 def test_delete_like_when_not_liked(client, auth_cookies):
@@ -198,5 +201,6 @@ def test_delete_like_when_not_liked(client, auth_cookies):
         cookies=auth_cookies,
     )
     post_id = create.json()["data"]["postId"]
-    res = client.delete(f"/v1/posts/{post_id}/likes", cookies=auth_cookies)
-    assert res.status_code == 204
+    res = client.delete(f"/v1/likes/posts/{post_id}", cookies=auth_cookies)
+    assert res.status_code == 200
+    assert res.json()["data"]["isLiked"] is False

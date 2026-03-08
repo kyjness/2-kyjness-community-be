@@ -1,33 +1,24 @@
-# DB 세션 의존성. get_master_db(CUD) / get_slave_db(Read). yield 후 commit/rollback/close.
-# 주의: 세션은 이미 트랜잭션 중이므로 controller에서 db.begin() 사용 시 InvalidRequestError 발생.
-from typing import Generator
+# DB 세션 의존성. get_master_db(CUD) / get_slave_db(Read). 비동기 AsyncSession. 트랜잭션은 서비스 레이어에서 async with db.begin()으로 관리.
+from collections.abc import AsyncGenerator
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.engine import SessionLocal, SessionLocalReader
-
-
-def get_master_db() -> Generator[Session, None, None]:
-    """CUD용 Writer 세션. yield 후 commit/예외 시 rollback/finally close."""
-    db = SessionLocal()
-    try:
-        yield db
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+from app.db.engine import AsyncSessionLocal, AsyncSessionLocalReader
 
 
-def get_slave_db() -> Generator[Session, None, None]:
-    """조회용 Reader 세션(READ ONLY). yield 후 commit/예외 시 rollback/finally close."""
-    db = SessionLocalReader()
-    try:
-        yield db
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+async def get_master_db() -> AsyncGenerator[AsyncSession, None]:
+    """CUD용 Writer 세션. yield 후 close만 수행. commit/rollback은 서비스에서 async with db.begin()으로 처리."""
+    async with AsyncSessionLocal() as db:
+        try:
+            yield db
+        finally:
+            await db.close()
+
+
+async def get_slave_db() -> AsyncGenerator[AsyncSession, None]:
+    """조회용 Reader 세션(READ ONLY). yield 후 close만 수행."""
+    async with AsyncSessionLocalReader() as db:
+        try:
+            yield db
+        finally:
+            await db.close()

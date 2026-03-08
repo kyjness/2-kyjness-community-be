@@ -16,8 +16,8 @@ pydantic = { version = ">=2.10.0", extras = ["email"] }
 python-dotenv = "1.0.0"
 bcrypt = "4.1.2"
 sqlalchemy = ">=2.0.0"
-pymysql = ">=1.1.0"
-cryptography = ">=41.0.0"
+asyncpg = ">=0.29.0"
+psycopg = { extras = ["binary"], version = ">=3.1.0" }
 python-multipart = ">=0.0.6"
 boto3 = ">=1.28.0"
 gunicorn = ">=21.0.0"
@@ -30,6 +30,7 @@ pytest-asyncio = ">=0.21.0"
 httpx = ">=0.24.0"
 alembic = ">=1.13.0"
 ruff = "^0.15.5"
+poethepoet = "^0.29.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -39,3 +40,11 @@ build-backend = "poetry.core.masonry.api"
 testpaths = ["test"]
 pythonpath = ["."]
 python_files = ["*.py"]
+
+[tool.poe.tasks]
+# Device Guard 우회를 위해 python -m 방식을 기본으로 채택
+run = "python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+test = "python -m pytest test/ -v"
+lint = "python -m ruff check . --fix"
+format = "python -m ruff format ."
+migrate = "python -m alembic upgrade head"

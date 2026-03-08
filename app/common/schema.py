@@ -21,7 +21,6 @@ T = TypeVar("T")
 
 
 class ApiResponse(BaseSchema, Generic[T]):
-
     code: str
     data: Optional[T] = None
     message: Optional[str] = None
@@ -34,7 +33,6 @@ class PaginatedResponse(BaseSchema, Generic[T]):
 
 
 class RootData(BaseSchema):
-
     message: str = ""
     version: str = ""
     docs: str = ""
