@@ -1,18 +1,16 @@
 # 댓글 비즈니스 로직. Full-Async. 생성/삭제 시 게시글 comment_count 조정은 서비스에서 조율.
 from __future__ import annotations
 
-from typing import List, Optional
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.exceptions import CommentNotFoundException, PostNotFoundException
-from app.comments.model import CommentsModel, CommentLikesModel
+from app.comments.model import CommentLikesModel, CommentsModel
 from app.comments.schema import (
     CommentIdData,
     CommentResponse,
-    CommentUpsertRequest,
     CommentsPageData,
+    CommentUpsertRequest,
 )
+from app.common.exceptions import CommentNotFoundException, PostNotFoundException
 
 
 async def _increment_post_comment_count(post_id: int, db: AsyncSession) -> None:
@@ -27,10 +25,14 @@ async def _decrement_post_comment_count(post_id: int, db: AsyncSession) -> None:
     await PostsModel.decrement_comment_count(post_id, db=db)
 
 
-async def _ensure_post_exists(post_id: int, db: AsyncSession) -> None:
+async def _ensure_post_visible(
+    post_id: int,
+    db: AsyncSession,
+    current_user_id: int | None = None,
+) -> None:
     from app.posts.model import PostsModel
 
-    if await PostsModel.get_post_by_id(post_id, db=db) is None:
+    if await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id) is None:
         raise PostNotFoundException()
 
 
@@ -38,9 +40,7 @@ def _comment_to_response(
     c, liked_ids: set, deleted_content_placeholder: str = "삭제된 댓글입니다."
 ):
     """AsyncSession에서는 lazy load 금지이므로, c.replies에 접근하지 않고 필드만 넣어 응답 생성."""
-    is_edited = (
-        c.updated_at > c.created_at if (c.updated_at and c.created_at) else False
-    )
+    is_edited = c.updated_at > c.created_at if (c.updated_at and c.created_at) else False
     is_deleted = c.deleted_at is not None
     content = (c.content if not is_deleted else deleted_content_placeholder) or ""
     return CommentResponse(
@@ -60,12 +60,12 @@ def _comment_to_response(
 
 
 def _build_comment_tree(
-    comments: List,
+    comments: list,
     liked_ids: set,
     sort: str = "latest",
-) -> List[CommentResponse]:
+) -> list[CommentResponse]:
     by_id = {}
-    roots: List[CommentResponse] = []
+    roots: list[CommentResponse] = []
     for c in comments:
         resp = _comment_to_response(c, liked_ids)
         by_id[c.id] = resp
@@ -79,11 +79,7 @@ def _build_comment_tree(
                 parent.replies.append(resp)
             else:
                 roots.append(resp)
-    roots = [
-        r
-        for r in roots
-        if not (getattr(r, "is_deleted", False) and len(r.replies) == 0)
-    ]
+    roots = [r for r in roots if not (getattr(r, "is_deleted", False) and len(r.replies) == 0)]
     if sort == "oldest":
         roots.sort(key=lambda r: r.id)
         for r in roots:
@@ -91,9 +87,7 @@ def _build_comment_tree(
     elif sort == "popular":
         roots.sort(key=lambda r: (getattr(r, "like_count", 0), r.id), reverse=True)
         for r in roots:
-            r.replies.sort(
-                key=lambda x: (getattr(x, "like_count", 0), x.id), reverse=True
-            )
+            r.replies.sort(key=lambda x: (getattr(x, "like_count", 0), x.id), reverse=True)
     else:
         roots.sort(key=lambda r: r.id, reverse=True)
         for r in roots:
@@ -111,15 +105,11 @@ class CommentService:
         db: AsyncSession,
     ) -> CommentIdData:
         async with db.begin():
-            await _ensure_post_exists(post_id, db=db)
+            await _ensure_post_visible(post_id, db=db, current_user_id=user_id)
             parent_id = getattr(data, "parent_id", None)
             if parent_id is not None:
                 parent = await CommentsModel.get_comment_by_id(parent_id, db=db)
-                if (
-                    not parent
-                    or parent.post_id != post_id
-                    or parent.deleted_at is not None
-                ):
+                if not parent or parent.post_id != post_id or parent.deleted_at is not None:
                     raise CommentNotFoundException()
                 if parent.parent_id is not None:
                     raise CommentNotFoundException()
@@ -137,17 +127,22 @@ class CommentService:
         page: int,
         size: int,
         db: AsyncSession,
-        sort: Optional[str] = None,
-        current_user_id: Optional[int] = None,
+        sort: str | None = None,
+        current_user_id: int | None = None,
     ) -> CommentsPageData:
         async with db.begin():
-            await _ensure_post_exists(post_id, db=db)
             from app.posts.model import PostsModel
 
-            post = await PostsModel.get_post_by_id(post_id, db=db)
-            assert post is not None
+            post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id)
+            if not post:
+                raise PostNotFoundException()
             comments = await CommentsModel.get_comments_by_post_id(
-                post_id, page=page, size=size, db=db, fetch_all_for_tree=True
+                post_id,
+                page=page,
+                size=size,
+                db=db,
+                fetch_all_for_tree=True,
+                current_user_id=current_user_id,
             )
             total_count = post.comment_count
             comment_ids = [c.id for c in comments]
@@ -160,7 +155,7 @@ class CommentService:
             )
             result = _build_comment_tree(comments, liked_ids, sort=sort or "latest")
         return CommentsPageData(
-            list=result,
+            items=result,
             total_count=total_count,
             total_pages=1,
             current_page=1,
@@ -175,20 +170,14 @@ class CommentService:
         db: AsyncSession,
     ) -> None:
         async with db.begin():
-            affected = await CommentsModel.update_comment(
-                post_id, comment_id, data.content, db=db
-            )
+            affected = await CommentsModel.update_comment(post_id, comment_id, data.content, db=db)
             if affected == 0:
                 raise CommentNotFoundException()
 
     @classmethod
-    async def delete_comment(
-        cls, post_id: int, comment_id: int, db: AsyncSession
-    ) -> None:
+    async def delete_comment(cls, post_id: int, comment_id: int, db: AsyncSession) -> None:
         async with db.begin():
-            comment = await CommentsModel.get_comment_by_id(
-                comment_id, db=db, include_deleted=True
-            )
+            comment = await CommentsModel.get_comment_by_id(comment_id, db=db, include_deleted=True)
             if comment is None or comment.post_id != post_id:
                 raise CommentNotFoundException()
             if comment.deleted_at is not None:

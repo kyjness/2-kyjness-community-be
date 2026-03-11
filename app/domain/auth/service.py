@@ -1,8 +1,9 @@
 # 인증 비즈니스 로직. 순수 데이터 반환·커스텀 예외. Redis 연동 캡슐화. Full-Async.
+# 멀티 디바이스: Redis Set(rt:{user_id})에 토큰 해시를 멤버로 저장. SADD/SISMEMBER/SREM 사용.
 from __future__ import annotations
 
+import hashlib
 import logging
-from typing import Optional
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,11 @@ logger = logging.getLogger(__name__)
 _REFRESH_KEY_PREFIX = "rt:"
 
 
+def _refresh_token_hash(token: str) -> str:
+    """Refresh 토큰을 Set 멤버로 저장할 때 사용하는 고정 길이 해시. 동일 토큰은 항상 동일 해시."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 class AuthService:
     @classmethod
     async def signup(cls, data: SignUpRequest, db: AsyncSession) -> None:
@@ -46,23 +52,22 @@ class AuthService:
         has_token = bool(data.signup_token)
         if has_image != has_token:
             raise MissingRequiredFieldException()
-        profile_image_id = None
+        hashed = hash_password(data.password)
         async with db.begin():
             if await UsersModel.email_exists(data.email, db=db):
                 raise EmailAlreadyExistsException()
             if await UsersModel.nickname_exists(data.nickname, db=db):
                 raise NicknameAlreadyExistsException()
-        if has_image and has_token:
-            if (
-                await MediaService.verify_signup_token(
-                    data.profile_image_id, data.signup_token, db=db
-                )
-                is None
-            ):
-                raise SignupImageTokenInvalidException()
-            profile_image_id = data.profile_image_id
-        hashed = hash_password(data.password)
-        async with db.begin():
+            profile_image_id = None
+            if has_image and has_token:
+                if (
+                    await MediaService.verify_signup_token(
+                        data.profile_image_id, data.signup_token, db=db
+                    )
+                    is None
+                ):
+                    raise SignupImageTokenInvalidException()
+                profile_image_id = data.profile_image_id
             created = await UsersModel.create_user(
                 data.email,
                 hashed,
@@ -71,16 +76,14 @@ class AuthService:
                 db=db,
             )
             if profile_image_id is not None:
-                await MediaModel.attach_signup_image(
-                    profile_image_id, created.id, db=db
-                )
+                await MediaModel.attach_signup_image(profile_image_id, created.id, db=db)
 
     @classmethod
     async def login(
         cls,
         data: LoginRequest,
         db: AsyncSession,
-        redis: Optional[Redis] = None,
+        redis: Redis | None = None,
         refresh_ttl_seconds: int = 0,
     ) -> tuple[LoginSuccessData, str]:
         async with db.begin():
@@ -103,18 +106,16 @@ class AuthService:
                 access_token=access_token,
             )
         if redis and refresh_ttl_seconds > 0:
-            await redis.set(
-                f"{_REFRESH_KEY_PREFIX}{payload.id}",
-                refresh_token,
-                ex=refresh_ttl_seconds,
-            )
+            key = f"{_REFRESH_KEY_PREFIX}{payload.id}"
+            await redis.sadd(key, _refresh_token_hash(refresh_token))
+            await redis.expire(key, refresh_ttl_seconds)
         return (payload, refresh_token)
 
     @classmethod
     async def logout(
         cls,
-        refresh_token: Optional[str],
-        redis: Optional[Redis] = None,
+        refresh_token: str | None,
+        redis: Redis | None = None,
     ) -> None:
         if not refresh_token:
             return
@@ -122,7 +123,8 @@ class AuthService:
             payload = verify_refresh_token(refresh_token)
             user_id = payload.get("sub")
             if user_id is not None and redis:
-                await redis.delete(f"{_REFRESH_KEY_PREFIX}{user_id}")
+                key = f"{_REFRESH_KEY_PREFIX}{user_id}"
+                await redis.srem(key, _refresh_token_hash(refresh_token))
         except Exception as e:
             logger.warning(
                 "Logout: refresh token revoke failed or invalid token (user_id from payload). %s",
@@ -131,17 +133,15 @@ class AuthService:
             )
 
     @classmethod
-    async def revoke_refresh_for_user(
-        cls, user_id: int, redis: Optional[Redis] = None
-    ) -> None:
+    async def revoke_refresh_for_user(cls, user_id: int, redis: Redis | None = None) -> None:
         if redis:
             await redis.delete(f"{_REFRESH_KEY_PREFIX}{user_id}")
 
     @classmethod
     async def refresh_tokens(
         cls,
-        refresh_token: Optional[str],
-        redis: Optional[Redis],
+        refresh_token: str | None,
+        redis: Redis | None,
         db: AsyncSession,
     ) -> AccessTokenData:
         if not refresh_token:
@@ -149,8 +149,9 @@ class AuthService:
         payload = verify_refresh_token(refresh_token)
         user_id = int(payload["sub"])
         if redis:
-            stored = await redis.get(f"{_REFRESH_KEY_PREFIX}{user_id}")
-            if stored is None or stored != refresh_token:
+            key = f"{_REFRESH_KEY_PREFIX}{user_id}"
+            is_member = await redis.sismember(key, _refresh_token_hash(refresh_token))
+            if not is_member:
                 raise UnauthorizedException()
         async with db.begin():
             user = await UsersModel.get_user_by_id(user_id, db=db)

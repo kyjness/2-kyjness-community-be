@@ -1,13 +1,13 @@
 # 공용 enum. API·스키마·설정에서 허용 값 제한 및 문서화.
-from enum import Enum
+from enum import StrEnum
 
 
-class DogGender(str, Enum):
+class DogGender(StrEnum):
     MALE = "male"
     FEMALE = "female"
 
 
-class UserStatus(str, Enum):
+class UserStatus(StrEnum):
     ACTIVE = "ACTIVE"  # 정상 이용
     SUSPENDED = "SUSPENDED"  # 정지
     WITHDRAWN = "WITHDRAWN"  # 탈퇴(soft delete)

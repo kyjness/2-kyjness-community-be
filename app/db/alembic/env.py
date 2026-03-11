@@ -2,19 +2,18 @@ import sys
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 # 프로젝트 루트를 path에 추가 (script_location이 app/db/alembic 이므로 상위 3단계)
 _root = Path(__file__).resolve().parent.parent.parent.parent
 sys.path.insert(0, str(_root))
 
+from app.comments.model import Comment, CommentLike  # noqa: E402, F401
 from app.db.base import Base  # noqa: E402
-from app.users.model import User, DogProfile  # noqa: E402, F401
+from app.domain.likes.model import PostLike  # noqa: E402, F401
 from app.media.model import Image  # noqa: E402, F401
 from app.posts.model import Post, PostImage  # noqa: E402, F401
-from app.domain.likes.model import PostLike  # noqa: E402, F401
-from app.comments.model import Comment, CommentLike  # noqa: E402, F401
+from app.users.model import DogProfile, Report, User, UserBlock  # noqa: E402, F401
 
 config = context.config
 
@@ -24,6 +23,7 @@ def _set_database_url_if_needed() -> None:
     url = config.get_main_option("sqlalchemy.url", "")
     if not url or url.startswith("driver://"):
         from urllib.parse import quote_plus
+
         from app.core.config import settings
 
         if settings.WRITER_DB_URL:

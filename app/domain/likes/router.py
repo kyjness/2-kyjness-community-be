@@ -10,26 +10,18 @@ from app.domain.likes.service import LikeService
 router = APIRouter(prefix="/likes", tags=["likes"])
 
 
-@router.post(
-    "/posts/{post_id}", status_code=200, response_model=ApiResponse[LikeResponseData]
-)
+@router.post("/posts/{post_id}", status_code=200, response_model=ApiResponse[LikeResponseData])
 async def like_post(
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
-    is_liked, like_count, inserted = await LikeService.like_post(
-        post_id, user.id, db=db
-    )
+    is_liked, like_count, inserted = await LikeService.like_post(post_id, user.id, db=db)
     code = ApiCode.LIKE_SUCCESS.value if inserted else ApiCode.ALREADY_LIKED.value
-    return ApiResponse(
-        code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count)
-    )
+    return ApiResponse(code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count))
 
 
-@router.delete(
-    "/posts/{post_id}", status_code=200, response_model=ApiResponse[LikeResponseData]
-)
+@router.delete("/posts/{post_id}", status_code=200, response_model=ApiResponse[LikeResponseData])
 async def unlike_post(
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     user: CurrentUser = Depends(get_current_user),
@@ -52,13 +44,9 @@ async def like_comment(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
-    is_liked, like_count, inserted = await LikeService.like_comment(
-        comment_id, user.id, db=db
-    )
+    is_liked, like_count, inserted = await LikeService.like_comment(comment_id, user.id, db=db)
     code = ApiCode.LIKE_SUCCESS.value if inserted else ApiCode.ALREADY_LIKED.value
-    return ApiResponse(
-        code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count)
-    )
+    return ApiResponse(code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count))
 
 
 @router.delete(

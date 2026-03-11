@@ -22,6 +22,11 @@ docs
 *.md
 !README.md
 
+# 개발 및 테스트 전용 폴더
+test/
+typings/
+.pytest_cache/
+
 # IDE
 .idea
 .vscode

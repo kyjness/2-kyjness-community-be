@@ -1,11 +1,26 @@
-# 게시글 요청/응답 DTO. PostCreateRequest, PostResponse, 피드·상세 스키마.
-from typing import List, Optional
+# 게시글 요청/응답 DTO. 이미지 개수 제한 검증은 상단 헬퍼 + Annotated로 응집.
+from typing import Annotated
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AfterValidator, Field, model_validator
 
 from app.common import BaseSchema, UserStatus, UtcDatetime
 from app.common.codes import ApiCode
 from app.users.schema import RepresentativeDogInfo
+
+# --- 1. 상수 (없음) ---
+# --- 2. 내부 헬퍼 ---
+
+
+def _image_ids_max_five(v: list[int] | None) -> list[int] | None:
+    if v is not None and len(v) > 5:
+        raise ValueError(ApiCode.POST_FILE_LIMIT_EXCEEDED.name)
+    return v
+
+
+# --- 3. Annotated 재사용 타입 ---
+ImageIdsMaxFive = Annotated[list[int] | None, AfterValidator(_image_ids_max_five)]
+
+# --- 4. 스키마 모델 ---
 
 
 class PostIdData(BaseSchema):
@@ -15,35 +30,21 @@ class PostIdData(BaseSchema):
 class PostCreateRequest(BaseSchema):
     title: str = Field(..., min_length=1, max_length=26)
     content: str = Field(..., min_length=1, max_length=50_000)
-    image_ids: Optional[List[int]] = Field(default=None, max_length=5)
-
-    @field_validator("image_ids")
-    @classmethod
-    def image_ids_max_five_create(cls, v: Optional[List[int]]) -> Optional[List[int]]:
-        if v is not None and len(v) > 5:
-            raise ValueError(ApiCode.POST_FILE_LIMIT_EXCEEDED.name)
-        return v
+    image_ids: ImageIdsMaxFive = None
 
 
 class PostUpdateRequest(BaseSchema):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=26)
-    content: Optional[str] = Field(default=None, min_length=1, max_length=50_000)
-    image_ids: Optional[List[int]] = Field(default=None)
-
-    @field_validator("image_ids")
-    @classmethod
-    def image_ids_max_five_update(cls, v: Optional[List[int]]) -> Optional[List[int]]:
-        if v is not None and len(v) > 5:
-            raise ValueError(ApiCode.POST_FILE_LIMIT_EXCEEDED.name)
-        return v
+    title: str | None = Field(default=None, min_length=1, max_length=26)
+    content: str | None = Field(default=None, min_length=1, max_length=50_000)
+    image_ids: ImageIdsMaxFive = None
 
 
 class AuthorInfo(BaseSchema):
     id: int
     nickname: str
-    profile_image_id: Optional[int] = None
-    profile_image_url: Optional[str] = None
-    representative_dog: Optional[RepresentativeDogInfo] = None
+    profile_image_id: int | None = None
+    profile_image_url: str | None = None
+    representative_dog: RepresentativeDogInfo | None = None
 
     @model_validator(mode="wrap")
     @classmethod
@@ -65,8 +66,8 @@ class AuthorInfo(BaseSchema):
 
 class FileInfo(BaseSchema):
     id: int
-    file_url: Optional[str] = None
-    image_id: Optional[int] = None
+    file_url: str | None = None
+    image_id: int | None = None
 
 
 class PostResponse(BaseSchema):
@@ -78,5 +79,5 @@ class PostResponse(BaseSchema):
     comment_count: int = 0
     is_liked: bool = False
     author: AuthorInfo
-    files: List[FileInfo] = Field(default_factory=list)
+    files: list[FileInfo] = Field(default_factory=list)
     created_at: UtcDatetime

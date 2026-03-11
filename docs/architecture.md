@@ -1,6 +1,6 @@
 # 아키텍처 (Architecture)
 
-이 문서는 **새로 합류한 개발자**가 PuppyTalk 백엔드의 **내부 동작 원리**를 깊이 이해할 수 있도록, 설계 의도(Why)와 실제 코드 흐름(How)을 단계별로 정리한 딥다이브 가이드입니다.  
+이 문서는 PuppyTalk 백엔드의 **내부 동작 원리**를 깊이 이해할 수 있도록, 설계 의도(Why)와 실제 코드 흐름(How)을 단계별로 정리한 딥다이브 가이드입니다.  
 기능 나열이 아니라 **요청이 어떻게 검증·제한·라우팅되는지**, **DB·인증·정합성·성능이 어떤 이유로 설계되었는지**를 중심으로 서술합니다.
 
 ### FastAPI + REST API를 선택한 이유
@@ -29,15 +29,16 @@
 5. [데이터 정합성](#5-데이터-정합성)
 6. [성능 최적화](#6-성능-최적화)
 7. [이미지: signupToken·ref_count](#7-이미지-signuptokenref_count)
+8. [게시글 피드: 검색·정렬·차단·신고](#8-게시글-피드-검색정렬차단신고)
 
 ---
 
 ## 1. 폴더 구조 및 의존성
 
-### 1.1 의존성 단일화 (app/api/dependencies)
+### 1.1 의존성 단일화
 
-요청 스코프에서 쓰는 **인증(CurrentUser, get_current_user)·DB 세션(get_master_db, get_slave_db)·권한(require_post_author, require_comment_author)·쿼리 파싱·클라이언트 식별자(get_client_identifier)**는 **`app/api/dependencies`** 한 곳에서 제공한다. 라우터·핸들러는 여기서만 import하여, "어디서 DB·유저가 주입되는지"를 한눈에 파악할 수 있다.  
-비요청 스코프(cleanup, exception_handlers)용 세션은 **`app/db/session.py`의 `get_connection()`** (비동기 컨텍스트 매니저)만 사용한다.
+요청 스코프에서 쓰는 **인증·DB 세션·권한·쿼리 파싱·클라이언트 식별자**는 dependencies 한 곳에서 제공한다. 라우터·핸들러는 여기서만 주입받아, "DB·유저가 어디서 오는지"를 한눈에 파악할 수 있다.  
+비요청 스코프(cleanup, 예외 핸들러 등)용 DB 연결은 별도 컨텍스트 매니저로만 사용한다.
 
 ### 1.2 폴더 구조 요약
 
@@ -65,6 +66,8 @@ flowchart LR
         comments[comments]
         likes[likes]
         media[media]
+        reports[reports]
+        dogs[dogs]
     end
 
     auth --> users
@@ -76,6 +79,9 @@ flowchart LR
     comments --> posts
     likes --> posts
     likes --> comments
+    reports --> posts
+    reports --> comments
+    dogs --> users
 ```
 
 **상세 (계층별·참조 대상 명시)**
@@ -162,6 +168,8 @@ flowchart TB
 - **comments**: `CommentService`는 댓글 수 동기화를 위해 `PostsModel`만 참조(함수 내부 임포트).
 - **likes**: 라우터가 게시글/댓글 존재 여부 확인에 `PostsModel`, `CommentsModel` 사용. `LikeService`는 `PostLikesModel`, `CommentsModel`(get_like_count), `CommentLikesModel`(create/delete·like_count 갱신), `PostsModel`(like_count 갱신) 사용.
 - **media**: 다른 도메인을 참조하지 않음.
+- **reports**: `ReportService`가 게시글·댓글 신고 시 `PostsModel`·`CommentsModel`의 `report_count` 증가·`blinded_at` 설정.
+- **dogs**: `UserService`·`UsersModel`에서 `DogProfile` 관리. users 도메인에 포함.
 
 ---
 
@@ -175,23 +183,25 @@ flowchart TB
 [클라이언트]  HTTP 요청 (JSON body, Cookie)
     │
     ▼
-① Lifespan (앱 시작 1회, main.py)
-   → init_database() 로 DB 연결 확인. 실패 시 log.critical 후 요청 시점에 재시도.
-   → REDIS_URL 있으면 ConnectionPool·Redis 생성, app.state.redis 저장. 실패 시 Fail-open.
-   → cleanup_once() 1회 실행 후, SESSION_CLEANUP_INTERVAL > 0 이면 run_loop_async(stop_event) asyncio 태스크 시작.
-   → yield 이후(종료 시): stop_event.set() → cleanup 태스크 대기(최대 15초) → redis.aclose() → close_database().
+① Lifespan (앱 시작 1회)
+   → DB 연결 확인. 실패 시 log 후 요청 시점에 재시도.
+   → REDIS_URL 있으면 Redis 연결 풀 생성·저장. 실패 시 Fail-open.
+   → cleanup_once 1회 실행 후, SESSION_CLEANUP_INTERVAL > 0 이면 주기적 정리 태스크 시작.
+   → yield 이후(종료 시): 정리 태스크 종료 대기 → Redis 연결 종료 → DB 연결 종료.
 
-② GET /health (main.py)
+② GET /health
    → check_database() 호출. 성공 200 + { code, data: { status: "ok", database: "connected" } }, 실패 503 + { code: DB_ERROR, data: { status: "degraded", database: "disconnected" } }.
 
-③ 미들웨어 (요청마다, main.py app.middleware("http")(...) 등록 역순)
-   proxy_headers → request_id → access_log → rate_limit → security_headers (2.1 미들웨어 순서 참고).
+③ 미들웨어 (요청마다)
+   **순수 ASGI**(add_middleware): RequestIdMiddleware, ProxyHeadersMiddleware, RateLimitMiddleware, GZipMiddleware. LIFO이므로 **코드상 최하단에 등록한 RequestIdMiddleware**가 요청 진입 시 **가장 먼저** 실행되어 UUID4 발급·scope["state"]["request_id"] 주입. GZip은 안쪽에 두어 응답 body만 압축(1KB 미만은 미압축).
+   **함수형**(middleware("http")): security_headers, access_log.
+   실행 순서: request_id → proxy_headers → rate_limit → gzip → access_log → security_headers (2.1 미들웨어 순서 참고).
 
-④ 라우터 매칭 (main.py: app.include_router(v1_router), app/api/v1.py)
+④ 라우터 매칭
    v1_router = APIRouter(prefix="/v1"). include 순서: auth → users → media → posts → comments.
    예: /v1/auth/login, /v1/users/me, /v1/posts, /v1/posts/{id}/comments.
 
-⑤ 의존성 (Depends, app/api/dependencies)
+⑤ 의존성 (Depends)
    → get_master_db / get_slave_db: 요청마다 AsyncSession 주입. 트랜잭션은 서비스에서 `async with db.begin():`으로만 시작·커밋(autobegin=False). finally에서 세션 close.
    → get_current_user: Authorization Bearer 검증 → CurrentUser. 만료 시 401 + TOKEN_EXPIRED.
    → require_post_author / require_comment_author: 게시글·댓글 수정/삭제 시 작성자 본인 여부.
@@ -202,43 +212,47 @@ flowchart TB
 ⑦ Route 핸들러 → Service → Model
    라우터가 Service를 호출하고 반환값을 ApiResponse로 포장. 비즈니스 로직·도메인 간 조율은 Service에서 수행. Model은 AsyncSession만 사용하며, 트랜잭션은 Service의 `async with db.begin():` 블록에서만 시작·커밋됨.
 
-⑧ 예외 핸들러 (app/core/exception_handlers.py, register_exception_handlers(app))
-   RequestValidationError → 400 + code. HTTPException → status_code + { code, data }. IntegrityError/OperationalError 등 DB 예외 → 500/503 + code. 응답 형식 { code, data [, message] } 통일.
+⑧ 예외 핸들러
+   RequestValidationError → 400. HTTPException → status_code. DB 예외·Exception(catch-all) → 500/503. 모든 에러 응답은 { code, message, data } 형식 통일. 500 시 클라이언트에는 스택/쿼리 노출 없이 "Internal Server Error" 등 마스킹 메시지만 반환, 서버 로그에 request_id와 함께 기록.
     │
     ▼
-HTTP 응답  { "code": "...", "data": { ... } }
+HTTP 응답  { "code": "...", "message": "...", "data": ... }  (에러 시에도 X-Request-ID 헤더 포함)
 ```
 
 ### 2.1 미들웨어 순서
 
+**등록 방식**: RequestId·ProxyHeaders·RateLimit·GZip은 **순수 ASGI**로 `add_middleware()` 등록. Starlette LIFO이므로 **코드상 가장 마지막에 등록한 미들웨어**가 요청 진입 시 **가장 먼저** 실행된다. RequestIdMiddleware를 **최하단**에 두어 맨 먼저 ID를 발급하고, 이어서 ProxyHeaders(IP) → RateLimit → GZip 순으로 실행된다. 나머지(security_headers, access_log)는 `app.middleware("http")(...)`로 함수형 등록.
+
 | 순서 | 단계 | 의도(Why) |
 |------|------|-----------|
-| 1 | **Proxy Headers** | Nginx/ALB 뒤에서 실제 클라이언트 IP를 쓰기 위해 `X-Forwarded-For`를 사용할 수 있으나, **직접 파싱하면 IP 스푸핑**에 취약하다. 이 미들웨어는 **신뢰할 수 있는 프록시 IP**(`TRUSTED_PROXY_IPS`)에서 온 요청일 때만 첫 번째 값을 `request.scope["client"]`에 반영한다. Rate Limit·접근 로그는 **이후 항상 `request.client.host`만** 사용해, 한 번 검증된 IP만 신뢰한다. |
-| 2 | **Request ID** | `X-Request-ID` 생성 후 `request.state`·contextvars에 설정. 이후 모든 로그에 `[%(request_id)s]`가 자동 포함되어 **요청 단위 추적**이 가능해진다. |
-| 3 | **Access Log** | 요청 전 구간 시간 측정 → `call_next` 실행. 4xx는 WARNING, 5xx·미처리 예외는 ERROR·traceback 기록. DEBUG 시 응답에 `X-Process-Time` 헤더 추가. |
-| 4 | **Rate Limit** | Redis 기반 **Fixed Window**. 경로별로 전역(`rl:global:{ip}`), 로그인(`rl:login:{ip}`), 회원가입 업로드(`rl:signup_upload:{ip}`) 키를 두고, **Lua 스크립트**(INCR + EXPIRE + TTL)로 원자적으로 카운트·TTL을 처리한다. Redis 미설정·예외 시 **Fail-open**(요청 허용)으로 가용성을 우선한다. OPTIONS·`/health`는 제외. |
-| 5 | **Security Headers** | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, CSP(설정 시) 등으로 클릭재킹·MIME 스니핑 등을 완화한다. |
+| 1 | **Request ID** | 순수 ASGI. 요청 진입 시 UUID4 발급 → `scope.setdefault("state", {})["request_id"]` 저장(FastAPI의 `request.state.request_id`와 동일). `send`를 래핑해 `http.response.start` 시 **응답 헤더에 X-Request-ID 주입**하므로 4xx/5xx 예외 응답에도 헤더가 포함되어 프론트에서 에러 리포트 시 ID를 첨부할 수 있다. contextvars에 설정되어 로그 포맷 `[%(request_id)s]`로 **요청 단위 추적** 가능. |
+| 2 | **Proxy Headers** | 순수 ASGI(scope/receive/send). Nginx/ALB 뒤에서 실제 클라이언트 IP를 쓰기 위해 `X-Forwarded-For`를 사용할 수 있으나, **직접 파싱하면 IP 스푸핑**에 취약하다. **신뢰할 수 있는 프록시 IP**(`TRUSTED_PROXY_IPS`)에서 온 요청일 때만 첫 번째 값을 `scope["client"]`에 반영한다. Rate Limit·접근 로그는 **이후 항상 `request.client.host`만** 사용해, 한 번 검증된 IP만 신뢰한다. |
+| 3 | **Rate Limit** | 순수 ASGI. Redis 기반 **Fixed Window**. 경로별 키: 전역·로그인·회원가입 업로드. Lua로 INCR+EXPIRE 원자 처리. **Fail-open**: Redis 장애 시 로그인·회원가입 업로드만 **인메모리 Fallback**(10,000키, eviction) 적용, 나머지 경로는 제한 없이 통과(가용성 우선). OPTIONS·`/health`는 제외. |
+| 4 | **GZip** | Starlette `GZipMiddleware`. 응답 body가 **1KB 이상**일 때만 gzip 압축하여 전송(작은 JSON·에러 응답은 CPU 낭비 방지). `Accept-Encoding: gzip` 클라이언트에만 적용. |
+| 5 | **Access Log** | 요청 전 구간 시간 측정 → `call_next` 실행. 4xx는 WARNING, 5xx·미처리 예외는 ERROR·traceback 기록. DEBUG 시 응답에 `X-Process-Time` 헤더 추가. |
+| 6 | **Security Headers** | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, CSP(설정 시) 등으로 클릭재킹·MIME 스니핑 등을 완화한다. |
 
-이후 **라우터 매칭** → **의존성 주입**(get_master_db / get_slave_db, get_current_user, get_client_identifier, 권한 체크) → **Route 핸들러** → **Service** → **Model** 순으로 진행합니다.
+이후 **라우터 매칭** → **의존성 주입**(get_master_db / get_slave_db, get_current_user, get_client_identifier, 권한 체크) → **Route 핸들러** → **Service** → **Model** 순으로 진행한다.
 
 ### 2.2 요청 흐름 다이어그램
 
 ```mermaid
 flowchart LR
     subgraph 미들웨어
-        A[proxy_headers] --> B[request_id]
-        B --> C[access_log]
-        C --> D[rate_limit]
-        D --> E[security_headers]
+        A[request_id<br/>순수 ASGI] --> B[proxy_headers<br/>순수 ASGI]
+        B --> C[rate_limit<br/>순수 ASGI]
+        C --> D[gzip]
+        D --> E[access_log]
+        E --> F[security_headers]
     end
-    E --> F[라우터]
-    F --> G[의존성: DB·CurrentUser·권한]
-    G --> H[Service]
-    H --> I[Model]
-    I --> J[응답]
+    F --> G[라우터]
+    G --> H[의존성: DB·CurrentUser·권한]
+    H --> I[Service]
+    I --> J[Model]
+    J --> K[응답]
 ```
 
-- **IP 일관성**: Rate Limit·Access Log 모두 **proxy_headers에서 검증된 `request.client.host`**만 사용하므로, 헤더를 직접 파싱하는 코드는 두지 않는다(스푸핑 방어).
+- **IP 일관성**: Rate Limit·Access Log 모두 **ProxyHeadersMiddleware에서 검증된 `request.client.host`**만 사용하므로, 헤더를 직접 파싱하는 코드는 두지 않는다(스푸핑 방어).
 
 ---
 
@@ -260,9 +274,9 @@ Reader 엔진은 Writer와 **별도 풀**로 분리되어 있으며, 동일 URL(
 ### 3.3 풀 및 세션 (Full-Async)
 
 - 엔진은 **psycopg3** (`postgresql+psycopg://`) + **create_async_engine**으로 생성하며, `async_sessionmaker`로 AsyncSession 팩토리(autobegin=False, expire_on_commit=False)를 둔다.
-- 풀 설정(`DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE`, `pool_pre_ping`)은 `app/core/config`에서 환경 변수로 조정한다.
-- 요청 스코프의 세션은 `app/api/dependencies/db.py`의 **get_master_db**·**get_slave_db**에서 AsyncSession을 yield한 뒤, finally에서 close한다. **트랜잭션은 서비스 레이어에서만** `async with db.begin():`으로 시작·커밋한다(모델에서 commit/rollback 호출 금지).
-- **비요청 스코프**(cleanup, exception_handlers 등)에서는 `app/db/session.py`의 **get_connection()** 비동기 컨텍스트 매니저만 사용하며, 호출부에서 `async with db.begin():`으로 트랜잭션을 관리한다.
+- 풀 설정은 환경 변수로 조정한다.
+- 요청 스코프: **get_master_db**·**get_slave_db**에서 AsyncSession을 yield한 뒤 finally에서 close. **트랜잭션은 서비스에서만** `async with db.begin():`으로 시작·커밋한다(모델에서 commit/rollback 금지).
+- 비요청 스코프(cleanup, 예외 핸들러 등): 별도 연결 컨텍스트 매니저를 사용하고, 호출부에서 `async with db.begin():`으로 트랜잭션을 관리한다.
 
 ---
 
@@ -271,18 +285,13 @@ Reader 엔진은 Writer와 **별도 풀**로 분리되어 있으며, 동일 URL(
 ### 4.1 JWT + Redis를 조합한 토큰 무효화(Revocation) 전략
 
 - **Access Token**: Stateless. `Authorization: Bearer <token>`으로 전달. 서버에 저장하지 않아 **수평 확장·멀티 인스턴스**에 유리하다. 만료 시 401 + `TOKEN_EXPIRED`로 프론트에서 Refresh 호출을 유도한다.
-- **Refresh Token**: HttpOnly 쿠키 + **Redis** `rt:{user_id}` 저장. XSS로부터 토큰 값을 읽기 어렵게 하고, **로그아웃·탈퇴·비밀번호 변경 시** Redis에서 해당 키를 삭제해 **즉시 무효화**할 수 있다.
-- 로그인 시 Access는 JSON body, Refresh는 쿠키(HttpOnly, Secure, SameSite=Lax)로 내려준다. Refresh 요청 시 쿠키의 토큰과 Redis 값을 비교한 뒤, 통과 시 새 Access Token만 JSON으로 반환한다.
+- **Refresh Token**: HttpOnly 쿠키 + **Redis Set** `rt:{user_id}` 저장. 토큰은 **SHA256 해시**로 저장·검증하여 원문 노출을 방지한다. **멀티 디바이스 지원**: `SADD`(로그인), `SISMEMBER`(리프레시), `SREM`(단일 기기 로그아웃), `DEL`(전체 무효화—탈퇴·비밀번호 변경). XSS로부터 토큰 값을 읽기 어렵게 하고, 즉시 무효화 가능하다.
+- 로그인 시 Access는 JSON body, Refresh는 쿠키(HttpOnly, Secure, SameSite=Lax)로 내려준다. Refresh 요청 시 쿠키의 토큰 해시가 Redis Set에 있는지 확인한 뒤, 통과 시 새 Access Token만 JSON으로 반환한다.
 
 ### 4.2 Magic Byte 기반 이미지 업로드 검증
 
-업로드 파일의 **Content-Type 헤더만 믿으면** 악의적으로 조작된 파일이 이미지로 저장될 수 있다. `app/domain/media/image_policy.py`에서는 **파일 시그니처(매직 바이트)**로 실제 포맷을 판별한다.
-
-- JPEG: `\xff\xd8\xff`
-- PNG: `\x89PNG\r\n\x1a\n`
-- WebP: `RIFF....WEBP`
-
-헤더가 허용 타입이어도 **바이트 스트림 앞부분**이 위 시그니처와 일치하지 않으면 `INVALID_IMAGE_FILE`로 거부한다. 용량은 청크 단위로 읽으며 `MAX_FILE_SIZE`를 초과하면 중단한다.
+**Content-Type 헤더만 믿으면** 악의적으로 조작된 파일이 이미지로 저장될 수 있다.  
+업로드 시 **파일 시그니처(매직 바이트)**로 실제 포맷을 검증한다. 허용 타입(JPEG, PNG, WebP)이어도 **바이트 스트림 앞부분**이 해당 포맷 시그니처와 일치하지 않으면 거부한다. 용량은 청크 단위로 읽으며 `MAX_FILE_SIZE` 초과 시 중단한다.
 
 ### 4.3 Pydantic을 활용한 XSS 방어
 
@@ -292,22 +301,26 @@ Reader 엔진은 Writer와 **별도 풀**로 분리되어 있으며, 동일 URL(
 
 ## 5. 데이터 정합성
 
-- **게시글(Post)**: `deleted_at`으로 **Soft Delete**. 목록·상세 조회 시 `deleted_at IS NULL`만 노출하며, 삭제 시 댓글(Comment)·좋아요(Like)·post_images·이미지 ref_count를 함께 정리한다.
-- **좋아요(Like)**: 게시글·댓글 좋아요는 **PostLikesModel**·**CommentLikesModel**의 `create`(ON CONFLICT DO NOTHING + RETURNING으로 삽입 여부 판단), like_count 증감은 **UPDATE ... RETURNING**으로 처리하며, 하나의 요청당 **단일 `async with db.begin():`** 블록으로 묶어 트랜잭션을 관리한다. 게시글 삭제 시 좋아요 행은 Hard Delete로 제거한다.
-- **댓글(Comment)**: 루트·대댓글 모두 **Soft Delete**. GET 댓글 목록 시 **대댓글은 삭제된 항목을 쿼리에서 제외**(`deleted_at IS NULL` OR `parent_id IS NULL`)하고, **루트는 삭제된 것도 포함**해 프론트에서 "삭제된 댓글입니다" 표시. 자식이 없는 삭제된 루트는 트리 빌드 시 목록에서 제외한다.
+- **게시글(Post)**: `deleted_at`으로 **Soft Delete**. `blinded_at`은 신고 누적으로 자동 블라인드 시 설정. 목록·상세 조회 시 `deleted_at IS NULL`만 노출하며, 삭제 시 댓글(Comment)·좋아요(Like)·post_images·이미지 ref_count를 함께 정리한다.
+- **좋아요(Like)**: 좋아요 버튼을 **두 번 눌러도** 에러가 나지 않도록, INSERT 시 `ON CONFLICT DO NOTHING`을 사용한다. RETURNING으로 실제 삽입 여부를 확인해 **새로 추가된 경우에만** like_count를 증가시킨다. 취소 시에는 DELETE 후 like_count 감소. 한 요청당 단일 트랜잭션으로 묶어 정합성을 유지한다. 게시글 삭제 시 좋아요 행은 함께 Hard Delete한다.
+- **댓글(Comment)**: 루트·대댓글 모두 **Soft Delete**. **루트 댓글**을 삭제하면 목록에는 남겨 두되 "삭제된 댓글입니다"로 표시한다. **대댓글**을 삭제하면 목록에서 아예 제외한다. 자식이 하나도 없는 삭제된 루트는 트리 빌드 시 제외해 빈 껍데기가 안 보이게 한다.
 
-### 5.2 트랜잭션을 활용한 회원가입–이미지 참조 무결성(ref_count) 보장
+### 5.2 회원가입–이미지 참조 무결성(ref_count)
 
-회원가입 시 **유저 생성**과 **프로필 이미지 소유권 이전**은 서비스 레이어에서 처리한다. `app/domain/auth/service.py`의 **AuthService.signup**에서는:
+회원가입 시 **유저 생성**과 **프로필 이미지 소유권 이전**을 한 트랜잭션에서 처리한다.
 
-1. `UsersModel.create_user(...)` 로 유저 생성.
-2. `profile_image_id`가 있으면 `MediaModel.attach_signup_image(profile_image_id, created.id, db=db)` 호출 — 이미지의 `uploader_id` 설정, `ref_count` 1 증가, `signup_token_hash`·`signup_expires_at` NULL 처리.
+1. 유저 생성.
+2. 프로필 이미지가 있으면: signupToken 검증 → 이미지 `uploader_id` 설정, `ref_count` +1, 토큰 필드 NULL 처리.
 
-이미지가 없을 때는 `attach_signup_image`를 호출하지 않아 정상 가입된다. 트랜잭션 커밋은 서비스 내 `async with db.begin():` 블록 종료 시 자동으로 수행된다.
+이미지가 없으면 2단계를 건너뛰고 정상 가입된다. 트랜잭션은 서비스의 `async with db.begin():` 블록 종료 시 자동 커밋된다.
 
-### 5.3 기타 복수 모델 조작 및 서비스 조율
+### 5.3 복수 테이블 조율
 
-게시글 삭제·댓글 생성/삭제 시 게시글 comment_count 갱신·좋아요·이미지 ref_count 변경 등 **여러 테이블·도메인을 건드리는 로직**은 **Service** 레이어에서 조율한다. (예: **CommentService**에서 댓글 생성 후 `PostsModel.increment_comment_count`, 삭제 후 `PostsModel.decrement_comment_count`. **UserService.update_user_profile**에서 강아지 동기화 및 `MediaModel` ref_count 증감. **PostService.delete_post**는 Model에서 댓글·좋아요·이미지 정리 후 soft delete.)
+**여러 테이블을 함께 갱신해야 하는 로직**은 Service에서 한 트랜잭션으로 처리한다.
+
+- **댓글 생성/삭제** → 게시글의 `comment_count` 증감
+- **게시글 삭제** → 댓글·좋아요·이미지 링크·이미지 ref_count 정리 후 soft delete
+- **프로필 수정(강아지·이미지)** → 강아지 테이블 동기화 + 기존/신규 이미지 ref_count 증감
 
 ---
 
@@ -321,13 +334,21 @@ Reader 엔진은 Writer와 **별도 풀**로 분리되어 있으며, 동일 URL(
 - 메인 쿼리: Post에 **LIMIT/OFFSET**이 정확히 적용되고, N:1인 `Post.user`는 **joinedload**로 유지해도 행 수를 부풀리지 않는다.
 - 보조 쿼리 1회: `post_id IN (...)`으로 해당 포스트들의 `post_images`(및 필요 시 `PostImage.image`)만 추가 로드한다.
 
-따라서 **N+1**을 막으면서도 **페이지네이션**이 DB 레벨에서 올바르게 동작한다. (구현: `app/domain/posts/model.py`의 `get_all_posts`.)
+따라서 **N+1**을 막으면서도 **페이지네이션**이 DB 레벨에서 올바르게 동작한다. **FK 인덱스**: `selectinload`가 발생시키는 `WHERE foreign_key_id IN (...)` 쿼리 성능을 위해, PostImage.post_id·Comment.post_id·DogProfile.owner_id 등 1:N 자식 측 FK 컬럼에는 `index=True`를 두어 인덱스가 생성되도록 했다.
 
-### 6.2 Boto3 S3 클라이언트 싱글톤 패턴
+### 6.2 S3 클라이언트 싱글톤
 
-`app/infra/storage.py`에서는 S3 사용 시 **매 요청마다 `boto3.client("s3", ...)`를 생성하지 않는다**.  
-**Lazy-loading 싱글톤** `_get_s3_client()`를 두고, 첫 호출 시에만 인증 검사 후 클라이언트를 생성해 모듈 전역에 캐시한다. 이후 `_s3_save`·`_s3_delete`는 모두 이 클라이언트를 재사용해 **연결·인증 오버헤드**를 줄인다.  
-`STORAGE_BACKEND=local`인 환경에서는 S3 경로를 타지 않으므로, boto3는 **`_get_s3_client()`가 호출될 때만** import되어 불필요한 의존성이 생기지 않는다.
+S3 사용 시 **매 요청마다 클라이언트를 새로 만들지 않는다**.  
+첫 호출 시에만 생성해 전역에 캐시하고, 이후 업로드·삭제는 모두 해당 클라이언트를 재사용한다. 연결·인증 오버헤드를 줄인다.  
+로컬 저장소(`STORAGE_BACKEND=local`) 환경에서는 S3 코드를 아예 타지 않으므로 boto3 의존성이 로드되지 않는다.
+
+### 6.3 조회수 중복 방지
+
+GET이 멱등해야 하므로 조회수는 **전용 POST 엔드포인트**로만 증가시킨다.
+
+**동작**: 같은 (게시글ID, 클라이언트 식별자) 조합으로 TTL(24시간) 내 재요청이 오면 조회수를 올리지 않는다. 인메모리 dict로 `(post_id, client_identifier)` → 만료 시각을 저장하고, 50,000키 초과 시 오래된 항목을 evict한다.
+
+**클라이언트 식별자**: Rate Limit·Access Log는 ProxyHeaders가 검증한 `request.client`만 쓰지만, 조회수는 X-Forwarded-For를 직접 참조한다. 조회수 조작 영향이 제한적이어서 가용성을 우선한다. 추후 Redis로 분산 전환 가능하다.
 
 ---
 
@@ -342,4 +363,29 @@ Reader 엔진은 Writer와 **별도 풀**로 분리되어 있으며, 동일 URL(
 
 ---
 
-이 문서는 현재 코드 동작과 일치하도록 유지한다. 폐기된 로직(예: 댓글 수를 매번 COUNT(*) 하던 방식, 요청마다 Boto3 클라이언트를 생성하던 방식)은 반영하지 않는다.
+## 8. 게시글 피드: 검색·정렬·차단·신고
+
+### 8.1 검색
+
+게시글 목록 API의 `q` 쿼리 파라미터로 **제목·본문 검색**을 한다.
+
+**동작**: `q`가 있으면 `title ILIKE %pattern%` OR `content ILIKE %pattern%` 조건을 추가한다. 한글·부분 일치가 가능하다. PostgreSQL `pg_trgm` 확장과 GIN 인덱스로 `ILIKE` 패턴 검색 성능을 보완한다.
+
+### 8.2 정렬
+
+게시글 목록: `sort`에 따라 `latest`(최신순, 기본)·`oldest`·`popular`(좋아요순)·`views`(조회수순) 적용.  
+댓글 목록: `latest`·`oldest`·`popular` 지원.
+
+### 8.3 차단(Block) 필터
+
+유저가 다른 유저를 차단하면, **피드·댓글**에서 차단한 유저의 게시글·댓글이 보이지 않는다.
+
+**동작**: 로그인한 유저가 목록/상세를 조회할 때, 쿼리에 "현재 유저가 차단한 유저의 콘텐츠 제외" 조건을 넣는다. 비로그인 사용자에게는 적용하지 않는다.
+
+### 8.4 신고·블라인드
+
+게시글·댓글을 신고할 수 있다. 동일 유저가 동일 대상을 **중복 신고**하면 거부된다.
+
+**동작**: 신고 시 `report_count`를 1 증가시킨다. `report_count`가 임계값(기본 5) 이상이면 **자동 블라인드**된다. 블라인드된 콘텐츠는 관리자 화면에서 검토·해제할 수 있다.
+
+---

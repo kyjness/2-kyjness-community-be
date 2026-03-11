@@ -1,7 +1,7 @@
 # 4xx/5xx·슬로우 요청 접근 로그. request_id, Method, Path, Status, 소요 시간. 4xx→WARNING, 5xx→ERROR.
 import logging
 import time
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from starlette.requests import Request
 from starlette.responses import Response

@@ -99,8 +99,7 @@ class MediaService:
 
     @classmethod
     async def verify_signup_token(cls, image_id: int, token: str, db: AsyncSession):
-        async with db.begin():
-            image = await MediaModel.get_signup_image(image_id, db)
+        image = await MediaModel.get_signup_image(image_id, db)
         if not image or image.uploader_id is not None:
             return None
         expected_hash = hash_token(token)
@@ -118,15 +117,17 @@ class MediaService:
 
     @classmethod
     async def delete_image(cls, image_id: int, user_id: int, db: AsyncSession) -> None:
+        file_key = None
         async with db.begin():
             image = await MediaModel.get_image_by_id(image_id, db=db)
-        if not image or image.uploader_id != user_id:
-            raise ImageNotFoundException()
-        if image.ref_count > 0:
-            raise ImageInUseException()
-        async with db.begin():
+            if not image or image.uploader_id != user_id:
+                raise ImageNotFoundException()
+            if image.ref_count > 0:
+                raise ImageInUseException()
+            file_key = image.file_key
             await MediaModel.delete_image_record(image, db=db)
-        await asyncio.to_thread(storage_delete, image.file_key)
+        if file_key:
+            await asyncio.to_thread(storage_delete, file_key)
 
     @classmethod
     async def decrement_ref_count(cls, image_id: int, db: AsyncSession) -> None:
@@ -161,12 +162,11 @@ class MediaService:
     async def cleanup_expired_signup_images(
         cls, db: AsyncSession
     ) -> tuple[int, list[str]]:
-        async with db.begin():
-            rows = await MediaModel.get_expired_signup_images(db=db)
-        if not rows:
-            return 0, []
         failed_file_keys: list[str] = []
         async with db.begin():
+            rows = await MediaModel.get_expired_signup_images(db=db)
+            if not rows:
+                return 0, []
             for img in rows:
                 try:
                     await asyncio.to_thread(storage_delete, img.file_key)

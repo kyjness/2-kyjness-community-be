@@ -14,6 +14,8 @@ from app.auth.service import AuthService
 from app.common import ApiCode, ApiResponse
 from app.users.schema import (
     AvailabilityData,
+    BlocksData,
+    BlockToggleResponse,
     UpdatePasswordRequest,
     UpdateUserRequest,
     UserAvailabilityQuery,
@@ -24,9 +26,7 @@ from app.users.service import UserService
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-@router.get(
-    "/availability", status_code=200, response_model=ApiResponse[AvailabilityData]
-)
+@router.get("/availability", status_code=200, response_model=ApiResponse[AvailabilityData])
 async def check_availability(
     query: UserAvailabilityQuery = Depends(parse_availability_query),
     db: AsyncSession = Depends(get_slave_db),
@@ -77,3 +77,30 @@ async def delete_me(
     await AuthService.revoke_refresh_for_user(user.id, redis)
     await UserService.delete_user(user.id, db=db)
     return Response(status_code=204)
+
+
+@router.get("/me/blocks", status_code=200, response_model=ApiResponse[BlocksData])
+async def get_my_blocks(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_slave_db),
+):
+    data = await UserService.get_blocked_list(user.id, db=db)
+    return ApiResponse(code=ApiCode.BLOCKS_RETRIEVED.value, data=data)
+
+
+@router.post(
+    "/{target_user_id}/block",
+    status_code=200,
+    response_model=ApiResponse[BlockToggleResponse],
+)
+async def toggle_block_user(
+    target_user_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_master_db),
+):
+    """유저 차단/차단해제 토글. 이미 차단된 경우 해제."""
+    is_blocked = await UserService.toggle_block_user(user.id, target_user_id, db=db)
+    return ApiResponse(
+        code=ApiCode.OK.value,
+        data=BlockToggleResponse(blocked=is_blocked),
+    )

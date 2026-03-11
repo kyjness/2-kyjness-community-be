@@ -1,5 +1,5 @@
-# 전역 스키마 기반. 모든 API 요청/응답은 BaseSchema 상속 → Snake/Camel 자동 변환 및 ORM 매핑.
-from typing import Generic, List, Optional, TypeVar
+# 공통 스키마·응답 래퍼. BaseSchema, ApiResponse, PaginatedResponse 등.
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,12 +22,12 @@ T = TypeVar("T")
 
 class ApiResponse(BaseSchema, Generic[T]):
     code: str
-    data: Optional[T] = None
-    message: Optional[str] = None
+    data: T | None = None
+    message: str | None = None
 
 
 class PaginatedResponse(BaseSchema, Generic[T]):
-    list: List[T] = Field(default_factory=list)
+    items: list[T] = Field(default_factory=list)
     has_more: bool = False
     total: int = 0
 

@@ -80,28 +80,41 @@ class PostService:
         db: AsyncSession,
         q: Optional[str] = None,
         sort: Optional[str] = None,
+        current_user_id: Optional[int] = None,
     ) -> Tuple[List[PostResponse], bool, int]:
         """통합 목록 API: q(검색어) ILIKE, sort: latest|popular|views|oldest."""
         search_q = q.strip() if (q and q.strip()) else None
         async with db.begin():
             posts, has_more = await PostsModel.get_all_posts(
-                page, size, db=db, search_q=search_q, sort=sort
+                page,
+                size,
+                db=db,
+                search_q=search_q,
+                sort=sort,
+                current_user_id=current_user_id,
             )
-            total = await PostsModel.get_posts_count(db=db, search_q=search_q)
+            total = await PostsModel.get_posts_count(
+                db=db, search_q=search_q, current_user_id=current_user_id
+            )
             result = [PostResponse.model_validate(p) for p in posts if p.user]
         return result, has_more, total
 
     @classmethod
     async def record_post_view(
-        cls, post_id: int, client_identifier: str, db: AsyncSession
+        cls,
+        post_id: int,
+        client_identifier: str,
+        db: AsyncSession,
+        current_user_id: Optional[int] = None,
     ) -> None:
         async with db.begin():
-            post = await PostsModel.get_post_by_id(post_id, db=db)
-        if not post:
-            raise PostNotFoundException()
-        if not _consume_view_if_new(post_id, client_identifier):
-            return
-        async with db.begin():
+            post = await PostsModel.get_post_by_id(
+                post_id, db=db, current_user_id=current_user_id
+            )
+            if not post:
+                raise PostNotFoundException()
+            if not _consume_view_if_new(post_id, client_identifier):
+                return
             await PostsModel.increment_view_count(post_id, db=db)
 
     @classmethod
@@ -112,17 +125,19 @@ class PostService:
         current_user_id: Optional[int] = None,
     ) -> PostResponse:
         async with db.begin():
-            post = await PostsModel.get_post_by_id(post_id, db=db)
+            post = await PostsModel.get_post_by_id(
+                post_id, db=db, current_user_id=current_user_id
+            )
             if not post:
                 raise PostNotFoundException()
             if not post.user:
                 raise UserNotFoundException()
             data = PostResponse.model_validate(post)
-        if current_user_id is not None:
-            from app.domain.likes.service import LikeService
+            if current_user_id is not None:
+                from app.domain.likes.service import LikeService
 
-            is_liked = await LikeService.is_post_liked(post_id, current_user_id, db=db)
-            data = data.model_copy(update={"is_liked": is_liked})
+                is_liked = await LikeService.is_post_liked(post_id, current_user_id, db=db)
+                data = data.model_copy(update={"is_liked": is_liked})
         return data
 
     @classmethod

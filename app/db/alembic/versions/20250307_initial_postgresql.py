@@ -8,16 +8,15 @@ Create Date: 2025-03-07
 - No sessions table (JWT+Redis only).
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "initial_pg"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -28,9 +27,7 @@ def upgrade() -> None:
         sa.Column("password", sa.String(255), nullable=False),
         sa.Column("nickname", sa.String(255), nullable=False),
         sa.Column("profile_image_id", sa.Integer(), nullable=True),
-        sa.Column(
-            "status", sa.String(20), nullable=False, server_default=sa.text("'ACTIVE'")
-        ),
+        sa.Column("status", sa.String(20), nullable=False, server_default=sa.text("'ACTIVE'")),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
@@ -47,18 +44,14 @@ def upgrade() -> None:
         sa.Column("content_type", sa.String(255), nullable=True),
         sa.Column("size", sa.Integer(), nullable=True),
         sa.Column("uploader_id", sa.Integer(), nullable=True),
-        sa.Column(
-            "ref_count", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("ref_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("signup_token_hash", sa.String(64), nullable=True),
         sa.Column("signup_expires_at", sa.DateTime(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["uploader_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        op.f("ix_images_uploader_id"), "images", ["uploader_id"], unique=False
-    )
+    op.create_index(op.f("ix_images_uploader_id"), "images", ["uploader_id"], unique=False)
     op.create_index(
         op.f("ix_images_signup_expires_at"),
         "images",
@@ -93,14 +86,10 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["owner_id"], ["users.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["profile_image_id"], ["images.id"], ondelete="SET NULL"
-        ),
+        sa.ForeignKeyConstraint(["profile_image_id"], ["images.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        op.f("ix_dog_profiles_owner_id"), "dog_profiles", ["owner_id"], unique=False
-    )
+    op.create_index(op.f("ix_dog_profiles_owner_id"), "dog_profiles", ["owner_id"], unique=False)
 
     op.create_table(
         "posts",
@@ -108,15 +97,9 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("title", sa.String(255), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column(
-            "view_count", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
-        sa.Column(
-            "like_count", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
-        sa.Column(
-            "comment_count", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("view_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("like_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("comment_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
@@ -124,9 +107,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_posts_user_id"), "posts", ["user_id"], unique=False)
-    op.create_index(
-        op.f("ix_posts_deleted_at_id"), "posts", ["deleted_at", "id"], unique=False
-    )
+    op.create_index(op.f("ix_posts_deleted_at_id"), "posts", ["deleted_at", "id"], unique=False)
 
     op.create_table(
         "post_images",
@@ -139,12 +120,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("image_id", name="uq_post_images_image_id"),
     )
-    op.create_index(
-        op.f("ix_post_images_post_id"), "post_images", ["post_id"], unique=False
-    )
-    op.create_index(
-        op.f("ix_post_images_image_id"), "post_images", ["image_id"], unique=False
-    )
+    op.create_index(op.f("ix_post_images_post_id"), "post_images", ["post_id"], unique=False)
+    op.create_index(op.f("ix_post_images_image_id"), "post_images", ["image_id"], unique=False)
 
     op.create_table(
         "comments",
@@ -160,9 +137,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_comments_post_id"), "comments", ["post_id"], unique=False)
-    op.create_index(
-        op.f("ix_comments_author_id"), "comments", ["author_id"], unique=False
-    )
+    op.create_index(op.f("ix_comments_author_id"), "comments", ["author_id"], unique=False)
 
     op.create_table(
         "likes",

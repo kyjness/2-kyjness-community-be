@@ -2,7 +2,7 @@
 # 커스텀 예외 사용 → 전역 handler가 400 응답 처리.
 import asyncio
 import uuid
-from typing import List, Literal, Optional
+from typing import Literal
 
 from fastapi import UploadFile
 
@@ -35,11 +35,7 @@ def sniff_image_type(content_start: bytes) -> tuple[str, str]:
         return "image/jpeg", "jpg"
     if len(content_start) >= 8 and content_start[:8] == PNG_HEADER:
         return "image/png", "png"
-    if (
-        len(content_start) >= 12
-        and content_start[:4] == b"RIFF"
-        and content_start[8:12] == b"WEBP"
-    ):
+    if len(content_start) >= 12 and content_start[:4] == b"RIFF" and content_start[8:12] == b"WEBP":
         return "image/webp", "webp"
     raise InvalidImageFileException()
 
@@ -67,10 +63,10 @@ def _generate_key(purpose: ImagePurpose, ext: str) -> str:
 
 
 async def save_image_for_media(
-    file: Optional[UploadFile],
+    file: UploadFile | None,
     purpose: ImagePurpose = "post",
-    allowed_types: Optional[List[str]] = None,
-    max_size: Optional[int] = None,
+    allowed_types: list[str] | None = None,
+    max_size: int | None = None,
 ) -> tuple[str, str, str, int]:
     validate_purpose(purpose)
     if not file:

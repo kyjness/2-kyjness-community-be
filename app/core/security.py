@@ -1,6 +1,6 @@
 # 비밀번호 해시·검증(bcrypt), JWT Access/Refresh 토큰 생성·검증.
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
@@ -30,25 +30,21 @@ def verify_password(password: str, hashed_password: str) -> bool:
 
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def create_access_token(sub: int) -> str:
     """sub=user_id. ACCESS_TOKEN_EXPIRE_SECONDS 후 만료. JWT spec에 따라 sub는 문자열로 저장."""
     expire = _now_utc() + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
     payload = {"sub": str(sub), "exp": expire, "iat": _now_utc(), "type": "access"}
-    return jwt.encode(
-        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
-    )
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 def create_refresh_token(sub: int) -> str:
     """sub=user_id. REFRESH_TOKEN_EXPIRE_DAYS 후 만료. Redis rt:{user_id}에 저장해 무효화 가능. JWT spec에 따라 sub는 문자열로 저장."""
     expire = _now_utc() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": str(sub), "exp": expire, "iat": _now_utc(), "type": "refresh"}
-    return jwt.encode(
-        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
-    )
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 def verify_access_token(token: str) -> dict[str, Any]:

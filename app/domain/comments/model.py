@@ -1,14 +1,24 @@
 # 댓글 CRUD. Comment ORM 반환, Controller/매퍼에서 Schema로 직렬화. AsyncSession.
-from typing import List, Optional, Set
 
-from sqlalchemy import or_, select, update, delete, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Text,
+    delete,
+    exists,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import mapped_column, relationship, joinedload
-from sqlalchemy import Integer, Text, DateTime, ForeignKey
+from sqlalchemy.orm import joinedload, mapped_column, relationship
 
 from app.db import Base, utc_now
-from app.users.model import User, DogProfile
+from app.users.model import DogProfile, User, UserBlock
 
 
 class Comment(Base):
@@ -16,30 +26,41 @@ class Comment(Base):
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     post_id = mapped_column(
-        Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True
     )
     author_id = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     parent_id = mapped_column(
-        Integer, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True
+        Integer, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True
     )
     content = mapped_column(Text, nullable=False)
     like_count = mapped_column(Integer, default=0, nullable=False)
+    report_count = mapped_column(Integer, default=0, nullable=False)
+    is_blinded = mapped_column(Boolean, default=False, nullable=False)
     created_at = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at = mapped_column(DateTime(timezone=True), nullable=False)
     deleted_at = mapped_column(DateTime(timezone=True), nullable=True)
 
-    author = relationship(User, foreign_keys=[author_id])
+    author = relationship(User, foreign_keys=[author_id], lazy="raise_on_sql")
     parent = relationship(
         "Comment",
         remote_side="Comment.id",
         back_populates="replies",
         foreign_keys=[parent_id],
+        lazy="raise_on_sql",
     )
-    replies = relationship("Comment", back_populates="parent", foreign_keys=[parent_id])
+    replies = relationship(
+        "Comment",
+        back_populates="parent",
+        foreign_keys=[parent_id],
+        lazy="raise_on_sql",
+    )
     likes = relationship(
-        "CommentLike", back_populates="comment", foreign_keys="CommentLike.comment_id"
+        "CommentLike",
+        back_populates="comment",
+        foreign_keys="CommentLike.comment_id",
+        lazy="raise_on_sql",
     )
 
 
@@ -49,13 +70,11 @@ class CommentLike(Base):
     comment_id = mapped_column(
         Integer, ForeignKey("comments.id", ondelete="CASCADE"), primary_key=True
     )
-    user_id = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
+    user_id = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     created_at = mapped_column(DateTime(timezone=True), nullable=False)
 
-    comment = relationship(Comment, back_populates="likes")
-    user = relationship(User, foreign_keys=[user_id])
+    comment = relationship(Comment, back_populates="likes", lazy="raise_on_sql")
+    user = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
 
 
 class CommentsModel:
@@ -66,7 +85,7 @@ class CommentsModel:
         user_id: int,
         content: str,
         db: AsyncSession,
-        parent_id: Optional[int] = None,
+        parent_id: int | None = None,
     ) -> Comment:
         now = utc_now()
         c = Comment(
@@ -86,7 +105,7 @@ class CommentsModel:
     @classmethod
     async def get_comment_by_id(
         cls, comment_id: int, db: AsyncSession, include_deleted: bool = False
-    ) -> Optional[Comment]:
+    ) -> Comment | None:
         stmt = (
             select(Comment)
             .where(Comment.id == comment_id)
@@ -111,7 +130,8 @@ class CommentsModel:
         *,
         db: AsyncSession,
         fetch_all_for_tree: bool = False,
-    ) -> List[Comment]:
+        current_user_id: int | None = None,
+    ) -> list[Comment]:
         """fetch_all_for_tree=True: no pagination, return all for post (cap 500) to build tree.
         루트 댓글은 삭제된 것도 포함(프론트에서 '삭제된 댓글입니다' 표시).
         대댓글은 삭제된 것은 제외(deleted_at IS NULL인 것만)."""
@@ -119,6 +139,7 @@ class CommentsModel:
             select(Comment)
             .where(
                 Comment.post_id == post_id,
+                Comment.is_blinded.is_(False),
                 or_(Comment.deleted_at.is_(None), Comment.parent_id.is_(None)),
             )
             .options(
@@ -129,6 +150,12 @@ class CommentsModel:
             )
             .order_by(Comment.parent_id.asc().nulls_first(), Comment.id.asc())
         )
+        if current_user_id is not None:
+            block_exists = exists(1).where(
+                UserBlock.blocker_id == current_user_id,
+                UserBlock.blocked_id == Comment.author_id,
+            )
+            stmt = stmt.where(~block_exists)
         if fetch_all_for_tree:
             stmt = stmt.limit(500)
         else:
@@ -149,13 +176,12 @@ class CommentsModel:
                 Comment.deleted_at.is_(None),
             )
             .values(content=content, updated_at=utc_now())
+            .returning(Comment.id)
         )
-        return r.rowcount
+        return len(list(r.scalars().all()))
 
     @classmethod
-    async def delete_comment(
-        cls, post_id: int, comment_id: int, db: AsyncSession
-    ) -> bool:
+    async def delete_comment(cls, post_id: int, comment_id: int, db: AsyncSession) -> bool:
         r = await db.execute(
             update(Comment)
             .where(
@@ -164,26 +190,45 @@ class CommentsModel:
                 Comment.deleted_at.is_(None),
             )
             .values(deleted_at=utc_now())
+            .returning(Comment.id)
         )
-        return r.rowcount > 0
+        return r.scalar_one_or_none() is not None
 
     @classmethod
     async def get_liked_comment_ids_for_user(
-        cls, user_id: int, comment_ids: List[int], db: AsyncSession
-    ) -> Set[int]:
+        cls, user_id: int, comment_ids: list[int], db: AsyncSession
+    ) -> set[int]:
         if not comment_ids:
             return set()
-        return await CommentLikesModel.get_liked_comment_ids_for_user(
-            user_id, comment_ids, db=db
-        )
+        return await CommentLikesModel.get_liked_comment_ids_for_user(user_id, comment_ids, db=db)
 
     @classmethod
     async def get_like_count(cls, comment_id: int, db: AsyncSession) -> int:
-        result = await db.execute(
-            select(Comment.like_count).where(Comment.id == comment_id)
-        )
+        result = await db.execute(select(Comment.like_count).where(Comment.id == comment_id))
         row = result.scalar_one_or_none()
         return row or 0
+
+    @classmethod
+    async def increment_report_count(cls, comment_id: int, db: AsyncSession) -> int | None:
+        stmt = (
+            update(Comment)
+            .where(Comment.id == comment_id)
+            .values(report_count=Comment.report_count + 1)
+            .returning(Comment.report_count)
+        )
+        result = await db.execute(stmt)
+        row = result.one_or_none()
+        return row[0] if row is not None else None
+
+    @classmethod
+    async def set_blinded(cls, comment_id: int, db: AsyncSession) -> bool:
+        r = await db.execute(
+            update(Comment)
+            .where(Comment.id == comment_id)
+            .values(is_blinded=True, updated_at=utc_now())
+            .returning(Comment.id)
+        )
+        return r.scalar_one_or_none() is not None
 
     @classmethod
     async def increment_like_count(cls, comment_id: int, db: AsyncSession) -> int:
@@ -192,9 +237,7 @@ class CommentsModel:
             .where(Comment.id == comment_id)
             .values(like_count=Comment.like_count + 1)
         )
-        result = await db.execute(
-            select(Comment.like_count).where(Comment.id == comment_id)
-        )
+        result = await db.execute(select(Comment.like_count).where(Comment.id == comment_id))
         return result.scalar_one_or_none() or 0
 
     @classmethod
@@ -204,17 +247,15 @@ class CommentsModel:
             .where(Comment.id == comment_id)
             .values(like_count=func.greatest(Comment.like_count - 1, 0))
         )
-        result = await db.execute(
-            select(Comment.like_count).where(Comment.id == comment_id)
-        )
+        result = await db.execute(select(Comment.like_count).where(Comment.id == comment_id))
         return result.scalar_one_or_none() or 0
 
 
 class CommentLikesModel:
     @classmethod
     async def get_liked_comment_ids_for_user(
-        cls, user_id: int, comment_ids: List[int], db: AsyncSession
-    ) -> Set[int]:
+        cls, user_id: int, comment_ids: list[int], db: AsyncSession
+    ) -> set[int]:
         if not comment_ids:
             return set()
         stmt = select(CommentLike.comment_id).where(
@@ -230,9 +271,7 @@ class CommentLikesModel:
         stmt = (
             pg_insert(CommentLike)
             .values(comment_id=comment_id, user_id=user_id, created_at=utc_now())
-            .on_conflict_do_nothing(
-                index_elements=[CommentLike.comment_id, CommentLike.user_id]
-            )
+            .on_conflict_do_nothing(index_elements=[CommentLike.comment_id, CommentLike.user_id])
             .returning(CommentLike.comment_id)
         )
         result = await db.execute(stmt)
@@ -241,12 +280,14 @@ class CommentLikesModel:
     @classmethod
     async def delete(cls, comment_id: int, user_id: int, db: AsyncSession) -> bool:
         r = await db.execute(
-            delete(CommentLike).where(
+            delete(CommentLike)
+            .where(
                 CommentLike.comment_id == comment_id,
                 CommentLike.user_id == user_id,
             )
+            .returning(CommentLike.comment_id)
         )
-        return r.rowcount > 0
+        return r.scalar_one_or_none() is not None
 
     @classmethod
     async def has_like(cls, comment_id: int, user_id: int, db: AsyncSession) -> bool:
@@ -268,9 +309,7 @@ class CommentLikesModel:
             .where(Comment.id == comment_id)
             .values(like_count=Comment.like_count + 1)
         )
-        result = await db.execute(
-            select(Comment.like_count).where(Comment.id == comment_id)
-        )
+        result = await db.execute(select(Comment.like_count).where(Comment.id == comment_id))
         return result.scalar_one_or_none() or 0
 
     @classmethod
@@ -280,7 +319,5 @@ class CommentLikesModel:
             .where(Comment.id == comment_id)
             .values(like_count=func.greatest(Comment.like_count - 1, 0))
         )
-        result = await db.execute(
-            select(Comment.like_count).where(Comment.id == comment_id)
-        )
+        result = await db.execute(select(Comment.like_count).where(Comment.id == comment_id))
         return result.scalar_one_or_none() or 0

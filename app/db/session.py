@@ -1,7 +1,6 @@
 # 비요청 스코프용 세션. get_connection(cleanup/exception 등). 요청 스코프용 get_master_db/get_slave_db는 app.api.dependencies.db.
 from contextlib import asynccontextmanager
 
-
 from app.db.engine import AsyncSessionLocal
 
 

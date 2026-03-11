@@ -118,9 +118,9 @@ def test_me_success(client):
         "/v1/auth/login", json={"email": "me_ok@example.com", "password": "password12"}
     )
     assert login.status_code == 200
-    token = login.json().get("data", {}).get("accessToken") or login.json().get(
-        "data", {}
-    ).get("access_token")
+    token = login.json().get("data", {}).get("accessToken") or login.json().get("data", {}).get(
+        "access_token"
+    )
     assert token
     res = client.get("/v1/users/me", headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200

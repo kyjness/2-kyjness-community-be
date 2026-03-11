@@ -9,13 +9,12 @@ Create Date: 2025-03-07
 - 이 파일은 해당 리비전을 복구하여 체인을 이어주며, upgrade/downgrade는 no-op.
 """
 
-from typing import Sequence, Union
-
+from collections.abc import Sequence
 
 revision: str = "datetime_tz"
-down_revision: Union[str, None] = "add_comment_likes"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "add_comment_likes"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

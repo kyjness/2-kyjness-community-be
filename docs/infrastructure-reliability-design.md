@@ -7,8 +7,8 @@
 
 **관련 문서**
 
-- [README](../README.md) — 기술 스택, 실행 방법, 확장 전략
-- [architecture.md](architecture.md) — 도메인 레이어, 요청·인증 흐름
+- [README](../README.md)
+- [architecture.md](architecture.md)
 - [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra) — Docker/EC2/K8s 배포 정의 (별도 레포)
 
 ---
@@ -31,14 +31,14 @@
 | 구분             | 기술                                                     | 비고                                                                                  |
 | -------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | **언어·패키지**     | Python 3.8+, Poetry 2.x                                | `pyproject.toml`, `poetry.lock`; 의존성·스크립트 정의                                        |
-| **클라이언트**      | Vanilla JS (ES Module), HTML/CSS                       | SPA (`index.html`, `js/main.js`), `js/config.js`의 `BASE_URL`로 API 호스트 설정            |
+| **클라이언트**      | React 19, Vite 8, Tailwind CSS 4, TypeScript           | SPA (`src/`), `src/config.js`·환경변수 `VITE_API_BASE_URL`로 API 베이스 URL 설정 (기본 `/api/v1`) |
 | **WAS**        | FastAPI, Uvicorn(개발) / Gunicorn + Uvicorn worker(프로덕션) | `Dockerfile`: `-w 4`, `UvicornWorker`; `app/main.py` 진입                             |
-| **DB**         | PostgreSQL (psycopg2)                                  | `app/db/engine.py`, SQLAlchemy 2.x, Alembic; RDS 배포 시 동일 스택                         |
+| **DB**         | PostgreSQL (psycopg 비동기)                             | `app/db/engine.py`, SQLAlchemy 2.x AsyncSession, Alembic; RDS 배포 시 동일 스택              |
 | **ORM·마이그레이션** | SQLAlchemy 2.x, Alembic                                | `app/db/` 하위; 스키마 변경은 `alembic/versions/` 리비전으로 관리                                  |
 | **캐시/세션**      | **현재** JWT + Redis(Refresh Token·Rate Limit) / 세션 테이블 없음     | README·`.env.example`: `REDIS_URL` 설정 시 Redis; `pyproject.toml`에 redis 의존성 있음 |
-| **스토리지**       | 로컬 파일 / S3 (boto3)                                     | `app/core/storage.py`: `STORAGE_BACKEND=local                                       |
+| **스토리지**       | 로컬 파일 / S3 (boto3)                                     | `app/core/config.py`: `STORAGE_BACKEND=local` 또는 `s3`; `app/core/storage.py`에서 분기      |
 | **검증·암호화**     | Pydantic v2, bcrypt(비밀번호)                              | 요청·응답 DTO 검증; `app/core/security.py`                                                |
-| **외부 연동**      | 동일 백엔드 REST API, S3 API                                | 프론트는 `js/api.js`에서 `fetch(BASE_URL + endpoint)`, `credentials: 'include'`로 쿠키 전송    |
+| **외부 연동**      | 동일 백엔드 REST API, S3 API                                | 프론트는 `src/api/client.js`(axios)로 `baseURL`·`withCredentials: true` 설정, 쿠키 기반 인증    |
 
 
 ### 1.2 전체 구성도 (Mermaid)
@@ -94,25 +94,28 @@ graph TD
 | 5      | **RDS PostgreSQL**           | 쓰기·읽기. (확장 시 Multi-AZ·Read Replica 분리)                     | **현재** 단일 DB로 비즈니스 데이터 |
 | 6      | **S3**                       | 업로드 이미지, 정적 웹 자산(선택), 버전·수명 주기로 백업                     | -                         |
 | (확장 시) | **RDS Read Replica**         | 읽기 부하 분산(피드·조회)                                        | 현재 미사용                    |
-| (확장 시) | **ElastiCache Redis**        | 세션·캐시·Rate Limit 통합                                    | README: 확장 시 이전 가능        |
+| (선택/확장) | **Redis (ElastiCache)**     | Refresh Token 저장·Rate Limit 분산. `REDIS_URL` 설정 시 사용; 미설정 시 인메모리 Fail-open | 현재 코드에서 `REDIS_URL` 있으면 사용 중 |
 
 
 ### 1.4 요청 흐름 (단계별)
 
-- **도메인**: `app/domain` — auth, users, media, posts, comments, likes. 각각 router → service → model → schema 4계층 패턴.
+- **도메인**: `app/domain` 및 `app` 하위 — auth, users, media, posts, comments, likes, dogs, reports, admin. 각각 router → service → model → schema 4계층 패턴.
 - **주요 API 경로**: `v1_router` prefix `/v1`. 예: `/v1/auth/login`, `/v1/auth/logout`, `/v1/users/me`, `/v1/posts`, `/v1/posts/{id}`, `/v1/posts/{id}/comments`, `/v1/media/images` 등.
-- **미들웨어 순서** (요청 방향): CORS → security_headers → rate_limit → access_log → request_id.  
+- **미들웨어 순서** (LIFO 기준 안→바깥): CORS → security_headers → access_log → GZip → rate_limit → ProxyHeaders → RequestId.  
   - CORS: `allow_credentials=True`로 쿠키 전송.  
+  - GZip: 응답 1KB 이상 시 압축(`minimum_size=1024`), 대역폭 절감.  
   - rate_limit: IP당 전역 제한, 로그인은 별도(분당 5회), 회원가입 업로드 별도.  
+  - ProxyHeaders: X-Forwarded-For 등 프록시 헤더 신뢰(클라이언트 IP).  
+  - RequestId: 요청별 UUID 발급, 응답 헤더 `X-Request-ID`(에러 응답 포함)로 추적.  
   - access_log: 4xx/5xx 시 request_id·Path·Status·소요 시간 로깅.
 
 **인프라 관점 요청 흐름 (단계)**:
 
-1. **Lifespan** — `init_database()`, 세션·미사용 이미지 cleanup 스레드 기동; 종료 시 `close_database()`.
-2. **GET /health** — DB ping, 200/503 (ALB 헬스체크용).
+1. **Lifespan** — `init_database()`, `init_redis(app)`(Refresh Token·Rate Limit), 미사용 이미지 cleanup 태스크 기동; 종료 시 `close_redis`, `close_database()`.
+2. **GET /health** — writer·reader DB 엔진 각각 `SELECT 1`로 ping, 성공 시 200/ 실패 시 503 (ALB 헬스체크용).
 3. **미들웨어** — 위 순서대로 통과.
 4. **라우터 매칭** — `/v1/`* → 해당 도메인 router.
-5. **의존성** — `get_db`(Session), `get_current_user`(Cookie → 세션 조회), 작성자 검증 등.
+5. **의존성** — `get_db`(AsyncSession), `get_current_user`(Cookie·JWT 검증, Refresh Token은 Redis), 작성자 검증 등.
 6. **핸들러 → Service → Model** — DB/스토리지 접근 후 응답.
 
 아래 시퀀스 다이어그램은 클라이언트부터 DB·S3까지의 흐름을 요약한다.
@@ -155,25 +158,26 @@ sequenceDiagram
 
 | 항목             | 구현 위치                                | 현재 값·동작                                                                                                                                                                                                                          |
 | -------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **진입점·라우팅**    | `app/main.py`                        | FastAPI 앱, `lifespan`에서 DB 초기화·세션 클린업 스레드, `/health`·`/`·`/upload` 정적, `v1_router` include                                                                                                                                       |
-| **헬스체크**       | `app/main.py` L92–106                | `GET /health` → `check_database()` 호출. 성공 시 200 + `{"status":"ok","database":"connected"}`, 실패 시 **503** + `database: disconnected`. ALB 타겟 그룹 헬스체크 경로로 사용 가능                                                                    |
-| **DB 연결·풀**    | `app/db/engine.py`                   | `create_engine`에 `pool_pre_ping=True`, `pool_recycle=3600`, `connect_timeout=settings.DB_PING_TIMEOUT`(기본 1초). **pool_size 미설정** → SQLAlchemy 기본값 5. 워커 4개 시 프로세스당 5개, 인스턴스당 최대 20 커넥션                                           |
-| **DB 상태 확인**   | `app/db/connection.py`               | `check_database()`: `SELECT 1` 실행으로 연결 검사. `init_database()` 실패 시에도 앱은 기동하며, 요청 시점에 재시도됨(`main.py` 로그 메시지)                                                                                                                       |
+| **진입점·라우팅**    | `app/main.py`                        | FastAPI 앱, `lifespan`에서 DB·Redis 초기화, 미사용 이미지 cleanup 태스크, `/health`·`/`·`/upload` 정적, `app.api.v1`의 `v1_router` include                                                                                                          |
+| **헬스체크**       | `app/main.py` L114–134               | `GET /health` → `check_database()`(writer·reader 엔진 각각 검사). 성공 시 200 + `{ "code", "data": { "status": "ok", "database": "connected" } }`, 실패 시 **503** + `data.status: degraded`, `database: disconnected`. ALB 타겟 그룹 헬스체크 경로로 사용 가능 |
+| **DB 연결·풀**    | `app/db/engine.py`                   | `create_async_engine`에 `pool_size=settings.DB_POOL_SIZE`(기본 20), `max_overflow`, `pool_recycle=3600`, `pool_pre_ping=True`, `connect_timeout=settings.DB_PING_TIMEOUT`(기본 1초). 워커 4개 시 인스턴스당 최대 80 커넥션(20×4) 수준으로 RDS `max_connections` 내 조정 필요 |
+| **DB 상태 확인**   | `app/db/connection.py`               | `check_database()`: writer_engine·reader_engine 각각 `SELECT 1`로 연결 검사. `init_database()` 실패 시에도 앱은 기동하며, 요청 시점에 재시도됨(`main.py` 로그 메시지)                                                                                           |
 | **세션**         | JWT + Redis (Refresh Token)             | 세션 테이블 없음. `SESSION_EXPIRY_TIME`, `SESSION_CLEANUP_INTERVAL`은 회원가입 이미지 등 클린업용(`app/core/cleanup.py`)                                                                      |
 | **Rate Limit** | `app/core/middleware/rate_limit.py`  | **인메모리** (워커별 `deque`). `/health` 제외. 전역: `RATE_LIMIT_WINDOW`(60초), `RATE_LIMIT_MAX_REQUESTS`(100). 로그인: `LOGIN_RATE_LIMIT_`*(60초, 5회). 회원가입 업로드: `SIGNUP_UPLOAD_RATE_LIMIT_*`(3600초, 10회). `.env.example`: `REDIS_URL` 비우면 인메모리 |
-| **미들웨어 순서**    | `app/main.py` L57–69                 | CORS → `security_headers` → `rate_limit` → `access_log` → `request_id`                                                                                                                                                           |
+| **미들웨어 순서**    | `app/main.py` L72–90                  | CORS → `security_headers` → `access_log` → `GZipMiddleware`(minimum_size=1024) → `RateLimitMiddleware` → `ProxyHeadersMiddleware` → `RequestIdMiddleware`. LIFO이므로 요청 시 RequestId가 맨 먼저 실행. |
+| **전역 예외 처리**   | `app/core/exception_handlers.py`      | 모든 에러 응답을 `{ code, message, data }` 형태로 통일. 500 발생 시 클라이언트에는 스택/쿼리 노출 없이 마스킹, 서버 로그에는 `request_id` 포함해 추적 가능. 응답 헤더 `X-Request-ID`는 에러 시에도 포함. |
 | **설정**         | `app/core/config.py`, `.env.example` | `ENV`별 `.env.{ENV}` 로드. CORS, 세션 TTL, Rate Limit, S3/로컬 스토리지, `DB_PING_TIMEOUT`, `BE_API_URL` 등 환경 변수로 제어                                                                                                                        |
-| **프로덕션 실행**    | `Dockerfile`                         | Gunicorn `-w 4` `-k uvicorn.workers.UvicornWorker`, `-b 0.0.0.0:8000` (ARG PORT로 변경 가능)                                                                                                                                          |
+| **프로덕션 실행**    | `Dockerfile`                         | Python 3.11-slim, Gunicorn `-w 4` `-k uvicorn.workers.UvicornWorker`, `-b 0.0.0.0:8000`. `ARG PORT=8000`은 EXPOSE용; 바인딩 포트 변경 시 CMD 수정·재빌드 필요. TrustedHostMiddleware는 `TRUSTED_HOSTS != ["*"]`일 때만 등록.                              |
 
 
 #### 프론트엔드 (2-kyjness-community-fe)
 
 
-| 항목              | 구현 위치          | 현재 값·동작                                                                                                                                             |
-| --------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **API 베이스 URL** | `js/config.js` | `BASE_URL = 'http://127.0.0.1:8000/v1'`. 배포 시 백엔드 `BE_API_URL`과 맞춰 수정 필요 (주석 참고)                                                                    |
-| **API 호출**      | `js/api.js`    | `api.get/post/patch/delete/postFormData` → `fetch(BASE_URL + endpoint, { credentials: 'include' })`. 401 시 로그인 페이지로 이동(일부 엔드포인트는 `skip401Redirect`) |
-| **라우팅·페이지**     | `js/` 하위       | SPA, `main.js` 등에서 라우팅; 게시글·댓글·프로필·미디어 등은 `/v1/`* API 사용                                                                                            |
+| 항목              | 구현 위치               | 현재 값·동작                                                                                                                                             |
+| --------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **API 베이스 URL** | `src/config.js`     | `VITE_API_BASE_URL` 환경변수 또는 기본값 `'/api/v1'`. 배포 시 백엔드 URL과 맞춰 설정 (프록시/Vite env 참고)                                                                  |
+| **API 호출**      | `src/api/client.js` | axios 인스턴스 `baseURL`·`withCredentials: true`. `api.get/post/patch/delete/postFormData` 등. 401 시 `setUnauthorizedHandler`로 로그인 페이지 이동 등 처리          |
+| **라우팅·페이지**     | `src/` (React Router) | `Router.jsx`, 페이지 컴포넌트; 게시글·댓글·프로필·미디어·관리자 등은 `/v1/`* API 사용. 상태 관리 Zustand                                                                          |
 
 
 #### 현재 구성과 확장 시 차이
@@ -183,8 +187,8 @@ sequenceDiagram
 | ---------- | ------------ | ----------------------------------------------- |
 | 세션         | JWT + Redis     | 이미 Redis 사용(Refresh·Rate Limit). 세션 테이블 없음           |
 | Rate Limit | 인메모리(워커별)    | `REDIS_URL` 설정 시 Redis 기반으로 통합 제한 가능            |
-| DB 풀       | 기본 5 (설정 없음) | RDS·워커 수에 맞춰 `pool_size`/`max_overflow` 명시 권장   |
-| 헬스체크       | DB만 검사       | Redis 사용 시 `/health`에서 Redis 연결도 검사해 ALB와 일치시키기 |
+| DB 풀       | `settings.DB_POOL_SIZE`(기본 20) | RDS `max_connections`·워커 수에 맞춰 조정. 확장 시 Read Replica 분리 권장 |
+| 헬스체크       | DB(writer·reader)만 검사 | Redis 사용 시 `/health`에서 Redis 연결도 검사해 ALB와 일치시키기 |
 
 
 ---
@@ -208,12 +212,12 @@ sequenceDiagram
 
 | 병목 지점             | 원인                               | 증상                             | 영향도       | 현재 코드 기준                                                                                   |
 | ----------------- | -------------------------------- | ------------------------------ | --------- | ------------------------------------------------------------------------------------------ |
-| **DB 커넥션 풀 고갈**   | SQLAlchemy 풀 크기 고정, 장시간 쿼리·락 대기  | `Too many connections`, 5xx 증가 | **높음**    | `engine.py`에 **pool_size 미설정** → 기본 5. 워커 4개면 인스턴스당 20 커넥션. RDS 시 max_connections 내로 조정 필요 |
+| **DB 커넥션 풀 고갈**   | SQLAlchemy 풀 크기 고정, 장시간 쿼리·락 대기  | `Too many connections`, 5xx 증가 | **높음**    | `engine.py`: `pool_size=settings.DB_POOL_SIZE`(기본 20). 워커 4개면 인스턴스당 최대 80 커넥션 수준. RDS `max_connections` 내로 조정 필요 |
 | **WAS 스레드/워커 고갈** | Gunicorn worker 수 제한, 블로킹 I/O 대기 | 요청 큐잉·타임아웃, ALB 5xx            | **높음**    | `Dockerfile`: **-w 4** 고정. 스케일 아웃 또는 워커 수 증가 필요                                            |
 | **PostgreSQL 쓰기 한계** | Single Primary, 인덱스 부족·풀스캔       | 쓰기 지연, 복제 지연(Lag) 증가           | **중간**    | 단일 DB 구성 시 쓰기 집중                                                                           |
 | **네트워크 대역폭**      | EC2 인스턴스 타입별 제한                  | 패킷 드롭, 지연 증가                   | 중간        | -                                                                                          |
 | **Rate Limit 분산** | 인메모리 시 워커별 제한                    | 워커 4개면 IP당 실질 한도가 워커별로 따로 적용됨  | **중간**    | `rate_limit.py`: 워커마다 별도 `deque`. Redis 도입 시 통합 제한 가능                                      |
-| **Redis 연결 수**    | (확장 시) maxclients, 단일 노드         | 연결 거부, 세션/캐시 조회 실패             | **중간**    | 현재 미사용. 확장 시 고려                                                                            |
+| **Redis 연결 수**    | (확장 시) maxclients, 단일 노드         | 연결 거부, Refresh/캐시 조회 실패          | **중간**    | `REDIS_URL` 설정 시 Refresh Token·Rate Limit에 Redis 사용. 미설정 시 인메모리 Fail-open. 확장 시 연결 수 상한 고려 |
 | **ALB 연결/처리량**    | 연결 수·새 연결 생성률 제한                 | 503, Latency 상승                | 낮음(상한 높음) | -                                                                                          |
 
 
@@ -294,7 +298,7 @@ graph LR
 
 | 설정 항목                 | 권장값                                        | 설명                                                                                                          |
 | --------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| **ALB 타겟 그룹**         | HTTP:80 또는 HTTPS:443                       | 헬스체크 경로: `/health`. **현재 구현**: DB 연결 성공 시 200, 실패 시 503 반환(`app/main.py`) → ALB가 503 인스턴스를 Unhealthy로 제외 가능 |
+| **ALB 타겟 그룹**         | HTTP:80 또는 HTTPS:443                       | 헬스체크 경로: `/health`. **현재 구현**: writer·reader DB 엔진 연결 성공 시 200, 실패 시 503 반환(`app/main.py`) → ALB가 503 인스턴스를 Unhealthy로 제외 가능 |
 | **헬스체크**              | 간격 30초, 임계값 2회 실패 Unhealthy, 2회 성공 Healthy | 짧은 일시 장애에 덜 민감                                                                                              |
 | **Deregistration 지연** | 30초                                        | 인스턴스 종료 시 진행 중 요청 완료 유예                                                                                     |
 | **ASG 최소/최대/희망**      | 2 / 10 / 2 (평소)                            | 트래픽 증가 시 10대까지 스케일 아웃                                                                                       |
@@ -377,7 +381,7 @@ CloudWatch (및 RDS/ALB 메트릭) + SNS로 온콜 담당자에게 알림 설정
 
 - **블루/그린 또는 카나리**: ASG 기반으로 새 AMI/버전 배포 후, ALB 타겟 그룹으로 트래픽을 점진적 전환해 롤백 시간 단축.
 - **DB 마이그레이션**: Alembic 마이그레이션은 **비파괴적** 변경 우선 적용, 필요 시 단계별 배포(스키마 → 코드).
-- **헬스체크 일치**: ALB 헬스체크 경로(`/health`)는 **현재 DB만 검사**함. Redis 도입 시 `/health`에서 Redis 연결도 검사해, 장애 인스턴스가 트래픽에서 제외되게 유지할 것.
+- **헬스체크 일치**: ALB 헬스체크 경로(`/health`)는 **현재 DB(writer·reader 엔진)만 검사**함. Redis 사용 시 `/health`에서 Redis 연결도 검사해, 장애 인스턴스가 트래픽에서 제외되게 유지할 것.
 
 ---
 
@@ -402,10 +406,7 @@ CloudWatch (및 RDS/ALB 메트릭) + SNS로 온콜 담당자에게 알림 설정
 - **트래픽 가정**: 본 문서의 장애 시나리오·병목 분석은 평소 동시 접속 약 500명, 초당 요청 약 100건, 이벤트 시 10배 급증(동시 5,000명·RPS 1,000 이상)을 가정한 수치이다. 실제 서비스 규모에 따라 조정할 것.
 - **인프라 배포**: 실제 배포 정의(Docker Compose, EC2, Kubernetes 등)는 PuppyTalk Infra 레포에서 관리한다. 본 보고서의 구성도·권장값은 해당 인프라에 적용할 설계 기준이다.
 - **기능 확장(추후 도입 시)**  
-  - 검색/필터: 견종·지역·태그 기반 게시글 검색.  
-  - 신고/차단: 게시글 신고, 사용자 차단(차단한 사용자 글 숨김).  
   - 알림: 내 게시글에 댓글 등록 시 알림 목록 제공.  
-  - 관리자: 신고 누적 게시글 숨김, 사용자 제재(ROLE 기반).  
   - 비밀번호 찾기·이메일 인증: 이메일 재설정 링크 발송, 가입 시 이메일 인증 — 도입 시 auth·users 도메인 확장 예정.
 - **인프라 확장(규모 확대 시)**: 세션은 JWT+Redis 사용. 로드밸런서·캐시·메시지 큐 등은 필요 시 단계적으로 도입한다.
 

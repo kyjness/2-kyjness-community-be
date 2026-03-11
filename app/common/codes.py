@@ -1,8 +1,8 @@
 # API 응답 code 상수 (ApiCode enum). HTTP 상태·메시지 매핑은 docs/api-codes.md 참고.
-from enum import Enum
+from enum import StrEnum
 
 
-class ApiCode(str, Enum):
+class ApiCode(StrEnum):
     # --- 공통 ---
     OK = "OK"
     # --- Auth ---
@@ -20,6 +20,7 @@ class ApiCode(str, Enum):
     USER_UPDATED = "USER_UPDATED"
     PASSWORD_UPDATED = "PASSWORD_UPDATED"
     USER_NOT_FOUND = "USER_NOT_FOUND"
+    BLOCKS_RETRIEVED = "BLOCKS_RETRIEVED"
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
     # --- Posts ---
     POST_UPLOADED = "POST_UPLOADED"
@@ -65,3 +66,6 @@ class ApiCode(str, Enum):
     CONSTRAINT_ERROR = "CONSTRAINT_ERROR"
     DB_ERROR = "DB_ERROR"
     HTTP_ERROR = "HTTP_ERROR"
+    # --- Reports ---
+    REPORT_SUBMITTED = "REPORT_SUBMITTED"
+    ALREADY_REPORTED = "ALREADY_REPORTED"

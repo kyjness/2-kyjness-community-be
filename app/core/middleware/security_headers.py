@@ -1,5 +1,5 @@
 # 보안 헤더. X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, CSP.
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from starlette.requests import Request
 from starlette.responses import Response

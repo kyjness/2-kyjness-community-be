@@ -18,8 +18,9 @@ async def init_redis(app) -> None:
             max_connections=settings.REDIS_MAX_CONNECTIONS,
             decode_responses=True,
         )
-        app.state.redis = Redis(connection_pool=pool)
-        await app.state.redis.ping()
+        client: Redis = Redis(connection_pool=pool)
+        app.state.redis = client
+        await client.ping()
         log.info("Redis connection pool initialized.")
     except Exception as e:
         log.warning("Redis 연결 실패: %s. Rate limit 미들웨어는 Fail-open.", e)
@@ -27,7 +28,8 @@ async def init_redis(app) -> None:
 
 
 async def close_redis(app) -> None:
-    if getattr(app.state, "redis", None) is not None:
-        await app.state.redis.aclose()
+    client = getattr(app.state, "redis", None)
+    if isinstance(client, Redis):
+        await client.aclose()
         app.state.redis = None
         log.info("Redis connection closed.")

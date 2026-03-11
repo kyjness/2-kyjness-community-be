@@ -29,22 +29,52 @@ pytest = ">=7.0.0"
 pytest-asyncio = ">=0.21.0"
 httpx = ">=0.24.0"
 alembic = ">=1.13.0"
-ruff = "^0.15.5"
+pip-audit = ">=2.0.0"
 poethepoet = "^0.29.0"
+pyright = "^1.1.0"
+ruff = "^0.15.5"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["app", "test"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]  # pycodestyle, Pyflakes, isort, pyupgrade
+fixable = ["ALL"]
+ignore = ["E501"]  # line length은 format에서 처리
 
 [tool.pytest.ini_options]
 testpaths = ["test"]
 pythonpath = ["."]
 python_files = ["*.py"]
 
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+reportMissingImports = false  # app.* 등 런타임 경로는 IDE/CI에서 제외 가능
+stubPath = "typings"
+
 [tool.poe.tasks]
 # Device Guard 우회를 위해 python -m 방식을 기본으로 채택
 run = "python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 test = "python -m pytest test/ -v"
+migrate = "python -m alembic upgrade head"
+
+# [수정/적용용] 코드를 직접 변경함
 lint = "python -m ruff check . --fix"
 format = "python -m ruff format ."
-migrate = "python -m alembic upgrade head"
+quality = ["lint", "format"]
+
+# [검사용] 코드 수정 없이 리포트만 출력 (CI/CD용)
+lint-check = "python -m ruff check ."
+format-check = "python -m ruff format . --check"
+typecheck = "pyright"
+audit = "python -m pip_audit"
+
+# 전체 검사: 순서대로 실행, 하나라도 실패하면 중단
+check = ["lint-check", "format-check", "typecheck", "audit"]

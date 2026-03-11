@@ -6,24 +6,21 @@ Create Date: 2025-03-07
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "add_comment_likes"
-down_revision: Union[str, None] = "initial_pg"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "initial_pg"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     op.add_column(
         "comments",
-        sa.Column(
-            "like_count", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("like_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
     )
     op.create_table(
         "comment_likes",
@@ -40,9 +37,7 @@ def upgrade() -> None:
         ["comment_id"],
         unique=False,
     )
-    op.create_index(
-        op.f("ix_comment_likes_user_id"), "comment_likes", ["user_id"], unique=False
-    )
+    op.create_index(op.f("ix_comment_likes_user_id"), "comment_likes", ["user_id"], unique=False)
 
 
 def downgrade() -> None:

@@ -1,33 +1,33 @@
 # PuppyTalk API 진입점. lifespan, 미들웨어·라우터·/health. DI는 app.api.dependencies.
 import asyncio
 import logging
-from pathlib import Path
-
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import v1_router
-from app.common import ApiCode, ApiResponse, setup_logging
-from app.common.schema import RootData
-from app.core.cleanup import run_loop_async, run_once as cleanup_once
+from app.common import ApiCode, ApiResponse, RootData, setup_logging
+from app.core.cleanup import run_loop_async
+from app.core.cleanup import run_once as cleanup_once
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import (
+    RequestIdMiddleware,
     access_log_middleware,
-    proxy_headers_middleware,
-    rate_limit_middleware,
-    request_id_middleware,
     security_headers_middleware,
 )
+from app.core.middleware.proxy_headers import ProxyHeadersMiddleware
+from app.core.middleware.rate_limit import RateLimitMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from app.db import init_database, close_database
+    from app.db import close_database, init_database
     from app.infra.redis import close_redis, init_redis
 
     setup_logging()
@@ -51,12 +51,12 @@ async def lifespan(app: FastAPI):
     if cleanup_task is not None:
         try:
             await asyncio.wait_for(asyncio.shield(cleanup_task), timeout=15.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             cleanup_task.cancel()
             try:
                 await cleanup_task
             except asyncio.CancelledError:
-                pass
+                pass  # Intended: swallow cancel on lifespan shutdown
     await close_redis(app)
     await close_database()
 
@@ -78,13 +78,15 @@ app.add_middleware(
 if settings.TRUSTED_HOSTS != ["*"]:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.TRUSTED_HOSTS)
 
-# async def 미들웨어 유지(BaseHTTPMiddleware는 run_in_executor 오버헤드 있음). 나중에 등록한 것이 요청 시 먼저 실행.
-# 실행 순서: proxy_headers(Nginx 등에서 실제 IP 추출) → request_id → access_log → rate_limit → security_headers → 라우트
+# LIFO: 마지막 add_middleware가 요청 진입 시 가장 먼저 실행.
+# RequestIdMiddleware를 최하단에 등록 → 가장 바깥쪽 껍질이 되어 요청 시 맨 먼저 request_id 발급.
+# GZip은 안쪽(코드상 상단)에 두어 IP·Request ID 흐름을 건드리지 않고 응답만 압축.
 app.middleware("http")(security_headers_middleware)
-app.middleware("http")(rate_limit_middleware)
 app.middleware("http")(access_log_middleware)
-app.middleware("http")(request_id_middleware)
-app.middleware("http")(proxy_headers_middleware)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(ProxyHeadersMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 register_exception_handlers(app)
 
@@ -111,6 +113,7 @@ def root():
 @app.get("/health")
 async def health():
     from fastapi.responses import JSONResponse
+
     from app.db import check_database
 
     ok = await check_database()

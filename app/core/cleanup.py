@@ -35,5 +35,5 @@ async def run_loop_async(stop_event: asyncio.Event) -> None:
         await run_once()
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=float(interval))
-        except asyncio.TimeoutError:
-            pass
+        except TimeoutError:
+            pass  # Intended: interval elapsed, run cleanup again

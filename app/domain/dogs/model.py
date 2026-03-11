@@ -1,12 +1,10 @@
 # 강아지 프로필 CRUD. 대표 강아지 설정은 한 트랜잭션 내 원자적 처리. AsyncSession.
-from typing import List, Optional
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.db import utc_now
-
 from app.users.model import DogProfile
 
 
@@ -19,7 +17,7 @@ class DogProfilesModel:
         breed: str,
         gender: str,
         birth_date,
-        profile_image_id: Optional[int] = None,
+        profile_image_id: int | None = None,
         is_representative: bool = False,
         *,
         db: AsyncSession,
@@ -41,9 +39,7 @@ class DogProfilesModel:
         return dog
 
     @classmethod
-    async def get_by_id(
-        cls, dog_id: int, owner_id: int, db: AsyncSession
-    ) -> Optional[DogProfile]:
+    async def get_by_id(cls, dog_id: int, owner_id: int, db: AsyncSession) -> DogProfile | None:
         stmt = (
             select(DogProfile)
             .where(DogProfile.id == dog_id, DogProfile.owner_id == owner_id)
@@ -53,7 +49,7 @@ class DogProfilesModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_by_owner_id(cls, owner_id: int, db: AsyncSession) -> List[DogProfile]:
+    async def get_by_owner_id(cls, owner_id: int, db: AsyncSession) -> list[DogProfile]:
         stmt = (
             select(DogProfile)
             .where(DogProfile.owner_id == owner_id)
@@ -70,12 +66,12 @@ class DogProfilesModel:
         owner_id: int,
         *,
         db: AsyncSession,
-        name: Optional[str] = None,
-        breed: Optional[str] = None,
-        gender: Optional[str] = None,
+        name: str | None = None,
+        breed: str | None = None,
+        gender: str | None = None,
         birth_date=None,
-        profile_image_id: Optional[int] = None,
-        is_representative: Optional[bool] = None,
+        profile_image_id: int | None = None,
+        is_representative: bool | None = None,
     ) -> bool:
         values = {}
         if name is not None:
@@ -97,22 +93,21 @@ class DogProfilesModel:
             update(DogProfile)
             .where(DogProfile.id == dog_id, DogProfile.owner_id == owner_id)
             .values(**values)
+            .returning(DogProfile.id)
         )
-        return r.rowcount > 0
+        return r.scalar_one_or_none() is not None
 
     @classmethod
     async def delete(cls, dog_id: int, owner_id: int, db: AsyncSession) -> bool:
         r = await db.execute(
-            delete(DogProfile).where(
-                DogProfile.id == dog_id, DogProfile.owner_id == owner_id
-            )
+            delete(DogProfile)
+            .where(DogProfile.id == dog_id, DogProfile.owner_id == owner_id)
+            .returning(DogProfile.id)
         )
-        return r.rowcount > 0
+        return r.scalar_one_or_none() is not None
 
     @classmethod
-    async def set_representative(
-        cls, owner_id: int, dog_id: int, db: AsyncSession
-    ) -> bool:
+    async def set_representative(cls, owner_id: int, dog_id: int, db: AsyncSession) -> bool:
         """해당 유저의 대표 강아지를 dog_id로 설정. 기존 대표 해제 후 설정을 한 트랜잭션 내 원자적으로 수행."""
         await db.execute(
             update(DogProfile)
@@ -123,5 +118,6 @@ class DogProfilesModel:
             update(DogProfile)
             .where(DogProfile.id == dog_id, DogProfile.owner_id == owner_id)
             .values(is_representative=True, updated_at=utc_now())
+            .returning(DogProfile.id)
         )
-        return r.rowcount > 0
+        return r.scalar_one_or_none() is not None

@@ -6,22 +6,20 @@ Create Date: 2025-03-08
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
-
 revision: str = "pg_trgm_posts_gin"
-down_revision: Union[str, None] = "rename_likes_post_likes"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "rename_likes_post_likes"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
     op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_posts_title_gin "
-        "ON posts USING gin (title gin_trgm_ops);"
+        "CREATE INDEX IF NOT EXISTS idx_posts_title_gin ON posts USING gin (title gin_trgm_ops);"
     )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_posts_content_gin "

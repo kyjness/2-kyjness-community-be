@@ -2,11 +2,10 @@
 # 하나의 요청당 하나의 async with db.begin()으로 묶어 Race Condition 방지.
 from __future__ import annotations
 
-from typing import Tuple
-
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.comments.model import CommentLikesModel, CommentsModel
 from app.common.exceptions import (
     AlreadyLikedException,
     CommentNotFoundException,
@@ -15,7 +14,6 @@ from app.common.exceptions import (
 from app.db import get_connection
 from app.domain.likes.model import PostLikesModel
 from app.posts.model import PostsModel
-from app.comments.model import CommentsModel, CommentLikesModel
 
 
 def _is_unique_violation(exc: IntegrityError) -> bool:
@@ -27,13 +25,12 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
 class LikeService:
     @classmethod
     async def is_post_liked(cls, post_id: int, user_id: int, db: AsyncSession) -> bool:
-        async with db.begin():
-            return await PostLikesModel.has_like(post_id, user_id, db=db)
+        return await PostLikesModel.has_like(post_id, user_id, db=db)
 
     @classmethod
     async def like_post(
         cls, post_id: int, user_id: int, db: AsyncSession
-    ) -> Tuple[bool, int, bool]:
+    ) -> tuple[bool, int, bool]:
         async with db.begin():
             if await PostsModel.get_post_by_id(post_id, db=db) is None:
                 raise PostNotFoundException()
@@ -48,18 +45,14 @@ class LikeService:
                 if _is_unique_violation(e):
                     async with get_connection() as db2:
                         async with db2.begin():
-                            like_count = await PostsModel.get_like_count(
-                                post_id, db=db2
-                            )
+                            like_count = await PostsModel.get_like_count(post_id, db=db2)
                     raise AlreadyLikedException(
                         data={"likeCount": like_count, "isLiked": True},
                     ) from e
                 raise
 
     @classmethod
-    async def unlike_post(
-        cls, post_id: int, user_id: int, db: AsyncSession
-    ) -> Tuple[bool, int]:
+    async def unlike_post(cls, post_id: int, user_id: int, db: AsyncSession) -> tuple[bool, int]:
         async with db.begin():
             if await PostsModel.get_post_by_id(post_id, db=db) is None:
                 raise PostNotFoundException()
@@ -73,16 +66,14 @@ class LikeService:
     @classmethod
     async def like_comment(
         cls, comment_id: int, user_id: int, db: AsyncSession
-    ) -> Tuple[bool, int, bool]:
+    ) -> tuple[bool, int, bool]:
         async with db.begin():
             if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:
                 raise CommentNotFoundException()
             try:
                 inserted = await CommentLikesModel.create(comment_id, user_id, db=db)
                 if inserted:
-                    like_count = await CommentLikesModel.increment_like_count(
-                        comment_id, db=db
-                    )
+                    like_count = await CommentLikesModel.increment_like_count(comment_id, db=db)
                 else:
                     like_count = await CommentsModel.get_like_count(comment_id, db=db)
                 return (True, like_count, inserted)
@@ -90,9 +81,7 @@ class LikeService:
                 if _is_unique_violation(e):
                     async with get_connection() as db2:
                         async with db2.begin():
-                            like_count = await CommentsModel.get_like_count(
-                                comment_id, db=db2
-                            )
+                            like_count = await CommentsModel.get_like_count(comment_id, db=db2)
                     raise AlreadyLikedException(
                         data={"likeCount": like_count, "isLiked": True},
                     ) from e
@@ -101,15 +90,13 @@ class LikeService:
     @classmethod
     async def unlike_comment(
         cls, comment_id: int, user_id: int, db: AsyncSession
-    ) -> Tuple[bool, int]:
+    ) -> tuple[bool, int]:
         async with db.begin():
             if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:
                 raise CommentNotFoundException()
             deleted = await CommentLikesModel.delete(comment_id, user_id, db=db)
             if deleted:
-                like_count = await CommentLikesModel.decrement_like_count(
-                    comment_id, db=db
-                )
+                like_count = await CommentLikesModel.decrement_like_count(comment_id, db=db)
             else:
                 like_count = await CommentsModel.get_like_count(comment_id, db=db)
         return (False, like_count)

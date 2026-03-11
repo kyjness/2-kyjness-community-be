@@ -1,8 +1,6 @@
 # 강아지 프로필 비즈니스 로직. 순수 데이터/커스텀 예외. Full-Async.
 from __future__ import annotations
 
-from typing import List, Optional, Set, Union
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import (
@@ -10,11 +8,10 @@ from app.common.exceptions import (
     InternalServerErrorException,
     NotFoundException,
 )
-from app.media.model import MediaModel
-from app.users.model import UsersModel
-
 from app.dogs.model import DogProfilesModel
 from app.dogs.schema import DogProfileUpsertItem
+from app.media.model import MediaModel
+from app.users.model import UsersModel
 from app.users.schema import UserProfileResponse
 
 
@@ -23,25 +20,19 @@ class DogService:
     async def upsert_dog_profile(
         cls,
         owner_id: int,
-        items: List[Union[dict, DogProfileUpsertItem]],
+        items: list[dict | DogProfileUpsertItem],
         db: AsyncSession,
-        to_decrement: Optional[List[int]] = None,
+        to_decrement: list[int] | None = None,
     ) -> None:
         """강아지 목록 전체 교체(생성/수정/삭제). 대표 강아지 설정은 한 트랜잭션 내 원자적."""
         if to_decrement is None:
             to_decrement = []
-        existing_ids = {
-            d.id for d in await DogProfilesModel.get_by_owner_id(owner_id, db=db)
-        }
-        requested_ids: Set[int] = set()
-        representative_id: Optional[int] = None
+        existing_ids = {d.id for d in await DogProfilesModel.get_by_owner_id(owner_id, db=db)}
+        requested_ids: set[int] = set()
+        representative_id: int | None = None
 
         for raw in items:
-            item = (
-                raw
-                if isinstance(raw, DogProfileUpsertItem)
-                else DogProfileUpsertItem.model_validate(raw)
-            )
+            item: DogProfileUpsertItem = DogProfileUpsertItem.model_validate(raw)
             if item.id is None:
                 dog = await DogProfilesModel.create(
                     owner_id=owner_id,
@@ -69,9 +60,7 @@ class DogService:
                     if old.profile_image_id:
                         to_decrement.append(old.profile_image_id)
                     if item.profile_image_id:
-                        await MediaModel.increment_ref_count(
-                            item.profile_image_id, db=db
-                        )
+                        await MediaModel.increment_ref_count(item.profile_image_id, db=db)
                 await DogProfilesModel.update(
                     item.id,
                     owner_id,
@@ -91,9 +80,7 @@ class DogService:
             await DogProfilesModel.delete(did, owner_id, db=db)
 
         if representative_id and requested_ids:
-            await DogProfilesModel.set_representative(
-                owner_id, representative_id, db=db
-            )
+            await DogProfilesModel.set_representative(owner_id, representative_id, db=db)
 
     @classmethod
     async def set_representative_dog(

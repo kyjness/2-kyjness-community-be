@@ -1,5 +1,4 @@
 # 댓글 라우터. Router → Service. 예외는 전역 handler 처리.
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Path, Query
 from fastapi.responses import Response
@@ -15,7 +14,7 @@ from app.api.dependencies import (
     require_comment_author,
     require_comment_author_for_delete,
 )
-from app.comments.schema import CommentIdData, CommentUpsertRequest, CommentsPageData
+from app.comments.schema import CommentIdData, CommentsPageData, CommentUpsertRequest
 from app.comments.service import CommentService
 from app.common import ApiCode, ApiResponse
 
@@ -38,9 +37,9 @@ async def get_comments(
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
-    sort: Optional[str] = Query(None, description="정렬: latest|oldest|popular"),
+    sort: str | None = Query(None, description="정렬: latest|oldest|popular"),
     db: AsyncSession = Depends(get_slave_db),
-    current_user: Optional[CurrentUser] = Depends(get_current_user_optional),
+    current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
     data = await CommentService.get_comments(
         post_id,
@@ -70,7 +69,5 @@ async def delete_comment(
     author_ctx: CommentAuthorContext = Depends(require_comment_author_for_delete),
     db: AsyncSession = Depends(get_master_db),
 ):
-    await CommentService.delete_comment(
-        author_ctx.post_id, author_ctx.comment_id, db=db
-    )
+    await CommentService.delete_comment(author_ctx.post_id, author_ctx.comment_id, db=db)
     return Response(status_code=204)

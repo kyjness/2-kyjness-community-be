@@ -3,9 +3,7 @@ from fastapi import Request
 
 
 def get_client_identifier(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for") or request.headers.get(
-        "X-Forwarded-For"
-    )
+    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip() or "0.0.0.0"
     client = request.scope.get("client") or ("0.0.0.0", 0)

@@ -1,5 +1,4 @@
 # 인증 라우터. Router → Service. 예외는 전역 handler 처리. HTTP 응답·쿠키는 라우터 전담.
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
 from redis.asyncio import Redis
@@ -9,8 +8,8 @@ from starlette.responses import JSONResponse
 from app.api.dependencies import get_master_db
 from app.auth.schema import (
     AccessTokenData,
-    LoginSuccessData,
     LoginRequest,
+    LoginSuccessData,
     SignUpRequest,
 )
 from app.auth.service import AuthService
@@ -39,7 +38,7 @@ async def login(
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_master_db),
 ):
-    redis: Optional[Redis] = getattr(request.app.state, "redis", None)
+    redis: Redis | None = getattr(request.app.state, "redis", None)
     ttl = _refresh_ttl_seconds()
     payload, refresh_token = await AuthService.login(
         login_data, db=db, redis=redis, refresh_ttl_seconds=ttl
@@ -64,7 +63,7 @@ async def login(
 @router.post("/logout", status_code=200, response_model=ApiResponse[None])
 async def logout(request: Request):
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
-    redis: Optional[Redis] = getattr(request.app.state, "redis", None)
+    redis: Redis | None = getattr(request.app.state, "redis", None)
     await AuthService.logout(refresh_token, redis=redis)
     result = ApiResponse(code=ApiCode.LOGOUT_SUCCESS.value, data=None)
     response = JSONResponse(content=result.model_dump(by_alias=True))
@@ -78,7 +77,7 @@ async def refresh(
     db: AsyncSession = Depends(get_master_db),
 ):
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
-    redis: Optional[Redis] = getattr(request.app.state, "redis", None)
+    redis: Redis | None = getattr(request.app.state, "redis", None)
     data = await AuthService.refresh_tokens(refresh_token, redis, db)
     result = ApiResponse(code=ApiCode.AUTH_SUCCESS.value, data=data)
     return JSONResponse(content=result.model_dump(by_alias=True))

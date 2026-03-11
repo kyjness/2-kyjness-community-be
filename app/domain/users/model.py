@@ -1,18 +1,21 @@
 # 사용자 CRUD. User ORM 반환, Controller에서 Schema.model_validate(user)로 직렬화. 프로필 이미지는 profile_image_id(FK). AsyncSession.
-from typing import List, Optional
+from typing import Any
 
 from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    delete,
     select,
     update,
-    String,
-    Integer,
-    DateTime,
-    Date,
-    ForeignKey,
-    Boolean,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import mapped_column, relationship, joinedload, selectinload
+from sqlalchemy.orm import joinedload, mapped_column, relationship, selectinload
 
 from app.common.enums import UserStatus
 from app.db import Base, utc_now
@@ -23,24 +26,26 @@ class DogProfile(Base):
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     owner_id = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name = mapped_column(String(100), nullable=False)
     breed = mapped_column(String(100), nullable=False)
     gender = mapped_column(String(20), nullable=False)
     birth_date = mapped_column(Date, nullable=False)
     profile_image_id = mapped_column(
-        Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_representative = mapped_column(Boolean, nullable=False, default=False)
     created_at = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at = mapped_column(DateTime(timezone=True), nullable=False)
 
-    owner = relationship("User", back_populates="dogs", foreign_keys=[owner_id])
-    profile_image = relationship("Image", foreign_keys=[profile_image_id])
+    owner = relationship(
+        "User", back_populates="dogs", foreign_keys=[owner_id], lazy="raise_on_sql"
+    )
+    profile_image = relationship("Image", foreign_keys=[profile_image_id], lazy="raise_on_sql")
 
     @property
-    def profile_image_url(self) -> Optional[str]:
+    def profile_image_url(self) -> str | None:
         if self.profile_image:
             return self.profile_image.file_url
         return None
@@ -56,21 +61,23 @@ class User(Base):
     profile_image_id = mapped_column(
         Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )
+    role = mapped_column(String(20), nullable=False, default="USER")
     status = mapped_column(String(20), nullable=False, default=UserStatus.ACTIVE.value)
     created_at = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at = mapped_column(DateTime(timezone=True), nullable=False)
     deleted_at = mapped_column(DateTime(timezone=True), nullable=True)
 
-    profile_image = relationship("Image", foreign_keys=[profile_image_id])
+    profile_image = relationship("Image", foreign_keys=[profile_image_id], lazy="raise_on_sql")
     dogs = relationship(
         "DogProfile",
         back_populates="owner",
         foreign_keys=[DogProfile.owner_id],
         order_by="DogProfile.id",
+        lazy="raise_on_sql",
     )
 
     @property
-    def profile_image_url(self) -> Optional[str]:
+    def profile_image_url(self) -> str | None:
         if self.profile_image:
             return self.profile_image.file_url
         return None
@@ -81,11 +88,53 @@ class User(Base):
         return UserStatus.is_active_value(self.status)
 
     @property
-    def representative_dog(self) -> Optional[DogProfile]:
+    def representative_dog(self) -> DogProfile | None:
         for d in self.dogs or []:
             if getattr(d, "is_representative", False):
                 return d
         return None
+
+
+class UserBlock(Base):
+    __tablename__ = "user_blocks"
+    __table_args__ = (
+        UniqueConstraint("blocker_id", "blocked_id", name="uq_user_blocks_blocker_blocked"),
+    )
+
+    blocker_id = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    blocked_id = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at = mapped_column(DateTime(timezone=True), nullable=False)
+
+    blocker = relationship("User", foreign_keys=[blocker_id], lazy="raise_on_sql")
+    blocked = relationship("User", foreign_keys=[blocked_id], lazy="raise_on_sql")
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "reporter_id",
+            "target_type",
+            "target_id",
+            name="uq_reports_reporter_target",
+        ),
+    )
+
+    id = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reporter_id = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_type = mapped_column(String(50), nullable=False)
+    target_id = mapped_column(Integer, nullable=False)
+    reason = mapped_column(Text, nullable=True)
+    status = mapped_column(String(20), nullable=False, default="PENDING")
+    created_at = mapped_column(DateTime(timezone=True), nullable=False)
+
+    reporter = relationship("User", foreign_keys=[reporter_id], lazy="raise_on_sql")
 
 
 class UsersModel:
@@ -95,7 +144,7 @@ class UsersModel:
         email: str,
         hashed_password: str,
         nickname: str,
-        profile_image_id: Optional[int] = None,
+        profile_image_id: int | None = None,
         *,
         db: AsyncSession,
     ) -> User:
@@ -115,7 +164,7 @@ class UsersModel:
         return user
 
     @classmethod
-    async def get_user_by_id(cls, user_id: int, db: AsyncSession) -> Optional[User]:
+    async def get_user_by_id(cls, user_id: int, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -125,9 +174,7 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_user_by_id_with_dogs(
-        cls, user_id: int, db: AsyncSession
-    ) -> Optional[User]:
+    async def get_user_by_id_with_dogs(cls, user_id: int, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -140,9 +187,7 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_users_by_ids(
-        cls, user_ids: List[int], db: AsyncSession
-    ) -> dict[int, User]:
+    async def get_users_by_ids(cls, user_ids: list[int], db: AsyncSession) -> dict[int, User]:
         if not user_ids:
             return {}
         stmt = (
@@ -155,7 +200,7 @@ class UsersModel:
         return {r.id: r for r in rows}
 
     @classmethod
-    async def get_user_by_email(cls, email: str, db: AsyncSession) -> Optional[User]:
+    async def get_user_by_email(cls, email: str, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
             .where(User.email == email.lower(), User.deleted_at.is_(None))
@@ -165,7 +210,7 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_password_hash(cls, user_id: int, db: AsyncSession) -> Optional[str]:
+    async def get_password_hash(cls, user_id: int, db: AsyncSession) -> str | None:
         result = await db.execute(
             select(User.password).where(User.id == user_id, User.deleted_at.is_(None))
         )
@@ -174,65 +219,127 @@ class UsersModel:
     @classmethod
     async def email_exists(cls, email: str, db: AsyncSession) -> bool:
         result = await db.execute(
-            select(User.id)
-            .where(User.email == email.lower(), User.deleted_at.is_(None))
-            .limit(1)
+            select(User.id).where(User.email == email.lower(), User.deleted_at.is_(None)).limit(1)
         )
         return result.first() is not None
 
     @classmethod
     async def nickname_exists(cls, nickname: str, db: AsyncSession) -> bool:
         result = await db.execute(
-            select(User.id)
-            .where(User.nickname == nickname, User.deleted_at.is_(None))
+            select(User.id).where(User.nickname == nickname, User.deleted_at.is_(None)).limit(1)
+        )
+        return result.first() is not None
+
+    _UPDATE_USER_ALLOWED = frozenset({"nickname", "profile_image_id", "status"})
+
+    @classmethod
+    async def update_user(
+        cls,
+        user_id: int,
+        *,
+        db: AsyncSession,
+        **fields: Any,
+    ) -> bool:
+        allowed = {k: v for k, v in fields.items() if k in cls._UPDATE_USER_ALLOWED}
+        if not allowed:
+            return True
+        allowed["updated_at"] = utc_now()
+        r = await db.execute(
+            update(User)
+            .where(User.id == user_id, User.deleted_at.is_(None))
+            .values(**allowed)
+            .returning(User.id)
+        )
+        return r.scalar_one_or_none() is not None
+
+    @classmethod
+    async def update_password(cls, user_id: int, hashed_password: str, db: AsyncSession) -> bool:
+        r = await db.execute(
+            update(User)
+            .where(User.id == user_id, User.deleted_at.is_(None))
+            .values(password=hashed_password)
+            .returning(User.id)
+        )
+        return r.scalar_one_or_none() is not None
+
+    @classmethod
+    async def get_blocked_users(cls, blocker_id: int, db: AsyncSession) -> list[User]:
+        """내가 차단한 유저 목록 (삭제되지 않은 유저만, 차단 시점 최신순)."""
+        stmt = (
+            select(User)
+            .join(UserBlock, User.id == UserBlock.blocked_id)
+            .where(
+                UserBlock.blocker_id == blocker_id,
+                User.deleted_at.is_(None),
+            )
+            .options(joinedload(User.profile_image))
+            .order_by(UserBlock.created_at.desc())
+        )
+        result = await db.execute(stmt)
+        return list(result.unique().scalars().all())
+
+    @classmethod
+    async def block_exists(cls, blocker_id: int, blocked_id: int, db: AsyncSession) -> bool:
+        result = await db.execute(
+            select(UserBlock.blocker_id)
+            .where(
+                UserBlock.blocker_id == blocker_id,
+                UserBlock.blocked_id == blocked_id,
+            )
             .limit(1)
         )
         return result.first() is not None
 
     @classmethod
-    async def update_nickname(
-        cls, user_id: int, new_nickname: str, db: AsyncSession
-    ) -> bool:
-        r = await db.execute(
-            update(User)
-            .where(User.id == user_id, User.deleted_at.is_(None))
-            .values(nickname=new_nickname, updated_at=utc_now())
+    async def block_user(cls, blocker_id: int, blocked_id: int, db: AsyncSession) -> None:
+        db.add(
+            UserBlock(
+                blocker_id=blocker_id,
+                blocked_id=blocked_id,
+                created_at=utc_now(),
+            )
         )
-        return r.rowcount > 0
+        await db.flush()
 
     @classmethod
-    async def update_password(
-        cls, user_id: int, hashed_password: str, db: AsyncSession
-    ) -> bool:
+    async def unblock_user(cls, blocker_id: int, blocked_id: int, db: AsyncSession) -> int:
         r = await db.execute(
-            update(User)
-            .where(User.id == user_id, User.deleted_at.is_(None))
-            .values(password=hashed_password)
+            delete(UserBlock)
+            .where(
+                UserBlock.blocker_id == blocker_id,
+                UserBlock.blocked_id == blocked_id,
+            )
+            .returning(UserBlock.blocker_id)
         )
-        return r.rowcount > 0
+        return len(list(r.scalars().all()))
+
+    _DELETED_AT_MAX_LEN = 255
 
     @classmethod
-    async def update_profile_image_id(
-        cls, user_id: int, profile_image_id: Optional[int], db: AsyncSession
-    ) -> bool:
-        r = await db.execute(
-            update(User)
-            .where(User.id == user_id, User.deleted_at.is_(None))
-            .values(profile_image_id=profile_image_id, updated_at=utc_now())
-        )
-        return r.rowcount > 0
+    def _deleted_at_suffix(cls, user_id: int) -> str:
+        ts = int(utc_now().timestamp())
+        return f"_deleted_{user_id}_{ts}"
+
+    @classmethod
+    def _mask_for_withdrawal(cls, value: str, suffix: str) -> str:
+        max_len = cls._DELETED_AT_MAX_LEN
+        prefix_len = max(0, max_len - len(suffix))
+        base = str(value)[:prefix_len] if value else ""
+        return (base + suffix)[:max_len]
 
     @classmethod
     async def delete_user(cls, user_id: int, db: AsyncSession) -> bool:
-        """탈퇴(Soft Delete). email/nickname에 suffix 추가해 UNIQUE 재가입 충돌 방지(puppytalkdb.sql 주석 참고)."""
-        user = await cls.get_user_by_id(user_id, db=db)
-        if not user:
+        stmt = select(User.id, User.email, User.nickname).where(
+            User.id == user_id, User.deleted_at.is_(None)
+        )
+        result = await db.execute(stmt)
+        row = result.one_or_none()
+        if not row:
             return False
-        ts = int(utc_now().timestamp())
-        suffix = f"_deleted_{user_id}_{ts}"
-        max_prefix = max(0, 255 - len(suffix))
-        new_email = (user.email[:max_prefix] + suffix)[:255]
-        new_nickname = (user.nickname[:max_prefix] + suffix)[:255]
+        now = utc_now()
+        suffix = cls._deleted_at_suffix(user_id)
+        new_email = cls._mask_for_withdrawal(row.email, suffix)
+        new_nickname = cls._mask_for_withdrawal(row.nickname, suffix)
         r = await db.execute(
             update(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -241,7 +348,9 @@ class UsersModel:
                 nickname=new_nickname,
                 status=UserStatus.WITHDRAWN.value,
                 profile_image_id=None,
-                deleted_at=utc_now(),
+                deleted_at=now,
+                updated_at=now,
             )
+            .returning(User.id)
         )
-        return r.rowcount > 0
+        return r.scalar_one_or_none() is not None

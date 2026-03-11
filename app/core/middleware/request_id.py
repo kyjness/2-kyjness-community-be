@@ -1,26 +1,40 @@
-# X-Request-ID 생성·전달. contextvars에 설정해 비동기 태스크 전역에서 접근. main에서 마지막 등록 → 요청 시 가장 먼저 실행.
+# Request ID 발급·scope.state 주입·X-Request-ID 응답 헤더. 순수 ASGI.
+# main에서 add_middleware로 가장 마지막(코드상 최하단) 등록 → LIFO로 요청 진입 시 가장 먼저 실행.
 import contextvars
 import uuid
-from typing import Awaitable, Callable
+from collections.abc import MutableMapping
+from typing import Any
 
-from starlette.requests import Request
-from starlette.responses import Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "request_id", default=""
-)
+request_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="")
 
 
-async def request_id_middleware(
-    request: Request,
-    call_next: Callable[[Request], Awaitable[Response]],
-) -> Response:
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-    request.state.request_id = request_id
-    token = request_id_ctx.set(request_id)
-    try:
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
-    finally:
-        request_id_ctx.reset(token)
+class RequestIdMiddleware:
+    """모든 HTTP 요청에 UUID4 기반 request_id 발급, scope['state']['request_id'] 저장, 응답 헤더에 X-Request-ID 주입."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        state = scope.setdefault("state", {})
+        request_id = str(uuid.uuid4())
+        state["request_id"] = request_id
+
+        token = request_id_ctx.set(request_id)
+        try:
+
+            async def send_wrapper(message: MutableMapping[str, Any]) -> None:
+                if message.get("type") == "http.response.start":
+                    headers = list(message.get("headers", []))
+                    headers.append((b"x-request-id", request_id.encode("utf-8")))
+                    message = {**message, "headers": headers}
+                await send(message)
+
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            request_id_ctx.reset(token)

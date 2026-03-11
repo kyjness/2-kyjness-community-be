@@ -54,9 +54,7 @@ async def require_comment_author(
             raise InvalidPostIdFormatException()
         if comment.author_id != user.id:
             raise ForbiddenException()
-        return CommentAuthorContext(
-            post_id=post_id, user_id=user.id, comment_id=comment_id
-        )
+        return CommentAuthorContext(post_id=post_id, user_id=user.id, comment_id=comment_id)
 
 
 async def require_comment_author_for_delete(
@@ -68,9 +66,7 @@ async def require_comment_author_for_delete(
     """삭제 시 이미 삭제된 댓글도 작성자로 인정해 204 멱등 응답."""
     async with db.begin():
         author_id = await PostsModel.get_post_author_id(post_id, db=db)
-        comment = await CommentsModel.get_comment_by_id(
-            comment_id, db=db, include_deleted=True
-        )
+        comment = await CommentsModel.get_comment_by_id(comment_id, db=db, include_deleted=True)
         if author_id is None:
             raise PostNotFoundException()
         if not comment:
@@ -79,6 +75,4 @@ async def require_comment_author_for_delete(
             raise InvalidPostIdFormatException()
         if comment.author_id != user.id:
             raise ForbiddenException()
-        return CommentAuthorContext(
-            post_id=post_id, user_id=user.id, comment_id=comment_id
-        )
+        return CommentAuthorContext(post_id=post_id, user_id=user.id, comment_id=comment_id)
