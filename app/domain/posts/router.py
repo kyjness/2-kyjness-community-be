@@ -31,7 +31,7 @@ async def create_post(
     db: AsyncSession = Depends(get_master_db),
 ):
     post_id = await PostService.create_post(user.id, post_data, db=db)
-    return ApiResponse(code=ApiCode.POST_UPLOADED.value, data=PostIdData(id=post_id))
+    return ApiResponse(code=ApiCode.POST_UPLOADED, data=PostIdData(id=post_id))
 
 
 @router.get("", status_code=200, response_model=ApiResponse[PaginatedResponse[PostResponse]])
@@ -52,7 +52,7 @@ async def get_posts(
         current_user_id=current_user.id if current_user else None,
     )
     return ApiResponse(
-        code=ApiCode.POSTS_RETRIEVED.value,
+        code=ApiCode.POSTS_RETRIEVED,
         data=PaginatedResponse(items=result, has_more=has_more, total=total),
     )
 
@@ -70,7 +70,7 @@ async def record_view(
         db=db,
         current_user_id=current_user.id if current_user else None,
     )
-    return ApiResponse(code=ApiCode.POST_VIEW_RECORDED.value, data=None)
+    return ApiResponse(code=ApiCode.POST_VIEW_RECORDED, data=None)
 
 
 @router.get("/{post_id}", status_code=200, response_model=ApiResponse[PostResponse])
@@ -82,7 +82,7 @@ async def get_post(
     data = await PostService.get_post_detail(
         post_id, db=db, current_user_id=current_user.id if current_user else None
     )
-    return ApiResponse(code=ApiCode.POST_RETRIEVED.value, data=data)
+    return ApiResponse(code=ApiCode.POST_RETRIEVED, data=data)
 
 
 @router.patch(
@@ -97,7 +97,7 @@ async def update_post(
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.update_post(post_id, post_data, db=db)
-    return ApiResponse(code=ApiCode.POST_UPDATED.value, data=None)
+    return ApiResponse(code=ApiCode.POST_UPDATED, data=None)
 
 
 @router.delete(
@@ -111,4 +111,4 @@ async def delete_post(
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.delete_post(post_id, db=db)
-    return ApiResponse(code=ApiCode.POST_DELETED.value, data=None)
+    return ApiResponse(code=ApiCode.POST_DELETED, data=None)

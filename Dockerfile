@@ -1,60 +1,63 @@
-# PuppyTalk API - Docker 이미지
-# 비루트 사용자, 멀티스테이지, 최소 패키지, 시크릿은 런타임 주입
-
 # -----------------------------------------------------------------------------
-# Stage 1: Builder (의존성 설치, 최종 이미지에 포함 안 함)
+# Stage 1: Builder 
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS builder
+    FROM python:3.11-slim AS builder
 
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV POETRY_VERSION=2.0.1
-ENV POETRY_HOME=/opt/poetry
-ENV PATH="$POETRY_HOME/bin:$PATH"
-RUN pip install --no-cache-dir poetry==$POETRY_VERSION
-ENV POETRY_VIRTUALENVS_CREATE=false
-
-COPY pyproject.toml poetry.lock* ./
-RUN poetry install --no-root --no-dev --no-interaction
-
-COPY app/ ./app/
-COPY alembic.ini ./
-
-# -----------------------------------------------------------------------------
-# Stage 2: Runtime (최소 패키지, 비루트 사용자)
-# -----------------------------------------------------------------------------
-FROM python:3.11-slim AS runtime
-
-WORKDIR /app
-
-# 시크릿/환경변수는 이미지에 넣지 않고 런타임에 -e 또는 외부 설정으로 주입
-RUN groupadd -r appgroup && useradd -r -g appgroup -u 1000 appuser
-
-# site-packages·bin만 복사하면 shared lib 등이 빠질 수 있으므로 /usr/local 통째 복사
-COPY --from=builder /usr/local /usr/local
-
-COPY --from=builder /app/app ./app
-
-# HEALTHCHECK용 curl (경량)
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /app/upload && chown -R appuser:appgroup /app
-
-ENV PYTHONUNBUFFERED=1
-# PORT: 빌드 시 --build-arg, 런타임 시 -e PORT=9000 으로 오버라이드 가능
-ARG PORT=8000
-ENV PORT=${PORT}
-EXPOSE ${PORT}
-
-USER appuser
-
-# PORT는 ENV로 런타임 주입 가능. shell 형식으로 ${PORT} 확장
-CMD ["sh", "-c", "exec gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT}"]
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://127.0.0.1:${PORT}/health || exit 1
+    WORKDIR /app
+    
+    RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        && rm -rf /var/lib/apt/lists/*
+    
+    ENV POETRY_VERSION=2.0.1
+    RUN pip install --no-cache-dir poetry==$POETRY_VERSION
+    
+    # 가상 환경(.venv) 프로젝트 내부에 생성하도록 강제
+    ENV POETRY_VIRTUALENVS_CREATE=true
+    ENV POETRY_VIRTUALENVS_IN_PROJECT=true
+    
+    COPY pyproject.toml poetry.lock* ./
+    RUN poetry install --no-root --only main --no-interaction
+    
+    # 앱 코드와 루트에 있는 alembic.ini 복사
+    COPY app/ ./app/
+    COPY alembic.ini ./
+    
+    # -----------------------------------------------------------------------------
+    # Stage 2: Runtime (실무 최적화: 보안 및 경량화)
+    # -----------------------------------------------------------------------------
+    FROM python:3.11-slim AS runtime
+    
+    WORKDIR /app
+    
+    # 비루트 사용자 생성
+    RUN groupadd -r appgroup && useradd -r -g appgroup -u 1000 appuser
+    
+    # 빌더에서 생성된 가상 환경과 소스 코드를 가져오며 소유권(chown) 즉시 부여
+    # (app/ 내부에 db/alembic 폴더가 이미 포함되어 있으므로 별도 복사 불필요)
+    COPY --chown=appuser:appgroup --from=builder /app/.venv /app/.venv
+    COPY --chown=appuser:appgroup --from=builder /app/app ./app
+    COPY --chown=appuser:appgroup --from=builder /app/alembic.ini ./
+    
+    # PATH를 가상 환경으로 고정하여 poetry 없이 명령어(alembic, gunicorn) 직접 실행 가능
+    ENV PATH="/app/.venv/bin:$PATH"
+    ENV VIRTUAL_ENV=/app/.venv
+    
+    RUN apt-get update && apt-get install -y --no-install-recommends curl \
+        && rm -rf /var/lib/apt/lists/*
+    
+    # 업로드 폴더 생성 및 소유권 부여
+    RUN mkdir -p /app/upload && chown -R appuser:appgroup /app/upload
+    
+    ENV PYTHONUNBUFFERED=1
+    ARG PORT=8000
+    ENV PORT=${PORT}
+    EXPOSE ${PORT}
+    
+    # 철저한 권한 분리: 이제부터 appuser로 실행
+    USER appuser
+    
+    CMD ["sh", "-c", "exec gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT}"]
+    
+    HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+        CMD curl -f http://127.0.0.1:${PORT}/v1/health || exit 1

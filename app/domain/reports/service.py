@@ -2,11 +2,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.comments.model import CommentsModel
-from app.common.exceptions import (
-    AlreadyReportedException,
-    CommentNotFoundException,
-    PostNotFoundException,
-)
+from app.common.enums import TargetType
+from app.common.exceptions import CommentNotFoundException, PostNotFoundException
 from app.core.config import settings
 from app.posts.model import PostsModel
 from app.reports.model import ReportsModel
@@ -18,7 +15,7 @@ class ReportService:
     async def _create_report_and_maybe_blind(
         cls,
         reporter_id: int,
-        target_type: str,
+        target_type: TargetType,
         target_id: int,
         reason: str | None,
         db: AsyncSession,
@@ -26,13 +23,13 @@ class ReportService:
         await ReportsModel.create_report(
             reporter_id, target_type, target_id, reason, db=db
         )
-        if target_type == "POST":
+        if target_type == TargetType.POST:
             new_count = await PostsModel.increment_report_count(target_id, db=db)
         else:
             new_count = await CommentsModel.increment_report_count(target_id, db=db)
         blinded = False
         if new_count is not None and new_count >= settings.REPORT_BLIND_THRESHOLD:
-            if target_type == "POST":
+            if target_type == TargetType.POST:
                 await PostsModel.set_blinded(target_id, db=db)
             else:
                 await CommentsModel.set_blinded(target_id, db=db)
@@ -47,12 +44,7 @@ class ReportService:
         db: AsyncSession,
     ) -> ReportSubmitData:
         async with db.begin():
-            if await ReportsModel.report_exists(
-                reporter_id, data.target_type, data.target_id, db=db
-            ):
-                raise AlreadyReportedException()
-
-            if data.target_type == "POST":
+            if data.target_type == TargetType.POST:
                 if await PostsModel.get_post_author_id(data.target_id, db=db) is None:
                     raise PostNotFoundException()
             else:

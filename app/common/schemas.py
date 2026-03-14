@@ -3,6 +3,8 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.common.codes import ApiCode
+
 
 def to_camel(name: str) -> str:
     parts = name.split("_")
@@ -21,9 +23,17 @@ T = TypeVar("T")
 
 
 class ApiResponse(BaseSchema, Generic[T]):
-    code: str
+    """code는 ApiCode enum 또는 str. 직렬화 시 enum은 자동으로 .value로 나감."""
+    code: ApiCode | str
     data: T | None = None
     message: str | None = None
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        from_attributes=True,
+        use_enum_values=True,
+    )
 
 
 class PaginatedResponse(BaseSchema, Generic[T]):

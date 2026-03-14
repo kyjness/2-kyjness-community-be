@@ -29,7 +29,7 @@ async def upload_image_signup(
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await MediaService.upload_image_for_signup(image, db=db)
-    return ApiResponse(code=ApiCode.IMAGE_UPLOADED.value, data=data)
+    return ApiResponse(code=ApiCode.IMAGE_UPLOADED, data=data)
 
 
 @router.post(
@@ -45,7 +45,7 @@ async def upload_image(
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await MediaService.upload_image(image, user.id, purpose, db=db)
-    return ApiResponse(code=ApiCode.IMAGE_UPLOADED.value, data=data)
+    return ApiResponse(code=ApiCode.IMAGE_UPLOADED, data=data)
 
 
 @router.delete("/images/{image_id}", status_code=204)

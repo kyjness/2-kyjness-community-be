@@ -29,7 +29,7 @@ async def signup(
     db: AsyncSession = Depends(get_master_db),
 ):
     await AuthService.signup(signup_data, db=db)
-    return ApiResponse(code=ApiCode.SIGNUP_SUCCESS.value, data=None)
+    return ApiResponse(code=ApiCode.SIGNUP_SUCCESS, data=None)
 
 
 @router.post("/login", status_code=200, response_model=ApiResponse[LoginSuccessData])
@@ -44,7 +44,7 @@ async def login(
         login_data, db=db, redis=redis, refresh_ttl_seconds=ttl
     )
     response = JSONResponse(
-        content=ApiResponse(code=ApiCode.LOGIN_SUCCESS.value, data=payload).model_dump(
+        content=ApiResponse(code=ApiCode.LOGIN_SUCCESS, data=payload).model_dump(
             by_alias=True
         )
     )
@@ -65,7 +65,7 @@ async def logout(request: Request):
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     redis: Redis | None = getattr(request.app.state, "redis", None)
     await AuthService.logout(refresh_token, redis=redis)
-    result = ApiResponse(code=ApiCode.LOGOUT_SUCCESS.value, data=None)
+    result = ApiResponse(code=ApiCode.LOGOUT_SUCCESS, data=None)
     response = JSONResponse(content=result.model_dump(by_alias=True))
     response.delete_cookie(key=settings.REFRESH_TOKEN_COOKIE_NAME, path="/")
     return response
@@ -79,5 +79,5 @@ async def refresh(
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     redis: Redis | None = getattr(request.app.state, "redis", None)
     data = await AuthService.refresh_tokens(refresh_token, redis, db)
-    result = ApiResponse(code=ApiCode.AUTH_SUCCESS.value, data=data)
+    result = ApiResponse(code=ApiCode.AUTH_SUCCESS, data=data)
     return JSONResponse(content=result.model_dump(by_alias=True))

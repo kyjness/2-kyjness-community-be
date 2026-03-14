@@ -164,6 +164,19 @@ class PostsModel:
         return result.scalar_one_or_none()
 
     @classmethod
+    async def get_titles_by_ids(
+        cls, post_ids: list[int], db: AsyncSession
+    ) -> dict[int, str]:
+        if not post_ids:
+            return {}
+        result = await db.execute(
+            select(Post.id, Post.title).where(
+                Post.id.in_(post_ids), Post.deleted_at.is_(None)
+            )
+        )
+        return {row[0]: row[1] for row in result.all()}
+
+    @classmethod
     async def get_all_posts(
         cls,
         page: int = 1,
@@ -331,7 +344,7 @@ class PostsModel:
     async def set_blinded(cls, post_id: int, db: AsyncSession) -> bool:
         r = await db.execute(
             update(Post)
-            .where(Post.id == post_id)
+            .where(Post.id == post_id, Post.deleted_at.is_(None))
             .values(is_blinded=True, updated_at=utc_now())
             .returning(Post.id)
         )
@@ -339,12 +352,24 @@ class PostsModel:
 
     @classmethod
     async def unblind_post(cls, post_id: int, db: AsyncSession) -> bool:
+        """블라인드만 해제. report_count는 유지하여 관리자 목록에 계속 노출."""
         r = await db.execute(
             update(Post)
             .where(Post.id == post_id)
+            .values(is_blinded=False, updated_at=utc_now())
+            .returning(Post.id)
+        )
+        return r.scalar_one_or_none() is not None
+
+    @classmethod
+    async def reset_reports(cls, post_id: int, db: AsyncSession) -> bool:
+        """신고 무시: report_count=0, is_blinded=False 로 초기화."""
+        r = await db.execute(
+            update(Post)
+            .where(Post.id == post_id, Post.deleted_at.is_(None))
             .values(
-                is_blinded=False,
                 report_count=0,
+                is_blinded=False,
                 updated_at=utc_now(),
             )
             .returning(Post.id)
@@ -363,7 +388,7 @@ class PostsModel:
         stmt_base = (
             select(Post)
             .where(Post.deleted_at.is_(None))
-            .where((Post.report_count >= 1) | (Post.is_blinded.is_(True)))
+            .where(Post.report_count > 0)
             .options(
                 joinedload(Post.user).joinedload(User.profile_image),
                 joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_image),
@@ -374,7 +399,7 @@ class PostsModel:
         count_stmt = (
             select(func.count(Post.id))
             .where(Post.deleted_at.is_(None))
-            .where((Post.report_count >= 1) | (Post.is_blinded.is_(True)))
+            .where(Post.report_count > 0)
         )
         total = (await db.execute(count_stmt)).scalar_one_or_none() or 0
         stmt = stmt_base.limit(size).offset(offset)

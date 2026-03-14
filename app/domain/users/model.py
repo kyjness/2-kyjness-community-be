@@ -19,6 +19,7 @@ from sqlalchemy.orm import joinedload, mapped_column, relationship, selectinload
 
 from app.common.enums import UserStatus
 from app.db import Base, utc_now
+from app.infra.storage import build_url
 
 
 class DogProfile(Base):
@@ -47,7 +48,7 @@ class DogProfile(Base):
     @property
     def profile_image_url(self) -> str | None:
         if self.profile_image:
-            return self.profile_image.file_url
+            return build_url(self.profile_image.file_key)
         return None
 
 
@@ -79,7 +80,7 @@ class User(Base):
     @property
     def profile_image_url(self) -> str | None:
         if self.profile_image:
-            return self.profile_image.file_url
+            return build_url(self.profile_image.file_key)
         return None
 
     @property
@@ -115,14 +116,6 @@ class UserBlock(Base):
 
 class Report(Base):
     __tablename__ = "reports"
-    __table_args__ = (
-        UniqueConstraint(
-            "reporter_id",
-            "target_type",
-            "target_id",
-            name="uq_reports_reporter_target",
-        ),
-    )
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     reporter_id = mapped_column(
@@ -131,8 +124,8 @@ class Report(Base):
     target_type = mapped_column(String(50), nullable=False)
     target_id = mapped_column(Integer, nullable=False)
     reason = mapped_column(Text, nullable=True)
-    status = mapped_column(String(20), nullable=False, default="PENDING")
     created_at = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at = mapped_column(DateTime(timezone=True), nullable=True)
 
     reporter = relationship("User", foreign_keys=[reporter_id], lazy="raise_on_sql")
 

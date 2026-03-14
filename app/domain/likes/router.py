@@ -17,7 +17,7 @@ async def like_post(
     db: AsyncSession = Depends(get_master_db),
 ):
     is_liked, like_count, inserted = await LikeService.like_post(post_id, user.id, db=db)
-    code = ApiCode.LIKE_SUCCESS.value if inserted else ApiCode.ALREADY_LIKED.value
+    code = ApiCode.LIKE_SUCCESS if inserted else ApiCode.ALREADY_LIKED
     return ApiResponse(code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count))
 
 
@@ -29,7 +29,7 @@ async def unlike_post(
 ):
     is_liked, like_count = await LikeService.unlike_post(post_id, user.id, db=db)
     return ApiResponse(
-        code=ApiCode.LIKE_DELETED.value,
+        code=ApiCode.LIKE_DELETED,
         data=LikeResponseData(is_liked=is_liked, like_count=like_count),
     )
 
@@ -45,7 +45,7 @@ async def like_comment(
     db: AsyncSession = Depends(get_master_db),
 ):
     is_liked, like_count, inserted = await LikeService.like_comment(comment_id, user.id, db=db)
-    code = ApiCode.LIKE_SUCCESS.value if inserted else ApiCode.ALREADY_LIKED.value
+    code = ApiCode.LIKE_SUCCESS if inserted else ApiCode.ALREADY_LIKED
     return ApiResponse(code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count))
 
 
@@ -61,6 +61,6 @@ async def unlike_comment(
 ):
     is_liked, like_count = await LikeService.unlike_comment(comment_id, user.id, db=db)
     return ApiResponse(
-        code=ApiCode.LIKE_DELETED.value,
+        code=ApiCode.LIKE_DELETED,
         data=LikeResponseData(is_liked=is_liked, like_count=like_count),
     )

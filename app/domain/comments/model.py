@@ -132,9 +132,6 @@ class CommentsModel:
         fetch_all_for_tree: bool = False,
         current_user_id: int | None = None,
     ) -> list[Comment]:
-        """fetch_all_for_tree=True: no pagination, return all for post (cap 500) to build tree.
-        루트 댓글은 삭제된 것도 포함(프론트에서 '삭제된 댓글입니다' 표시).
-        대댓글은 삭제된 것은 제외(deleted_at IS NULL인 것만)."""
         stmt = (
             select(Comment)
             .where(
@@ -209,6 +206,36 @@ class CommentsModel:
         return row or 0
 
     @classmethod
+    async def get_reported_comments(
+        cls,
+        page: int = 1,
+        size: int = 20,
+        *,
+        db: AsyncSession,
+    ) -> tuple[list["Comment"], int]:
+        """report_count > 0 인 댓글 목록 (관리자 대시보드용). author 로드."""
+        offset = (page - 1) * size
+        stmt = (
+            select(Comment)
+            .where(Comment.report_count > 0)
+            .where(Comment.deleted_at.is_(None))
+            .options(
+                joinedload(Comment.author).joinedload(User.profile_image),
+            )
+            .order_by(Comment.report_count.desc(), Comment.created_at.desc())
+        )
+        count_stmt = (
+            select(func.count(Comment.id))
+            .where(Comment.report_count > 0)
+            .where(Comment.deleted_at.is_(None))
+        )
+        total = (await db.execute(count_stmt)).scalar_one_or_none() or 0
+        stmt = stmt.limit(size).offset(offset)
+        result = await db.execute(stmt)
+        comments = list(result.unique().scalars().all())
+        return comments, total
+
+    @classmethod
     async def increment_report_count(cls, comment_id: int, db: AsyncSession) -> int | None:
         stmt = (
             update(Comment)
@@ -226,6 +253,26 @@ class CommentsModel:
             update(Comment)
             .where(Comment.id == comment_id)
             .values(is_blinded=True, updated_at=utc_now())
+            .returning(Comment.id)
+        )
+        return r.scalar_one_or_none() is not None
+
+    @classmethod
+    async def unblind_comment(cls, comment_id: int, db: AsyncSession) -> bool:
+        r = await db.execute(
+            update(Comment)
+            .where(Comment.id == comment_id, Comment.deleted_at.is_(None))
+            .values(is_blinded=False, updated_at=utc_now())
+            .returning(Comment.id)
+        )
+        return r.scalar_one_or_none() is not None
+
+    @classmethod
+    async def reset_reports(cls, comment_id: int, db: AsyncSession) -> bool:
+        r = await db.execute(
+            update(Comment)
+            .where(Comment.id == comment_id, Comment.deleted_at.is_(None))
+            .values(report_count=0, is_blinded=False, updated_at=utc_now())
             .returning(Comment.id)
         )
         return r.scalar_one_or_none() is not None

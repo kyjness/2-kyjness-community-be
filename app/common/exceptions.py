@@ -181,13 +181,3 @@ class NotFoundException(BaseProjectException):
         super().__init__(status_code=404, code=code, message=message)
 
 
-# --- Reports ---
-class AlreadyReportedException(BaseProjectException):
-    """동일 유저가 동일 대상 이미 신고함(409)."""
-
-    def __init__(self, message: str | None = None):
-        super().__init__(
-            status_code=409,
-            code=ApiCode.ALREADY_REPORTED,
-            message=message or "이미 신고한 글/댓글입니다.",
-        )

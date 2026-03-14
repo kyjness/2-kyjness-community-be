@@ -41,7 +41,6 @@ _REFRESH_KEY_PREFIX = "rt:"
 
 
 def _refresh_token_hash(token: str) -> str:
-    """Refresh 토큰을 Set 멤버로 저장할 때 사용하는 고정 길이 해시. 동일 토큰은 항상 동일 해시."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 

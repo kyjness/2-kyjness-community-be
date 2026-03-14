@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 
 # 프로젝트 루트를 path에 추가 (script_location이 app/db/alembic 이므로 상위 3단계)
 _root = Path(__file__).resolve().parent.parent.parent.parent
@@ -52,11 +52,8 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     _set_database_url_if_needed()
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    url = config.get_main_option("sqlalchemy.url", "")
+    connectable = create_engine(url, poolclass=pool.NullPool)
 
     with connectable.connect() as connection:
         context.configure(

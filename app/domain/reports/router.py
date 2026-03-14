@@ -17,4 +17,4 @@ async def create_report(
     db: AsyncSession = Depends(get_master_db),
 ):
     result = await ReportService.submit_report(user.id, data, db=db)
-    return ApiResponse(code=ApiCode.REPORT_SUBMITTED.value, data=result)
+    return ApiResponse(code=ApiCode.REPORT_SUBMITTED, data=result)

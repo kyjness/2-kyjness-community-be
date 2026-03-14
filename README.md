@@ -43,14 +43,14 @@
 │   ├── db/                                 # SQLAlchemy Base·엔진·세션·연결
 │   │   └── alembic/                        # 마이그레이션 env, versions(리비전)
 │   ├── domain/                             # 기능별 도메인 (router → service → model → schema)
-│   │   ├── admin/                          # 관리자: 신고 목록·블라인드 해제·유저 정지·글 삭제
+│   │   ├── admin/                          # 관리자: 신고된 게시글·댓글 통합 목록, 블라인드/신고 무시/삭제, 유저 정지·해제
 │   │   ├── auth/                           # 회원가입·로그인·로그아웃·리프레시
 │   │   ├── comments/                       # 댓글 CRUD·페이지네이션
 │   │   ├── dogs/                           # 강아지 프로필
 │   │   ├── likes/                          # 게시글·댓글 좋아요
 │   │   ├── media/                          # 이미지 업로드(로컬/S3), signupToken·ref_count
 │   │   ├── posts/                          # 게시글 CRUD·피드·조회수
-│   │   ├── reports/                        # 신고 접수·자동 블라인드
+│   │   ├── reports/                        # 신고 접수(POST/COMMENT)·누적 Insert·자동 블라인드
 │   │   └── users/                          # 프로필·비밀번호·탈퇴·차단
 │   └── infra/                              # Redis(Refresh·RateLimit), storage(로컬/S3)
 ├── docs/                                   # 아키텍처·API 코드·인프라 설계 문서
@@ -87,6 +87,8 @@
 | **DB 읽기/쓰기 분리** | get_master_db / get_slave_db, WRITER_DB_URL / READER_DB_URL 분리(확장성 고려). 트랜잭션은 서비스의 `async with db.begin():`으로만 관리. |
 | **요청 추적** | 순수 ASGI RequestIdMiddleware로 UUID4 발급·scope.state·X-Request-ID 응답 헤더(4xx/5xx 포함). contextvars·RequestIdFilter로 로그에 request_id 자동 포함. |
 | **에러 응답** | 전역 예외 핸들러로 모든 에러를 { code, message, data } 형식 통일. 500 시 클라이언트에는 스택/쿼리 노출 없이 마스킹 메시지만 반환. |
+| **API 응답 code** | `ApiResponse.code`는 `ApiCode` enum 또는 str. 라우터에서는 `ApiCode.OK` 등 enum만 전달하며, Pydantic `use_enum_values=True`로 직렬화 시 문자열로 내려감. |
+| **신고** | 신고는 항상 새 행(Insert) 누적. 동일 유저 재신고도 허용. 신고 무시 시에만 `reports` soft delete·글/댓글 `report_count` 초기화. `reports` 테이블에는 `status` 컬럼 없음, `target_type`은 TargetType(POST/COMMENT). |
 | **응답 압축** | GZip 미들웨어(minimum_size=1KB)로 1KB 이상 응답만 gzip 압축. |
 | **Rate Limit** | Redis Fixed Window, 경로별 제한. Redis 장애 시 Fail-open. |
 
@@ -174,16 +176,8 @@ poetry run poe audit        # pip-audit (의존성 보안 취약점 스캔)
    UPDATE users SET role = 'ADMIN' WHERE id = 1;  -- 원하는 user id
    ```
 
-2. **백엔드만 쓸 때**  
-   로그인 후 받은 Access Token을 `Authorization: Bearer <token>` 헤더에 넣고 다음 API를 호출합니다.
-
-   - `GET /v1/admin/reported-posts?page=1&size=20` — 신고 누적·블라인드된 게시글 목록
-   - `PATCH /v1/admin/posts/{post_id}/unblind` — 블라인드 해제(복구)
-   - `PATCH /v1/admin/users/{user_id}/suspend` — 해당 유저 정지(SUSPENDED)
-   - `DELETE /v1/admin/posts/{post_id}` — 게시글 삭제(soft delete)
-
-3. **프론트에서 사용**  
-   관리자 계정으로 로그인한 뒤 브라우저에서 **`/admin/dashboard`** 로 이동하면, 신고된 게시글 목록과 [블라인드 해제], [유저 정지], [글 삭제] 버튼을 사용할 수 있습니다. 일반 유저가 접속하면 홈(`/`)으로 리다이렉트됩니다.
+2. **프론트에서 사용**  
+   관리자 계정으로 로그인하면 헤더의 **프로필 드롭다운**에 **관리자 대시보드** 링크가 표시됩니다. 해당 링크로 이동하면 신고된 게시글·댓글 통합 목록과 [블라인드 해제/처리], [유저 정지/해제], [글 삭제]/[댓글 삭제], [신고 무시] 버튼을 사용할 수 있습니다.
 
 Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra) 레포를 참고하면 됩니다.
 

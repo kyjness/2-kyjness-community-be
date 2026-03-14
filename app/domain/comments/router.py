@@ -29,7 +29,7 @@ async def create_comment(
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await CommentService.create_comment(post_id, user.id, comment_data, db=db)
-    return ApiResponse(code=ApiCode.COMMENT_UPLOADED.value, data=data)
+    return ApiResponse(code=ApiCode.COMMENT_UPLOADED, data=data)
 
 
 @router.get("", status_code=200, response_model=ApiResponse[CommentsPageData])
@@ -49,7 +49,7 @@ async def get_comments(
         sort=sort,
         current_user_id=current_user.id if current_user else None,
     )
-    return ApiResponse(code=ApiCode.COMMENTS_RETRIEVED.value, data=data)
+    return ApiResponse(code=ApiCode.COMMENTS_RETRIEVED, data=data)
 
 
 @router.patch("/{comment_id}", status_code=200, response_model=ApiResponse[None])
@@ -61,7 +61,7 @@ async def update_comment(
     await CommentService.update_comment(
         author_ctx.post_id, author_ctx.comment_id, comment_data, db=db
     )
-    return ApiResponse(code=ApiCode.COMMENT_UPDATED.value, data=None)
+    return ApiResponse(code=ApiCode.COMMENT_UPDATED, data=None)
 
 
 @router.delete("/{comment_id}", status_code=204)

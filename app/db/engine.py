@@ -30,8 +30,14 @@ def _make_async_engine(url: str) -> AsyncEngine:
     )
 
 
-_writer_url = settings.WRITER_DB_URL or _default_db_url()
-_reader_url = settings.READER_DB_URL or _writer_url
+def _normalize_to_psycopg(url: str) -> str:
+    if url and "asyncpg" in url:
+        return url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+    return url or ""
+
+
+_writer_url = _normalize_to_psycopg(settings.WRITER_DB_URL or _default_db_url())
+_reader_url = _normalize_to_psycopg(settings.READER_DB_URL or _writer_url)
 
 writer_engine: AsyncEngine = _make_async_engine(_writer_url)
 reader_engine: AsyncEngine = _make_async_engine(_reader_url)

@@ -3,7 +3,10 @@ from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schema import (
+    ActivatedResponse,
+    BlindedResponse,
     ReportedPostItem,
+    ResetReportsResponse,
     SuspendedResponse,
     UnblindedResponse,
 )
@@ -28,7 +31,7 @@ async def get_reported_posts(
     items, total = await AdminService.get_reported_posts(page=page, size=size, db=db)
     has_more = (page * size) < total
     return ApiResponse(
-        code=ApiCode.OK.value,
+        code=ApiCode.OK,
         data=PaginatedResponse(items=items, has_more=has_more, total=total),
     )
 
@@ -44,7 +47,21 @@ async def unblind_post(
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.unblind_post(post_id, db=db)
-    return ApiResponse(code=ApiCode.OK.value, data=UnblindedResponse())
+    return ApiResponse(code=ApiCode.OK, data=UnblindedResponse())
+
+
+@router.patch(
+    "/posts/{post_id}/reset-reports",
+    status_code=200,
+    response_model=ApiResponse[ResetReportsResponse],
+)
+async def reset_post_reports(
+    post_id: int = Path(..., ge=1),
+    admin: CurrentUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_master_db),
+):
+    await AdminService.reset_post_reports(post_id, db=db)
+    return ApiResponse(code=ApiCode.OK, data=ResetReportsResponse())
 
 
 @router.patch(
@@ -58,7 +75,35 @@ async def suspend_user(
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.suspend_user(user_id, db=db)
-    return ApiResponse(code=ApiCode.OK.value, data=SuspendedResponse())
+    return ApiResponse(code=ApiCode.OK, data=SuspendedResponse())
+
+
+@router.patch(
+    "/users/{user_id}/activate",
+    status_code=200,
+    response_model=ApiResponse[ActivatedResponse],
+)
+async def activate_user(
+    user_id: int = Path(..., ge=1),
+    admin: CurrentUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_master_db),
+):
+    await AdminService.activate_user(user_id, db=db)
+    return ApiResponse(code=ApiCode.OK, data=ActivatedResponse())
+
+
+@router.patch(
+    "/posts/{post_id}/blind",
+    status_code=200,
+    response_model=ApiResponse[BlindedResponse],
+)
+async def blind_post(
+    post_id: int = Path(..., ge=1),
+    admin: CurrentUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_master_db),
+):
+    await AdminService.blind_post(post_id, db=db)
+    return ApiResponse(code=ApiCode.OK, data=BlindedResponse())
 
 
 @router.delete(
@@ -72,4 +117,61 @@ async def delete_post_admin(
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.delete_post(post_id, db=db)
-    return ApiResponse(code=ApiCode.POST_DELETED.value, data=None)
+    return ApiResponse(code=ApiCode.POST_DELETED, data=None)
+
+
+@router.patch(
+    "/comments/{comment_id}/unblind",
+    status_code=200,
+    response_model=ApiResponse[UnblindedResponse],
+)
+async def unblind_comment(
+    comment_id: int = Path(..., ge=1),
+    admin: CurrentUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_master_db),
+):
+    await AdminService.unblind_comment(comment_id, db=db)
+    return ApiResponse(code=ApiCode.OK, data=UnblindedResponse())
+
+
+@router.patch(
+    "/comments/{comment_id}/blind",
+    status_code=200,
+    response_model=ApiResponse[BlindedResponse],
+)
+async def blind_comment(
+    comment_id: int = Path(..., ge=1),
+    admin: CurrentUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_master_db),
+):
+    await AdminService.blind_comment(comment_id, db=db)
+    return ApiResponse(code=ApiCode.OK, data=BlindedResponse())
+
+
+@router.patch(
+    "/comments/{comment_id}/reset-reports",
+    status_code=200,
+    response_model=ApiResponse[ResetReportsResponse],
+)
+async def reset_comment_reports(
+    comment_id: int = Path(..., ge=1),
+    admin: CurrentUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_master_db),
+):
+    await AdminService.reset_comment_reports(comment_id, db=db)
+    return ApiResponse(code=ApiCode.OK, data=ResetReportsResponse())
+
+
+@router.delete(
+    "/posts/{post_id}/comments/{comment_id}",
+    status_code=200,
+    response_model=ApiResponse[None],
+)
+async def delete_comment_admin(
+    post_id: int = Path(..., ge=1),
+    comment_id: int = Path(..., ge=1),
+    admin: CurrentUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_master_db),
+):
+    await AdminService.delete_comment(post_id, comment_id, db=db)
+    return ApiResponse(code=ApiCode.OK, data=None)

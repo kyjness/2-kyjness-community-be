@@ -16,8 +16,6 @@
 - **Resource-Centric Design**: 유저, 게시글, 댓글 등 서비스 도메인을 독립적인 리소스로 관리하여 API 가독성과 유지보수 편의성을 극대화함.
 - **Stateless Architecture**: 서버의 상태를 공유하지 않는 설계를 통해 트래픽 급증 시 컨테이너 기반의 **수평 확장(Scale-out)**에 최적화된 구조를 유지함.
 
-추후 **추천·AI 챗봇** 등 복합 쿼리나 스트리밍이 필요해지면 해당 기능만 GraphQL·SSE 등으로 부분 도입하는 전략을 취할 수 있음.
-
 ---
 
 ## 목차
@@ -51,6 +49,8 @@
 
 도메인 레이어는 **router → service → model → schema** 4계층 패턴을 따른다. 복합 연산·도메인 간 협업은 Service에서 수행한다.
 
+**common**에는 `ApiCode`(응답 code), `TargetType`(신고 대상: POST/COMMENT), `UserStatus` 등 StrEnum이 정의되어 있다. `ApiResponse.code`는 `ApiCode | str`을 받으며, `use_enum_values=True`로 직렬화 시 문자열로 내려가므로 라우터에서는 `ApiCode.OK` 등 enum만 전달하면 된다.
+
 ### 1.3 도메인 의존성 (Domain Dependency)
 
 요청 흐름(섹션 2.2)과 별도로, **도메인 간 참조 관계**만 아래 다이어그램으로 정리한다. 화살표 A → B는 "A 도메인의 Router/Service가 B 도메인의 Model·Service를 참조한다"는 의미다. 단방향으로 유지하며, 순환 참조 방지를 위해 필요한 경우 함수 내부 임포트를 사용한다.
@@ -67,6 +67,7 @@ flowchart LR
         likes[likes]
         media[media]
         reports[reports]
+        admin[admin]
         dogs[dogs]
     end
 
@@ -81,6 +82,10 @@ flowchart LR
     likes --> comments
     reports --> posts
     reports --> comments
+    admin --> posts
+    admin --> comments
+    admin --> users
+    admin --> reports
     dogs --> users
 ```
 
@@ -168,7 +173,8 @@ flowchart TB
 - **comments**: `CommentService`는 댓글 수 동기화를 위해 `PostsModel`만 참조(함수 내부 임포트).
 - **likes**: 라우터가 게시글/댓글 존재 여부 확인에 `PostsModel`, `CommentsModel` 사용. `LikeService`는 `PostLikesModel`, `CommentsModel`(get_like_count), `CommentLikesModel`(create/delete·like_count 갱신), `PostsModel`(like_count 갱신) 사용.
 - **media**: 다른 도메인을 참조하지 않음.
-- **reports**: `ReportService`가 게시글·댓글 신고 시 `PostsModel`·`CommentsModel`의 `report_count` 증가·`blinded_at` 설정.
+- **reports**: `ReportService`가 게시글·댓글 신고 시 `ReportsModel.create_report`(Insert만, 누적)·`PostsModel`/`CommentsModel`의 `report_count` 증가·임계값 도달 시 `blinded` 설정. `reports` 테이블은 `target_type`(TargetType: POST/COMMENT), `reason`(자유 문자열), `deleted_at`(신고 무시 시 soft delete)만 사용하며, `status` 컬럼은 제거됨.
+- **admin**: 관리자 전용. 신고된 게시글·댓글 통합 목록(`GET /admin/reported-posts`, `target_type`·`content_preview` 포함), 게시글/댓글 각각 블라인드 해제·블라인드 처리·신고 무시·삭제, 유저 정지/해제 API 제공. 내부적으로 `PostsModel`·`CommentsModel`·`ReportsModel`·`UsersModel` 사용.
 - **dogs**: `UserService`·`UsersModel`에서 `DogProfile` 관리. users 도메인에 포함.
 
 ---
@@ -198,8 +204,8 @@ flowchart TB
    실행 순서: request_id → proxy_headers → rate_limit → gzip → access_log → security_headers (2.1 미들웨어 순서 참고).
 
 ④ 라우터 매칭
-   v1_router = APIRouter(prefix="/v1"). include 순서: auth → users → media → posts → comments.
-   예: /v1/auth/login, /v1/users/me, /v1/posts, /v1/posts/{id}/comments.
+   v1_router = APIRouter(prefix="/v1"). include 순서: auth → users → dogs → media → posts → comments → likes → reports → admin.
+   예: /v1/auth/login, /v1/users/me, /v1/posts, /v1/posts/{id}/comments, /v1/reports, /v1/admin/reported-posts.
 
 ⑤ 의존성 (Depends)
    → get_master_db / get_slave_db: 요청마다 AsyncSession 주입. 트랜잭션은 서비스에서 `async with db.begin():`으로만 시작·커밋(autobegin=False). finally에서 세션 close.
@@ -321,6 +327,7 @@ Reader 엔진은 Writer와 **별도 풀**로 분리되어 있으며, 동일 URL(
 - **댓글 생성/삭제** → 게시글의 `comment_count` 증감
 - **게시글 삭제** → 댓글·좋아요·이미지 링크·이미지 ref_count 정리 후 soft delete
 - **프로필 수정(강아지·이미지)** → 강아지 테이블 동기화 + 기존/신규 이미지 ref_count 증감
+- **신고 무시(관리자)** → `reports` 해당 target 행들 soft delete(`deleted_at`) 후, 글/댓글의 `report_count`·`is_blinded` 초기화
 
 ---
 
@@ -384,8 +391,14 @@ GET이 멱등해야 하므로 조회수는 **전용 POST 엔드포인트**로만
 
 ### 8.4 신고·블라인드
 
-게시글·댓글을 신고할 수 있다. 동일 유저가 동일 대상을 **중복 신고**하면 거부된다.
+게시글·댓글을 신고할 수 있다. 신고는 **항상 새 행(Insert)**으로 누적되며, 동일 유저가 같은 대상을 다시 신고해도 별도 레코드가 추가된다.
 
-**동작**: 신고 시 `report_count`를 1 증가시킨다. `report_count`가 임계값(기본 5) 이상이면 **자동 블라인드**된다. 블라인드된 콘텐츠는 관리자 화면에서 검토·해제할 수 있다.
+**동작**:
+- 신고 시 `reports` 테이블에 `target_type`(POST/COMMENT), `target_id`, `reason`(자유 문자열)으로 행을 삽입하고, 해당 글/댓글의 `report_count`를 1 증가시킨다.
+- `report_count`가 임계값(기본 5) 이상이면 **자동 블라인드**된다.
+- **신고 무시**(관리자 초기화) 시에만 해당 target의 `reports` 행을 **soft delete**(`deleted_at` 설정)하고, 글/댓글의 `report_count`·`is_blinded`를 초기화한다. 이후 같은 유저가 다시 신고하면 새 행이 생성되어 목록에 다시 노출된다.
+- `reports` 테이블에는 `status` 컬럼을 두지 않으며, 애플리케이션에서는 `TargetType` enum(POST, COMMENT)으로 `target_type`을 다룬다.
+
+블라인드된 콘텐츠는 관리자 화면에서 검토·블라인드 해제·신고 무시·삭제(글/댓글)할 수 있다.
 
 ---

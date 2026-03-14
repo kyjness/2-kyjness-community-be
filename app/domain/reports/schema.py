@@ -1,13 +1,12 @@
 # 신고 요청/응답 DTO.
-from typing import Literal
-
 from pydantic import Field
 
 from app.common import BaseSchema
+from app.common.enums import TargetType
 
 
 class ReportCreateRequest(BaseSchema):
-    target_type: Literal["POST", "COMMENT"] = Field(..., description="신고 대상 유형")
+    target_type: TargetType = Field(..., description="신고 대상 유형")
     target_id: int = Field(..., ge=1, description="대상 ID (게시글 또는 댓글 PK)")
     reason: str | None = Field(default=None, max_length=500)
 

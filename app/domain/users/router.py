@@ -32,7 +32,7 @@ async def check_availability(
     db: AsyncSession = Depends(get_slave_db),
 ):
     data = await UserService.check_availability(query, db=db)
-    return ApiResponse(code=ApiCode.OK.value, data=data)
+    return ApiResponse(code=ApiCode.OK, data=data)
 
 
 @router.get("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
@@ -41,7 +41,7 @@ async def get_me(
     db: AsyncSession = Depends(get_slave_db),
 ):
     data = await UserService.get_user_profile(user.id, db=db)
-    return ApiResponse(code=ApiCode.USER_RETRIEVED.value, data=data)
+    return ApiResponse(code=ApiCode.USER_RETRIEVED, data=data)
 
 
 @router.patch("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
@@ -51,7 +51,7 @@ async def update_me(
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await UserService.update_user_profile(user.id, user_data, db=db)
-    return ApiResponse(code=ApiCode.USER_UPDATED.value, data=data)
+    return ApiResponse(code=ApiCode.USER_UPDATED, data=data)
 
 
 @router.patch("/me/password", status_code=200, response_model=ApiResponse[None])
@@ -64,7 +64,7 @@ async def update_password(
     await UserService.update_password(user.id, password_data, db=db)
     redis = getattr(request.app.state, "redis", None)
     await AuthService.revoke_refresh_for_user(user.id, redis)
-    return ApiResponse(code=ApiCode.PASSWORD_UPDATED.value, data=None)
+    return ApiResponse(code=ApiCode.PASSWORD_UPDATED, data=None)
 
 
 @router.delete("/me", status_code=204)
@@ -85,7 +85,7 @@ async def get_my_blocks(
     db: AsyncSession = Depends(get_slave_db),
 ):
     data = await UserService.get_blocked_list(user.id, db=db)
-    return ApiResponse(code=ApiCode.BLOCKS_RETRIEVED.value, data=data)
+    return ApiResponse(code=ApiCode.BLOCKS_RETRIEVED, data=data)
 
 
 @router.post(
@@ -101,6 +101,6 @@ async def toggle_block_user(
     """유저 차단/차단해제 토글. 이미 차단된 경우 해제."""
     is_blocked = await UserService.toggle_block_user(user.id, target_user_id, db=db)
     return ApiResponse(
-        code=ApiCode.OK.value,
+        code=ApiCode.OK,
         data=BlockToggleResponse(blocked=is_blocked),
     )

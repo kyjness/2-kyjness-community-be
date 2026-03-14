@@ -65,9 +65,12 @@ class Settings:
         if img_type.strip()
     ]
     BE_API_URL: str = os.getenv("BE_API_URL", "http://127.0.0.1:8000")
+    # API 주소의 기준점 (Nginx의 location /v1/ 과 일치해야 함)
+    API_PREFIX: str = "/v1"
     # 스토리지 (local | S3, S3 시 버킷·리전·키·공개 URL)
     STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "local")
     S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "")
+    S3_ENDPOINT_URL: str = os.getenv("S3_ENDPOINT_URL", "").strip()
     AWS_REGION: str = os.getenv("AWS_REGION", "ap-northeast-2")
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")

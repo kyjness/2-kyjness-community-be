@@ -9,26 +9,25 @@ keywords = ["fastapi", "api", "community", "backend"]
 packages = [{ include = "app" }]
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.11"
 fastapi = ">=0.115.0"
 uvicorn = { extras = ["standard"], version = ">=0.24.0" }
 pydantic = { version = ">=2.10.0", extras = ["email"] }
-python-dotenv = "1.0.0"
+python-dotenv = "^1.0.0"
 bcrypt = "4.1.2"
 sqlalchemy = ">=2.0.0"
-asyncpg = ">=0.29.0"
-psycopg = { extras = ["binary"], version = ">=3.1.0" }
+psycopg = { extras = ["binary"], version = "^3.1.0" }
 python-multipart = ">=0.0.6"
 boto3 = ">=1.28.0"
 gunicorn = ">=21.0.0"
 redis = ">=5.0.0"
 pyjwt = "^2.8.0"
+alembic = ">=1.13.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0.0"
 pytest-asyncio = ">=0.21.0"
 httpx = ">=0.24.0"
-alembic = ">=1.13.0"
 pip-audit = ">=2.0.0"
 poethepoet = "^0.29.0"
 pyright = "^1.1.0"

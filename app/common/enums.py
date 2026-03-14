@@ -2,6 +2,11 @@
 from enum import StrEnum
 
 
+class TargetType(StrEnum):
+    POST = "POST"
+    COMMENT = "COMMENT"
+
+
 class DogGender(StrEnum):
     MALE = "male"
     FEMALE = "female"

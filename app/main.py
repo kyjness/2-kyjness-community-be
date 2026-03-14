@@ -4,14 +4,16 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import v1_router
 from app.common import ApiCode, ApiResponse, RootData, setup_logging
+from app.db import check_database
 from app.core.cleanup import run_loop_async
 from app.core.cleanup import run_once as cleanup_once
 from app.core.config import settings
@@ -61,11 +63,18 @@ async def lifespan(app: FastAPI):
     await close_database()
 
 
+# 1. 설정값 가져오기
+_prefix = settings.API_PREFIX.rstrip("/")
+
 app = FastAPI(
     title="PuppyTalk API",
     description="커뮤니티 백엔드 API",
     version="1.0.0",
     lifespan=lifespan,
+    # 2. Swagger 및 OpenAPI 경로를 prefix에 맞게 동적 설정
+    docs_url=f"{_prefix}/docs",
+    redoc_url=f"{_prefix}/redoc",
+    openapi_url=f"{_prefix}/openapi.json",
 )
 
 app.add_middleware(
@@ -95,40 +104,35 @@ if settings.STORAGE_BACKEND == "local":
     upload_dir.mkdir(exist_ok=True)
     app.mount("/upload", StaticFiles(directory=str(upload_dir)), name="upload")
 
-app.include_router(v1_router)
+# 3. 루트 및 헬스체크용 공통 라우터 생성
+base_router = APIRouter(prefix=_prefix)
 
 
-@app.get("/", response_model=ApiResponse[RootData])
+@base_router.get("/", response_model=ApiResponse[RootData])
 def root():
     return ApiResponse(
-        code=ApiCode.OK.value,
+        code=ApiCode.OK,
         data=RootData(
             message="PuppyTalk API is running!",
             version="1.0.0",
-            docs="/docs",
+            docs=f"{_prefix}/docs",
         ),
     )
 
 
-@app.get("/health")
+@base_router.get("/health")
 async def health():
-    from fastapi.responses import JSONResponse
-
-    from app.db import check_database
-
     ok = await check_database()
-    if ok:
-        return JSONResponse(
-            status_code=200,
-            content={
-                "code": ApiCode.OK.value,
-                "data": {"status": "ok", "database": "connected"},
-            },
-        )
+    status_code = 200 if ok else 503
     return JSONResponse(
-        status_code=503,
+        status_code=status_code,
         content={
-            "code": ApiCode.DB_ERROR.value,
-            "data": {"status": "degraded", "database": "disconnected"},
+            "code": ApiCode.OK.value if ok else ApiCode.DB_ERROR.value,
+            "data": {"status": "ok" if ok else "degraded"},
         },
     )
+
+
+# 4. 라우터 등록 (순서 중요)
+app.include_router(base_router)  # /v1, /v1/health 등록
+app.include_router(v1_router)  # /v1/auth, /v1/users 등 기존 도메인 등록
