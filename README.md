@@ -113,8 +113,8 @@ poetry install
 [`.env.example`](.env.example)을 복사한 뒤 DB·JWT·Redis 등 필수 값을 채웁니다.
 
 ```bash
-cp .env.example .env.development
-# .env.development 편집: DB_*, JWT_SECRET_KEY, REDIS_URL. Docker 사용 시 DB_HOST=postgres, 로컬 PostgreSQL이면 DB_HOST=localhost
+cp .env.example .env
+# .env 편집: DB_PASSWORD, JWT_SECRET_KEY, REDIS_URL 등. Docker 사용 시 DB_HOST=postgres, 로컬 PostgreSQL이면 DB_HOST=localhost
 ```
 
 ### 3. DB 생성 및 스키마 적용

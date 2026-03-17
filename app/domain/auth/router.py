@@ -44,9 +44,7 @@ async def login(
         login_data, db=db, redis=redis, refresh_ttl_seconds=ttl
     )
     response = JSONResponse(
-        content=ApiResponse(code=ApiCode.LOGIN_SUCCESS, data=payload).model_dump(
-            by_alias=True
-        )
+        content=ApiResponse(code=ApiCode.LOGIN_SUCCESS, data=payload).model_dump()
     )
     response.set_cookie(
         key=settings.REFRESH_TOKEN_COOKIE_NAME,
@@ -66,7 +64,7 @@ async def logout(request: Request):
     redis: Redis | None = getattr(request.app.state, "redis", None)
     await AuthService.logout(refresh_token, redis=redis)
     result = ApiResponse(code=ApiCode.LOGOUT_SUCCESS, data=None)
-    response = JSONResponse(content=result.model_dump(by_alias=True))
+    response = JSONResponse(content=result.model_dump())
     response.delete_cookie(key=settings.REFRESH_TOKEN_COOKIE_NAME, path="/")
     return response
 

@@ -16,6 +16,7 @@ class BaseSchema(BaseModel):
         alias_generator=to_camel,
         populate_by_name=True,
         from_attributes=True,
+        serialize_by_alias=True,
     )
 
 
@@ -33,6 +34,7 @@ class ApiResponse(BaseSchema, Generic[T]):
         populate_by_name=True,
         from_attributes=True,
         use_enum_values=True,
+        serialize_by_alias=True,
     )
 
 

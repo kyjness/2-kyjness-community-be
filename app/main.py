@@ -136,3 +136,27 @@ async def health():
 # 4. 라우터 등록 (순서 중요)
 app.include_router(base_router)  # /v1, /v1/health 등록
 app.include_router(v1_router)  # /v1/auth, /v1/users 등 기존 도메인 등록
+
+# 5. OpenAPI 스키마를 실제 응답(camelCase)과 일치시키기 위해 스키마 property 키를 camelCase로 변환
+from fastapi.openapi.utils import get_openapi
+
+from app.core.openapi_camel import openapi_schema_to_camel
+
+
+def _custom_openapi():
+    if app.openapi_schema is not None:
+        return app.openapi_schema
+    app.openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=getattr(app, "openapi_version", "3.1.0"),
+        description=app.description,
+        routes=app.routes,
+        tags=getattr(app, "openapi_tags", None),
+        servers=getattr(app, "servers", None),
+    )
+    app.openapi_schema = openapi_schema_to_camel(app.openapi_schema)
+    return app.openapi_schema
+
+
+app.openapi = _custom_openapi
