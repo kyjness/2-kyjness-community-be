@@ -160,3 +160,8 @@ def _custom_openapi():
 
 
 app.openapi = _custom_openapi
+
+
+# --- AWS Lambda 배포를 위한 Mangum 핸들러 추가 ---
+from mangum import Mangum
+handler = Mangum(app, lifespan="on") # lifespan="on" 설정을 해야 위에서 정의한 DB 연결 로직이 작동합니다.

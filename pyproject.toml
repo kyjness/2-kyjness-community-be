@@ -23,6 +23,7 @@ gunicorn = ">=21.0.0"
 redis = ">=5.0.0"
 pyjwt = "^2.8.0"
 alembic = ">=1.13.0"
+mangum = "^0.21.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0.0"
