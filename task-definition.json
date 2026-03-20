@@ -1,0 +1,139 @@
+{
+    "taskDefinitionArn": "arn:aws:ecs:ap-northeast-2:654081961169:task-definition/puppytalk-be-task:2",
+    "containerDefinitions": [
+        {
+            "name": "puppytalk-be",
+            "image": "654081961169.dkr.ecr.ap-northeast-2.amazonaws.com/puppytalk-be-ecs@sha256:fe6f66d530aea9076ac572c387d013cc2c19b73a98c4f6a858f6b7f23549a443",
+            "cpu": 0,
+            "portMappings": [
+                {
+                    "name": "puppytalk-be-8000-tcp",
+                    "containerPort": 8000,
+                    "hostPort": 8000,
+                    "protocol": "tcp",
+                    "appProtocol": "http"
+                }
+            ],
+            "essential": true,
+            "environment": [
+                {
+                    "name": "AWS_REGION",
+                    "value": "ap-northeast-2"
+                },
+                {
+                    "name": "WRITER_DB_URL",
+                    "value": "postgresql+psycopg://postgres:0730@54.180.128.99:5432/puppytalk"
+                },
+                {
+                    "name": "JWT_ALGORITHM",
+                    "value": "HS256"
+                },
+                {
+                    "name": "S3_PUBLIC_BASE_URL",
+                    "value": "https://do3qjdi3ve2sg.cloudfront.net"
+                },
+                {
+                    "name": "STORAGE_BACKEND",
+                    "value": "s3"
+                },
+                {
+                    "name": "TRUSTED_HOSTS",
+                    "value": "*"
+                },
+                {
+                    "name": "CORS_ORIGINS",
+                    "value": "http://127.0.0.1:5173,http://localhost:5173"
+                },
+                {
+                    "name": "S3_BUCKET_NAME",
+                    "value": "puppytalk-media-654081961169-ap-northeast-2-an"
+                },
+                {
+                    "name": "DEBUG",
+                    "value": "false"
+                },
+                {
+                    "name": "JWT_SECRET_KEY",
+                    "value": "edc7f7a93a87715285edd5595397b0b52db55fd1d6065310cf492eb75989773e"
+                },
+                {
+                    "name": "READER_DB_URL",
+                    "value": "postgresql+psycopg://postgres:0730@54.180.128.99:5432/puppytalk"
+                },
+                {
+                    "name": "REDIS_URL",
+                    "value": "redis://54.180.128.99:6379"
+                }
+            ],
+            "environmentFiles": [],
+            "mountPoints": [],
+            "volumesFrom": [],
+            "ulimits": [],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/puppytalk-be-task",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "ap-northeast-2",
+                    "awslogs-stream-prefix": "ecs"
+                },
+                "secretOptions": []
+            },
+            "systemControls": []
+        }
+    ],
+    "family": "puppytalk-be-task",
+    "executionRoleArn": "arn:aws:iam::654081961169:role/ecsTaskExecutionRole",
+    "networkMode": "awsvpc",
+    "revision": 2,
+    "volumes": [],
+    "status": "ACTIVE",
+    "requiresAttributes": [
+        {
+            "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+        },
+        {
+            "name": "ecs.capability.execution-role-awslogs"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.ecr-auth"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.21"
+        },
+        {
+            "name": "ecs.capability.execution-role-ecr-pull"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.18"
+        },
+        {
+            "name": "ecs.capability.task-eni"
+        },
+        {
+            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29"
+        }
+    ],
+    "placementConstraints": [],
+    "compatibilities": [
+        "EC2",
+        "FARGATE",
+        "MANAGED_INSTANCES"
+    ],
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "512",
+    "memory": "1024",
+    "runtimePlatform": {
+        "cpuArchitecture": "X86_64",
+        "operatingSystemFamily": "LINUX"
+    },
+    "registeredAt": "2026-03-19T13:10:37.565Z",
+    "registeredBy": "arn:aws:iam::654081961169:root",
+    "enableFaultInjection": false,
+    "tags": []
+}
