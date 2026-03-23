@@ -1,7 +1,7 @@
 # 미디어 라우터. Router → Service. 예외는 전역 handler 처리.
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Path, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,7 @@ from app.api.dependencies import (
     get_current_user,
     get_master_db,
 )
-from app.common import ApiCode, ApiResponse
+from app.common import ApiCode, ApiResponse, api_response
 from app.media.schema import ImageUploadResponse, SignupImageUploadData
 from app.media.service import MediaService
 
@@ -25,11 +25,12 @@ router = APIRouter(prefix="/media", tags=["media"])
     dependencies=[Depends(check_upload_content_length)],
 )
 async def upload_image_signup(
+    request: Request,
     image: UploadFile = File(..., description="회원가입용 프로필 이미지"),
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await MediaService.upload_image_for_signup(image, db=db)
-    return ApiResponse(code=ApiCode.IMAGE_UPLOADED, data=data)
+    return api_response(request, code=ApiCode.IMAGE_UPLOADED, data=data)
 
 
 @router.post(
@@ -39,13 +40,14 @@ async def upload_image_signup(
     dependencies=[Depends(check_upload_content_length)],
 )
 async def upload_image(
+    request: Request,
     image: UploadFile = File(..., description="이미지 파일"),
     purpose: Literal["profile", "post"] = Query("post", description="profile | post"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await MediaService.upload_image(image, user.id, purpose, db=db)
-    return ApiResponse(code=ApiCode.IMAGE_UPLOADED, data=data)
+    return api_response(request, code=ApiCode.IMAGE_UPLOADED, data=data)
 
 
 @router.delete("/images/{image_id}", status_code=204)

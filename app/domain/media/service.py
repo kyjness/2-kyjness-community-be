@@ -160,7 +160,7 @@ class MediaService:
 
     @classmethod
     async def cleanup_expired_signup_images(
-        cls, db: AsyncSession
+        cls, db: AsyncSession, *, task_id: str
     ) -> tuple[int, list[str]]:
         failed_file_keys: list[str] = []
         async with db.begin():
@@ -172,7 +172,8 @@ class MediaService:
                     await asyncio.to_thread(storage_delete, img.file_key)
                 except Exception as e:
                     logger.warning(
-                        "Signup image storage delete failed image_id=%s file_key=%s: %s",
+                        "Signup image storage delete failed task_id=%s image_id=%s file_key=%s: %s",
+                        task_id,
                         img.id,
                         img.file_key,
                         e,

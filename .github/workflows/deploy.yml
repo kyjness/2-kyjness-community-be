@@ -27,18 +27,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 2. DB 테이블 자동 생성 (마이그레이션)
+      # 2. DB 테이블 자동 생성 (마이그레이션 - Poetry 적용)
       - name: Install Dependencies & Run Alembic
         env:
-          # 올려주신 시크릿 이름(EC2_HOST)에 정확히 맞췄습니다!
           DB_HOST: ${{ secrets.EC2_HOST }}  
           DB_PORT: 5432
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
         run: |
-          pip install -r requirements.txt
-          alembic upgrade head
+          pip install poetry
+          poetry install
+          poetry run alembic upgrade head
 
       # 3. AWS 인증 설정
       - name: Configure AWS credentials

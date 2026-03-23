@@ -7,6 +7,13 @@ class TargetType(StrEnum):
     COMMENT = "COMMENT"
 
 
+class ReportReason(StrEnum):
+    SPAM = "스팸"
+    PROFANITY = "욕설"
+    INAPPROPRIATE_CONTENT = "부적절한 콘텐츠"
+    OTHER = "기타"
+
+
 class DogGender(StrEnum):
     MALE = "male"
     FEMALE = "female"
@@ -17,10 +24,6 @@ class UserStatus(StrEnum):
     SUSPENDED = "SUSPENDED"  # 정지
     WITHDRAWN = "WITHDRAWN"  # 탈퇴(soft delete)
 
-    # Backward-compatibility (legacy 값)
-    BANNED = "BANNED"
-    DELETED = "DELETED"
-
     @classmethod
     def is_active_value(cls, status: object) -> bool:
         value = getattr(status, "value", status)
@@ -29,12 +32,12 @@ class UserStatus(StrEnum):
     @classmethod
     def is_suspended_value(cls, status: object) -> bool:
         value = getattr(status, "value", status)
-        return value in {cls.SUSPENDED.value, cls.BANNED.value}
+        return value == cls.SUSPENDED.value
 
     @classmethod
     def is_withdrawn_value(cls, status: object) -> bool:
         value = getattr(status, "value", status)
-        return value in {cls.WITHDRAWN.value, cls.DELETED.value}
+        return value == cls.WITHDRAWN.value
 
     @classmethod
     def inactive_message_ko(cls, status: object) -> str:

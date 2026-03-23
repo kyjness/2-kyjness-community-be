@@ -1,6 +1,8 @@
-# 만료 세션·회원가입용 이미지 TTL 정리. Full-Async: run_once 비동기, run_loop_async(lifespan).
+# 만료된 회원가입용 임시 이미지 정리. Full-Async: run_once 비동기, run_loop_async(lifespan).
+# HTTP request가 없으므로 실행마다 task_id(UUID)를 발급해 로그 상관관계에 사용.
 import asyncio
 import logging
+import uuid
 
 from app.core.config import settings
 from app.db import get_connection
@@ -9,6 +11,8 @@ log = logging.getLogger(__name__)
 
 
 async def run_once() -> None:
+    task_id = str(uuid.uuid4())
+    log.info("signup_image_cleanup_start task_id=%s", task_id)
     try:
         from app.media.service import MediaService
 
@@ -16,21 +20,28 @@ async def run_once() -> None:
             (
                 deleted_count,
                 failed_file_keys,
-            ) = await MediaService.cleanup_expired_signup_images(db)
+            ) = await MediaService.cleanup_expired_signup_images(db, task_id=task_id)
         if failed_file_keys:
             log.warning(
-                "Signup image cleanup: %s rows soft-deleted, %s storage delete failed (retry later): %s",
+                "signup_image_cleanup_partial task_id=%s deleted_count=%s storage_delete_failed=%s keys=%s",
+                task_id,
                 deleted_count,
                 len(failed_file_keys),
                 failed_file_keys,
             )
-            log.warning("[S3_DELETE_RETRY_NEEDED] keys: %s", failed_file_keys)
+            log.warning(
+                "[S3_DELETE_RETRY_NEEDED] task_id=%s keys=%s", task_id, failed_file_keys
+            )
+        elif deleted_count:
+            log.info(
+                "signup_image_cleanup_done task_id=%s deleted_count=%s", task_id, deleted_count
+            )
     except Exception as e:
-        log.warning("Signup image cleanup failed: %s", e)
+        log.warning("signup_image_cleanup_failed task_id=%s error=%s", task_id, e)
 
 
 async def run_loop_async(stop_event: asyncio.Event) -> None:
-    interval = max(60, settings.SESSION_CLEANUP_INTERVAL)
+    interval = max(60, settings.SIGNUP_IMAGE_CLEANUP_INTERVAL)
     while not stop_event.is_set():
         await run_once()
         try:

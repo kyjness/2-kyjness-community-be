@@ -1,6 +1,6 @@
 # 게시글 라우터. Router → Service. 예외는 전역 handler 처리.
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -12,7 +12,7 @@ from app.api.dependencies import (
     get_slave_db,
     require_post_author,
 )
-from app.common import ApiCode, ApiResponse, PaginatedResponse
+from app.common import ApiCode, ApiResponse, PaginatedResponse, api_response
 from app.posts.schema import (
     PostCreateRequest,
     PostIdData,
@@ -26,16 +26,18 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 
 @router.post("", status_code=201, response_model=ApiResponse[PostIdData])
 async def create_post(
+    request: Request,
     post_data: PostCreateRequest,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
     post_id = await PostService.create_post(user.id, post_data, db=db)
-    return ApiResponse(code=ApiCode.POST_UPLOADED, data=PostIdData(id=post_id))
+    return api_response(request, code=ApiCode.POST_UPLOADED, data=PostIdData(id=post_id))
 
 
 @router.get("", status_code=200, response_model=ApiResponse[PaginatedResponse[PostResponse]])
 async def get_posts(
+    request: Request,
     page: int = Query(1, ge=1, description="페이지 번호"),
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
     q: str | None = Query(None, description="검색어 (title, content ILIKE)"),
@@ -51,7 +53,8 @@ async def get_posts(
         sort=sort,
         current_user_id=current_user.id if current_user else None,
     )
-    return ApiResponse(
+    return api_response(
+        request,
         code=ApiCode.POSTS_RETRIEVED,
         data=PaginatedResponse(items=result, has_more=has_more, total=total),
     )
@@ -59,6 +62,7 @@ async def get_posts(
 
 @router.post("/{post_id}/view", status_code=200, response_model=ApiResponse[None])
 async def record_view(
+    request: Request,
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     client_id: str = Depends(get_client_identifier),
     db: AsyncSession = Depends(get_master_db),
@@ -70,11 +74,12 @@ async def record_view(
         db=db,
         current_user_id=current_user.id if current_user else None,
     )
-    return ApiResponse(code=ApiCode.POST_VIEW_RECORDED, data=None)
+    return api_response(request, code=ApiCode.POST_VIEW_RECORDED, data=None)
 
 
 @router.get("/{post_id}", status_code=200, response_model=ApiResponse[PostResponse])
 async def get_post(
+    request: Request,
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
@@ -82,7 +87,7 @@ async def get_post(
     data = await PostService.get_post_detail(
         post_id, db=db, current_user_id=current_user.id if current_user else None
     )
-    return ApiResponse(code=ApiCode.POST_RETRIEVED, data=data)
+    return api_response(request, code=ApiCode.POST_RETRIEVED, data=data)
 
 
 @router.patch(
@@ -92,12 +97,13 @@ async def get_post(
     dependencies=[Depends(require_post_author)],
 )
 async def update_post(
+    request: Request,
     post_data: PostUpdateRequest,
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.update_post(post_id, post_data, db=db)
-    return ApiResponse(code=ApiCode.POST_UPDATED, data=None)
+    return api_response(request, code=ApiCode.POST_UPDATED, data=None)
 
 
 @router.delete(
@@ -107,8 +113,9 @@ async def update_post(
     dependencies=[Depends(require_post_author)],
 )
 async def delete_post(
+    request: Request,
     post_id: int = Path(..., ge=1, description="게시글 ID"),
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.delete_post(post_id, db=db)
-    return ApiResponse(code=ApiCode.POST_DELETED, data=None)
+    return api_response(request, code=ApiCode.POST_DELETED, data=None)

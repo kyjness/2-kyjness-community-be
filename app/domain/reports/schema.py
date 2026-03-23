@@ -2,13 +2,13 @@
 from pydantic import Field
 
 from app.common import BaseSchema
-from app.common.enums import TargetType
+from app.common.enums import ReportReason, TargetType
 
 
 class ReportCreateRequest(BaseSchema):
-    target_type: TargetType = Field(..., description="신고 대상 유형")
+    target_type: TargetType = Field(..., description="신고 대상: POST(게시글) | COMMENT(댓글)")
     target_id: int = Field(..., ge=1, description="대상 ID (게시글 또는 댓글 PK)")
-    reason: str | None = Field(default=None, max_length=500)
+    reason: ReportReason = Field(..., description="신고 사유 (스팸|욕설|부적절한 콘텐츠|기타)")
 
 
 class ReportSubmitData(BaseSchema):

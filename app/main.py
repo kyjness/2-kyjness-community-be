@@ -1,10 +1,11 @@
 # PuppyTalk API 진입점. lifespan, 미들웨어·라우터·/health. DI는 app.api.dependencies.
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +13,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import v1_router
-from app.common import ApiCode, ApiResponse, RootData, setup_logging
+from app.common import ApiCode, ApiResponse, RootData, api_response, get_request_id, setup_logging
 from app.db import check_database
 from app.core.cleanup import run_loop_async
 from app.core.cleanup import run_once as cleanup_once
@@ -35,16 +36,19 @@ async def lifespan(app: FastAPI):
     setup_logging()
     log = logging.getLogger(__name__)
     if not await init_database():
-        log.critical("DB 연결 실패로 시작 시 검증 실패. 요청 시점에 재시도됨.")
-    else:
-        log.info("PostgreSQL 연결 성공.")
+        log.critical(
+            "PostgreSQL 연결을 %s회 시도했으나 실패. 프로세스를 종료합니다.",
+            settings.DB_INIT_MAX_ATTEMPTS,
+        )
+        sys.exit(1)
+    log.info("PostgreSQL 연결 성공.")
 
     await init_redis(app)
 
     await cleanup_once()
     stop_event = asyncio.Event()
     cleanup_task = None
-    if settings.SESSION_CLEANUP_INTERVAL > 0:
+    if settings.SIGNUP_IMAGE_CLEANUP_INTERVAL > 0:
         cleanup_task = asyncio.create_task(run_loop_async(stop_event))
 
     yield
@@ -109,8 +113,9 @@ base_router = APIRouter(prefix=_prefix)
 
 
 @base_router.get("/", response_model=ApiResponse[RootData])
-def root():
-    return ApiResponse(
+def root(request: Request):
+    return api_response(
+        request,
         code=ApiCode.OK,
         data=RootData(
             message="PuppyTalk API is running!",
@@ -121,14 +126,16 @@ def root():
 
 
 @base_router.get("/health")
-async def health():
+async def health(request: Request):
     ok = await check_database()
     status_code = 200 if ok else 503
     return JSONResponse(
         status_code=status_code,
         content={
             "code": ApiCode.OK.value if ok else ApiCode.DB_ERROR.value,
+            "message": "",
             "data": {"status": "ok" if ok else "degraded"},
+            "requestId": get_request_id(request),
         },
     )
 

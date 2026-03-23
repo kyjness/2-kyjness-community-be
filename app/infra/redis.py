@@ -30,6 +30,9 @@ async def init_redis(app) -> None:
 async def close_redis(app) -> None:
     client = getattr(app.state, "redis", None)
     if isinstance(client, Redis):
+        pool = client.connection_pool
         await client.aclose()
+        if pool is not None:
+            await pool.disconnect()
         app.state.redis = None
         log.info("Redis connection closed.")

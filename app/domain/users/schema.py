@@ -145,7 +145,7 @@ class UserProfileResponse(BaseSchema):
     email: str
     nickname: str
     role: str = Field(default="USER", description="USER|ADMIN")
-    status: UserStatus = Field(..., description="ACTIVE|BANNED|DELETED")
+    status: UserStatus = Field(..., description="ACTIVE|SUSPENDED|WITHDRAWN")
     profile_image_id: int | None = None
     profile_image_url: str | None = None
     created_at: UtcDatetime

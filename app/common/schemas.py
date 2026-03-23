@@ -17,6 +17,7 @@ class BaseSchema(BaseModel):
         populate_by_name=True,
         from_attributes=True,
         serialize_by_alias=True,
+        use_enum_values=True,
     )
 
 
@@ -24,17 +25,13 @@ T = TypeVar("T")
 
 
 class ApiResponse(BaseSchema, Generic[T]):
-    """code는 ApiCode enum 또는 str. 직렬화 시 enum은 자동으로 .value로 나감."""
+    """code는 ApiCode enum 또는 str. BaseSchema.use_enum_values로 직렬화 시 .value."""
     code: ApiCode | str
     data: T | None = None
     message: str | None = None
-
-    model_config = ConfigDict(
-        alias_generator=to_camel,
-        populate_by_name=True,
-        from_attributes=True,
-        use_enum_values=True,
-        serialize_by_alias=True,
+    request_id: str = Field(
+        default="",
+        description="요청 추적 ID(X-Request-ID 헤더와 동일). 에러 토스트·지원 문의용.",
     )
 
 

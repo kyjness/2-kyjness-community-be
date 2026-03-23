@@ -11,7 +11,7 @@ from app.api.dependencies import (
     parse_availability_query,
 )
 from app.auth.service import AuthService
-from app.common import ApiCode, ApiResponse
+from app.common import ApiCode, ApiResponse, api_response
 from app.users.schema import (
     AvailabilityData,
     BlocksData,
@@ -28,30 +28,33 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/availability", status_code=200, response_model=ApiResponse[AvailabilityData])
 async def check_availability(
+    request: Request,
     query: UserAvailabilityQuery = Depends(parse_availability_query),
     db: AsyncSession = Depends(get_slave_db),
 ):
     data = await UserService.check_availability(query, db=db)
-    return ApiResponse(code=ApiCode.OK, data=data)
+    return api_response(request, code=ApiCode.OK, data=data)
 
 
 @router.get("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
 async def get_me(
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
 ):
     data = await UserService.get_user_profile(user.id, db=db)
-    return ApiResponse(code=ApiCode.USER_RETRIEVED, data=data)
+    return api_response(request, code=ApiCode.USER_RETRIEVED, data=data)
 
 
 @router.patch("/me", status_code=200, response_model=ApiResponse[UserProfileResponse])
 async def update_me(
+    request: Request,
     user_data: UpdateUserRequest,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await UserService.update_user_profile(user.id, user_data, db=db)
-    return ApiResponse(code=ApiCode.USER_UPDATED, data=data)
+    return api_response(request, code=ApiCode.USER_UPDATED, data=data)
 
 
 @router.patch("/me/password", status_code=200, response_model=ApiResponse[None])
@@ -64,7 +67,7 @@ async def update_password(
     await UserService.update_password(user.id, password_data, db=db)
     redis = getattr(request.app.state, "redis", None)
     await AuthService.revoke_refresh_for_user(user.id, redis)
-    return ApiResponse(code=ApiCode.PASSWORD_UPDATED, data=None)
+    return api_response(request, code=ApiCode.PASSWORD_UPDATED, data=None)
 
 
 @router.delete("/me", status_code=204)
@@ -81,11 +84,12 @@ async def delete_me(
 
 @router.get("/me/blocks", status_code=200, response_model=ApiResponse[BlocksData])
 async def get_my_blocks(
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
 ):
     data = await UserService.get_blocked_list(user.id, db=db)
-    return ApiResponse(code=ApiCode.BLOCKS_RETRIEVED, data=data)
+    return api_response(request, code=ApiCode.BLOCKS_RETRIEVED, data=data)
 
 
 @router.post(
@@ -94,13 +98,15 @@ async def get_my_blocks(
     response_model=ApiResponse[BlockToggleResponse],
 )
 async def toggle_block_user(
+    request: Request,
     target_user_id: int,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
     """유저 차단/차단해제 토글. 이미 차단된 경우 해제."""
     is_blocked = await UserService.toggle_block_user(user.id, target_user_id, db=db)
-    return ApiResponse(
+    return api_response(
+        request,
         code=ApiCode.OK,
         data=BlockToggleResponse(blocked=is_blocked),
     )

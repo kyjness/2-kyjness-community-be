@@ -42,14 +42,14 @@
 
 | 파일 | 역할 |
 |------|------|
-| **router** | HTTP 엔드포인트 정의. `Depends(...)`로 DB·유저·클라이언트 식별자 주입. **Service** 호출 후 반환값을 ApiResponse로 포장·예외(ValueError)를 HTTP 에러로 변환. |
+| **router** | HTTP 엔드포인트 정의. `Depends(...)`로 DB·유저·클라이언트 식별자 주입. **Service** 호출 후 `api_response(request, ...)`로 `ApiResponse` 포장(`requestId` 자동 주입, `X-Request-ID`와 동일). |
 | **service** | 비즈니스 로직·도메인 간 조율(Orchestration). 순수 데이터 반환 또는 ValueError. Redis·토큰·카운트 동기화·이미지 ref_count 등 처리. ApiResponse·ApiCode·raise_http_error 미사용. |
 | **model** | DB 접근(CRUD·쿼리). AsyncSession만 사용. **commit/rollback은 하지 않으며**, 트랜잭션 경계는 서비스의 `async with db.begin():` 블록에서만 둠. |
 | **schema** | 요청/응답 DTO. Pydantic v2 검증·alias. |
 
 도메인 레이어는 **router → service → model → schema** 4계층 패턴을 따른다. 복합 연산·도메인 간 협업은 Service에서 수행한다.
 
-**common**에는 `ApiCode`(응답 code), `TargetType`(신고 대상: POST/COMMENT), `UserStatus` 등 StrEnum이 정의되어 있다. `ApiResponse.code`는 `ApiCode | str`을 받으며, `use_enum_values=True`로 직렬화 시 문자열로 내려가므로 라우터에서는 `ApiCode.OK` 등 enum만 전달하면 된다.
+**common**에는 `ApiCode`(응답 code), `TargetType`(신고 대상: POST/COMMENT), `ReportReason`(신고 사유: 프론트와 동일한 네 가지 한글 값), `UserStatus` 등 StrEnum이 정의되어 있다. `ApiResponse`는 `code`·`data`·`message`·`requestId` 필드를 갖는다(`requestId`는 `RequestIdMiddleware`가 넣은 값). `ApiResponse.code`는 `ApiCode | str`을 받으며, `BaseSchema`의 `use_enum_values=True`로 직렬화 시 문자열로 내려간다. 전역 예외 응답 JSON도 동일 키(`requestId` 포함)를 사용한다. 서버 측 상세 로그는 주로 5xx·DB 예외 등에 한해 JSON 한 줄(`event`, `request_id`, `path` 등)로 남기고, 클라이언트 검증 실패(4xx)는 로그를 남기지 않는다.
 
 ### 1.3 도메인 의존성 (Domain Dependency)
 
@@ -173,7 +173,7 @@ flowchart TB
 - **comments**: `CommentService`는 댓글 수 동기화를 위해 `PostsModel`만 참조(함수 내부 임포트).
 - **likes**: 라우터가 게시글/댓글 존재 여부 확인에 `PostsModel`, `CommentsModel` 사용. `LikeService`는 `PostLikesModel`, `CommentsModel`(get_like_count), `CommentLikesModel`(create/delete·like_count 갱신), `PostsModel`(like_count 갱신) 사용.
 - **media**: 다른 도메인을 참조하지 않음.
-- **reports**: `ReportService`가 게시글·댓글 신고 시 `ReportsModel.create_report`(Insert만, 누적)·`PostsModel`/`CommentsModel`의 `report_count` 증가·임계값 도달 시 `blinded` 설정. `reports` 테이블은 `target_type`(TargetType: POST/COMMENT), `reason`(자유 문자열), `deleted_at`(신고 무시 시 soft delete)만 사용하며, `status` 컬럼은 제거됨.
+- **reports**: `ReportService`가 게시글·댓글 신고 시 `ReportsModel.create_report`(Insert만, 누적)·`PostsModel`/`CommentsModel`의 `report_count` 증가·임계값 도달 시 `blinded` 설정. `reports` 테이블은 `target_type`(TargetType: POST/COMMENT), `reason`(`ReportReason`과 동일한 문자열로 저장), `deleted_at`(신고 무시 시 soft delete)만 사용하며, `status` 컬럼은 제거됨.
 - **admin**: 관리자 전용. 신고된 게시글·댓글 통합 목록(`GET /admin/reported-posts`, `target_type`·`content_preview` 포함), 게시글/댓글 각각 블라인드 해제·블라인드 처리·신고 무시·삭제, 유저 정지/해제 API 제공. 내부적으로 `PostsModel`·`CommentsModel`·`ReportsModel`·`UsersModel` 사용.
 - **dogs**: `UserService`·`UsersModel`에서 `DogProfile` 관리. users 도메인에 포함.
 
@@ -192,7 +192,7 @@ flowchart TB
 ① Lifespan (앱 시작 1회)
    → DB 연결 확인. 실패 시 log 후 요청 시점에 재시도.
    → REDIS_URL 있으면 Redis 연결 풀 생성·저장. 실패 시 Fail-open.
-   → cleanup_once 1회 실행 후, SESSION_CLEANUP_INTERVAL > 0 이면 주기적 정리 태스크 시작.
+   → cleanup_once 1회 실행 후, SIGNUP_IMAGE_CLEANUP_INTERVAL > 0 이면 주기적 정리 태스크 시작.
    → yield 이후(종료 시): 정리 태스크 종료 대기 → Redis 연결 종료 → DB 연결 종료.
 
 ② GET /health
@@ -394,10 +394,10 @@ GET이 멱등해야 하므로 조회수는 **전용 POST 엔드포인트**로만
 게시글·댓글을 신고할 수 있다. 신고는 **항상 새 행(Insert)**으로 누적되며, 동일 유저가 같은 대상을 다시 신고해도 별도 레코드가 추가된다.
 
 **동작**:
-- 신고 시 `reports` 테이블에 `target_type`(POST/COMMENT), `target_id`, `reason`(자유 문자열)으로 행을 삽입하고, 해당 글/댓글의 `report_count`를 1 증가시킨다.
+- 신고 시 `reports` 테이블에 `target_type`(POST/COMMENT), `target_id`, `reason`(`ReportReason`: 스팸·욕설·부적절한 콘텐츠·기타)으로 행을 삽입하고, 해당 글/댓글의 `report_count`를 1 증가시킨다.
 - `report_count`가 임계값(기본 5) 이상이면 **자동 블라인드**된다.
 - **신고 무시**(관리자 초기화) 시에만 해당 target의 `reports` 행을 **soft delete**(`deleted_at` 설정)하고, 글/댓글의 `report_count`·`is_blinded`를 초기화한다. 이후 같은 유저가 다시 신고하면 새 행이 생성되어 목록에 다시 노출된다.
-- `reports` 테이블에는 `status` 컬럼을 두지 않으며, 애플리케이션에서는 `TargetType` enum(POST, COMMENT)으로 `target_type`을 다룬다.
+- `reports` 테이블에는 `status` 컬럼을 두지 않으며, 애플리케이션에서는 `TargetType` enum(POST, COMMENT)으로 `target_type`을, `ReportReason`으로 API 입력 `reason`을 다룬다.
 
 블라인드된 콘텐츠는 관리자 화면에서 검토·블라인드 해제·신고 무시·삭제(글/댓글)할 수 있다.
 

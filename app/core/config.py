@@ -39,6 +39,8 @@ class Settings:
     DB_PING_TIMEOUT: int = int(os.getenv("DB_PING_TIMEOUT", "1"))
     WRITER_DB_URL: str = os.getenv("WRITER_DB_URL", "").strip()
     READER_DB_URL: str = os.getenv("READER_DB_URL", "").strip()
+    DB_INIT_MAX_ATTEMPTS: int = max(1, int(os.getenv("DB_INIT_MAX_ATTEMPTS", "3")))
+    DB_INIT_RETRY_DELAY_SECONDS: float = float(os.getenv("DB_INIT_RETRY_DELAY_SECONDS", "2"))
 
     # ----- JWT (배포 시 JWT_SECRET_KEY 반드시 변경) -----
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
@@ -48,8 +50,10 @@ class Settings:
     REFRESH_TOKEN_COOKIE_NAME: str = os.getenv("REFRESH_TOKEN_COOKIE_NAME", "refresh_token")
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
-    # ----- 세션 (클린업 주기 초. 0이면 백그라운드 클린업 비활성) -----
-    SESSION_CLEANUP_INTERVAL: int = int(os.getenv("SESSION_CLEANUP_INTERVAL", "3600"))
+    # ----- 회원가입 임시 이미지 TTL 정리 (주기 초. 0이면 백그라운드 루프 비활성, 시작 시 1회는 항상 실행) -----
+    SIGNUP_IMAGE_CLEANUP_INTERVAL: int = int(
+        os.getenv("SIGNUP_IMAGE_CLEANUP_INTERVAL", "3600")
+    )
 
     # ----- Redis (비우면 연결 시도 안 함, rate limit 등 Fail-open) -----
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()

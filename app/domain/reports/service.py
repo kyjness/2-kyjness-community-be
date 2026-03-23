@@ -52,6 +52,10 @@ class ReportService:
                     raise CommentNotFoundException()
 
             blinded = await cls._create_report_and_maybe_blind(
-                reporter_id, data.target_type, data.target_id, data.reason, db=db
+                reporter_id,
+                data.target_type,
+                data.target_id,
+                data.reason.value,
+                db=db,
             )
             return ReportSubmitData(reported=True, blinded=blinded)

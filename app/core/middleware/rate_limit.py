@@ -113,13 +113,20 @@ async def _check_redis_fixed_window(
         raise
 
 
-async def _send_429(send: Send, code: ApiCode, retry_after_seconds: int) -> None:
-    """순수 ASGI: 429 응답만 전송. 블로킹 없음."""
+async def _send_429(
+    send: Send, scope: Scope, code: ApiCode, retry_after_seconds: int
+) -> None:
+    """순수 ASGI: 429 응답만 전송. ApiResponse·전역 에러와 동일 키(requestId 등)."""
+    state = scope.get("state") or {}
+    rid = state.get("request_id", "") or ""
     body = json.dumps(
         {
             "code": code.value,
+            "message": "",
             "data": {"retry_after_seconds": retry_after_seconds},
-        }
+            "requestId": rid,
+        },
+        ensure_ascii=False,
     ).encode("utf-8")
     headers = [
         (b"content-type", b"application/json"),
@@ -194,7 +201,7 @@ class RateLimitMiddleware:
                 allowed = True
 
         if not allowed:
-            await _send_429(send, code, retry_after_seconds)
+            await _send_429(send, scope, code, retry_after_seconds)
             return
 
         await self.app(scope, receive, send)
