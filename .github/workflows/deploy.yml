@@ -9,7 +9,6 @@ env:
   ECR_REPOSITORY: puppytalk-be-ecs
   ECS_SERVICE: puppytalk-be-service
   ECS_CLUSTER: puppytalk-cluster
-  # 루트 계층에 복사한 파일명
   ECS_TASK_DEFINITION: task-definition.json
   CONTAINER_NAME: puppytalk-be
 
@@ -22,7 +21,26 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. AWS 인증 설정
+      # 1. 파이썬 환경 세팅 (Alembic 실행용)
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # 2. DB 테이블 자동 생성 (마이그레이션)
+      - name: Install Dependencies & Run Alembic
+        env:
+          # 올려주신 시크릿 이름(EC2_HOST)에 정확히 맞췄습니다!
+          DB_HOST: ${{ secrets.EC2_HOST }}  
+          DB_PORT: 5432
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: |
+          pip install -r requirements.txt
+          alembic upgrade head
+
+      # 3. AWS 인증 설정
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -30,12 +48,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 2. Amazon ECR 로그인
+      # 4. Amazon ECR 로그인
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 3. Docker 이미지 빌드 및 ECR 푸시 (SHA 태그 사용)
+      # 5. Docker 이미지 빌드 및 ECR 푸시 (SHA 태그 사용)
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
@@ -46,7 +64,7 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      # 4. ECS 태스크 정의서에 새 이미지 주소 주입
+      # 6. ECS 태스크 정의서에 새 이미지 주소 주입
       - name: Fill in the new image ID in the Amazon ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -55,15 +73,11 @@ jobs:
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.build-image.outputs.image }}
 
-      # 5. ECS 블루/그린 배포 실행 (수정된 핵심 부분)
+      # 5. ECS 롤링 배포 실행
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           task-definition: ${{ steps.task-def.outputs.task-definition }}
-          codedeploy-appspec: appspec.yaml
-          # 아래 이름들이 AWS 콘솔의 CodeDeploy 설정과 일치하는지 꼭 확인하세요!
-          codedeploy-application: AppECS-puppytalk-cluster-puppytalk-be-service
-          codedeploy-deployment-group: DgpECS-puppytalk-cluster-puppytalk-be-service
           wait-for-service-stability: true
