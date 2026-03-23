@@ -10,7 +10,7 @@ env:
   ECS_SERVICE: puppytalk-be-service
   ECS_CLUSTER: puppytalk-cluster
   ECS_TASK_DEFINITION: task-definition.json
-  CONTAINER_NAME: puppytalk-be
+  CONTAINER_NAME: puppytalk-be-container
 
 jobs:
   deploy:

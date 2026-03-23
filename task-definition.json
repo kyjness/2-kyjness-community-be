@@ -2,7 +2,7 @@
     "taskDefinitionArn": "arn:aws:ecs:ap-northeast-2:654081961169:task-definition/puppytalk-be-task:2",
     "containerDefinitions": [
         {
-            "name": "puppytalk-be",
+            "name": "puppytalk-be-container",
             "image": "654081961169.dkr.ecr.ap-northeast-2.amazonaws.com/puppytalk-be-ecs@sha256:fe6f66d530aea9076ac572c387d013cc2c19b73a98c4f6a858f6b7f23549a443",
             "cpu": 0,
             "portMappings": [
@@ -22,7 +22,7 @@
                 },
                 {
                     "name": "WRITER_DB_URL",
-                    "value": "postgresql+psycopg://postgres:0730@54.180.128.99:5432/puppytalk"
+                    "value": "postgresql+psycopg://postgres:0730@10.0.1.4:5432/puppytalk"
                 },
                 {
                     "name": "JWT_ALGORITHM",
@@ -58,11 +58,11 @@
                 },
                 {
                     "name": "READER_DB_URL",
-                    "value": "postgresql+psycopg://postgres:0730@54.180.128.99:5432/puppytalk"
+                    "value": "postgresql+psycopg://postgres:0730@10.0.1.4:5432/puppytalk"
                 },
                 {
                     "name": "REDIS_URL",
-                    "value": "redis://54.180.128.99:6379"
+                    "value": "redis://10.0.1.4:6379"
                 }
             ],
             "environmentFiles": [],
@@ -89,33 +89,15 @@
     "volumes": [],
     "status": "ACTIVE",
     "requiresAttributes": [
-        {
-            "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
-        },
-        {
-            "name": "ecs.capability.execution-role-awslogs"
-        },
-        {
-            "name": "com.amazonaws.ecs.capability.ecr-auth"
-        },
-        {
-            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
-        },
-        {
-            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.21"
-        },
-        {
-            "name": "ecs.capability.execution-role-ecr-pull"
-        },
-        {
-            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.18"
-        },
-        {
-            "name": "ecs.capability.task-eni"
-        },
-        {
-            "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29"
-        }
+        { "name": "com.amazonaws.ecs.capability.logging-driver.awslogs" },
+        { "name": "ecs.capability.execution-role-awslogs" },
+        { "name": "com.amazonaws.ecs.capability.ecr-auth" },
+        { "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19" },
+        { "name": "com.amazonaws.ecs.capability.docker-remote-api.1.21" },
+        { "name": "ecs.capability.execution-role-ecr-pull" },
+        { "name": "com.amazonaws.ecs.capability.docker-remote-api.1.18" },
+        { "name": "ecs.capability.task-eni" },
+        { "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29" }
     ],
     "placementConstraints": [],
     "compatibilities": [
