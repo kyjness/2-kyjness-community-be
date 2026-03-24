@@ -33,6 +33,7 @@ class DogService:
 
         for raw in items:
             item: DogProfileUpsertItem = DogProfileUpsertItem.model_validate(raw)
+            touch_dog_image = "profile_image_id" in item.model_fields_set
             if item.id is None:
                 dog = await DogProfilesModel.create(
                     owner_id=owner_id,
@@ -56,7 +57,7 @@ class DogService:
                 if item.is_representative:
                     representative_id = item.id
                 old = await DogProfilesModel.get_by_id(item.id, owner_id, db=db)
-                if old and old.profile_image_id != item.profile_image_id:
+                if touch_dog_image and old and old.profile_image_id != item.profile_image_id:
                     if old.profile_image_id:
                         to_decrement.append(old.profile_image_id)
                     if item.profile_image_id:
@@ -70,6 +71,7 @@ class DogService:
                     gender=item.gender.value,
                     birth_date=item.birth_date,
                     profile_image_id=item.profile_image_id,
+                    touch_profile_image=touch_dog_image,
                     is_representative=item.is_representative,
                 )
 

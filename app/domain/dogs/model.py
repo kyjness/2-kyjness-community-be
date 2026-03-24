@@ -71,6 +71,7 @@ class DogProfilesModel:
         gender: str | None = None,
         birth_date=None,
         profile_image_id: int | None = None,
+        touch_profile_image: bool = False,
         is_representative: bool | None = None,
     ) -> bool:
         values = {}
@@ -82,7 +83,7 @@ class DogProfilesModel:
             values["gender"] = gender
         if birth_date is not None:
             values["birth_date"] = birth_date
-        if profile_image_id is not None:
+        if touch_profile_image:
             values["profile_image_id"] = profile_image_id
         if is_representative is not None:
             values["is_representative"] = is_representative

@@ -8,6 +8,23 @@ UPLOAD_DIR = PROJECT_ROOT / "upload"
 
 _s3_client = None
 
+_MEDIA_PREFIX = "media/"
+
+
+def _strip_redundant_media_prefixes(key: str) -> str:
+    """DB/호출부에 media/ 가 중복·혼입돼도 S3 키·공개 URL에서 한 번만 쓰이도록 본문 경로만 남김."""
+    k = (key or "").strip().lstrip("/")
+    while k.startswith(_MEDIA_PREFIX):
+        k = k[len(_MEDIA_PREFIX) :].lstrip("/")
+    return k
+
+
+def _s3_object_key(key: str) -> str:
+    body = _strip_redundant_media_prefixes(key)
+    if not body:
+        raise ValueError("storage key must not be empty")
+    return f"{_MEDIA_PREFIX}{body}"
+
 
 def _get_s3_client():
     """S3 클라이언트 Lazy-loading. 인증 정보 누락 시 ValueError."""
@@ -57,20 +74,21 @@ def _be_base_url() -> str:
 
 def build_url(key: str) -> str:
     if settings.STORAGE_BACKEND == "s3":
+        path_under_media = _strip_redundant_media_prefixes(key)
         if settings.S3_PUBLIC_BASE_URL:
             base = settings.S3_PUBLIC_BASE_URL.rstrip("/")
-            return f"{base}/{key}"
-        return f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{key}"
+            return f"{base}/{path_under_media}"
+        return (
+            f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/"
+            f"{_s3_object_key(key)}"
+        )
     base = _be_base_url().rstrip("/")
     return f"{base}/upload/{key}"
 
 
 def _s3_save(key: str, content: bytes, content_type: str) -> str:
     client = _get_s3_client()
-    
-    # 💡 CloudFront의 /media/* 라우팅 규칙과 물리적 S3 경로를 일치시킵니다.
-    s3_key = key if key.startswith("media/") else f"media/{key.lstrip('/')}"
-    
+    s3_key = _s3_object_key(key)
     client.put_object(
         Bucket=settings.S3_BUCKET_NAME,
         Key=s3_key,
@@ -83,11 +101,7 @@ def _s3_save(key: str, content: bytes, content_type: str) -> str:
 
 def _s3_delete(key: str) -> None:
     client = _get_s3_client()
-    
-    # 💡 삭제할 때도 올바른 경로(media/...)를 바라보도록 수정합니다.
-    s3_key = key if key.startswith("media/") else f"media/{key.lstrip('/')}"
-    
-    client.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key)
+    client.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=_s3_object_key(key))
 
 
 def _local_save(key: str, content: bytes, content_type: str) -> str:
