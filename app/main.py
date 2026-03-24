@@ -108,6 +108,10 @@ if settings.STORAGE_BACKEND == "local":
     upload_dir.mkdir(exist_ok=True)
     app.mount("/upload", StaticFiles(directory=str(upload_dir)), name="upload")
 
+@app.get("/")
+def alb_health_check():
+    return {"status": "ok", "message": "PuppyTalk API is running!"}
+
 # 3. 루트 및 헬스체크용 공통 라우터 생성
 base_router = APIRouter(prefix=_prefix)
 
