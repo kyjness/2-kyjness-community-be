@@ -10,7 +10,8 @@ on:
 
 env:
   AWS_REGION: ap-northeast-2
-  ECR_REPOSITORY: puppytalk-be-ecs
+  # Terraform ecr.tf: aws_ecr_repository.be → ${project_name}-be (= puppytalk-be)
+  ECR_REPOSITORY: puppytalk-be
   ECS_SERVICE: puppytalk-be-service
   ECS_CLUSTER: puppytalk-cluster
   # describe-task-definition 대상 = Task Definition family (서비스 이름과 다를 수 있음)
