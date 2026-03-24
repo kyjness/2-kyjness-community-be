@@ -22,8 +22,7 @@ docs
 *.md
 !README.md
 
-# 개발 및 테스트 전용 폴더
-test/
+# 개발 전용 (테스트 스위트는 재구성 전까지 제외)
 typings/
 .pytest_cache/
 

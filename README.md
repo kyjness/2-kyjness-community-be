@@ -137,13 +137,7 @@ psql -U postgres -d puppytalk -f docs/clear_db.sql
 poetry run poe run
 ```
 
-### 5. 테스트
-
-```bash
-poetry run poe test
-```
-
-### 6. 개발 도구 (Ruff, Pyright, pip-audit)
+### 5. 개발 도구 (Ruff, Pyright, pip-audit)
 
 **수정/적용용** (코드를 직접 변경):
 
@@ -165,7 +159,7 @@ poetry run poe audit        # pip-audit (의존성 보안 취약점 스캔)
 
 **보안·의존성 스캔**: `poe audit`은 현재 가상환경에 설치된 패키지(FastAPI, SQLAlchemy 등)를 [PyPA 알려진 취약점 DB](https://github.com/pypa/advisory-database) 기준으로 검사합니다. 취약 패키지가 있으면 목록과 조치 방법을 출력하고 종료 코드 1로 끝납니다.
 
-### 7. 관리자 기능 (Admin)
+### 6. 관리자 기능 (Admin)
 
 관리자 전용 API(`/v1/admin/*`)와 프론트 대시보드(`/admin/dashboard`)는 **role이 `ADMIN`인 유저만** 사용할 수 있습니다.
 

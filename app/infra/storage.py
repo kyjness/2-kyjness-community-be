@@ -67,18 +67,27 @@ def build_url(key: str) -> str:
 
 def _s3_save(key: str, content: bytes, content_type: str) -> str:
     client = _get_s3_client()
+    
+    # 💡 CloudFront의 /media/* 라우팅 규칙과 물리적 S3 경로를 일치시킵니다.
+    s3_key = key if key.startswith("media/") else f"media/{key.lstrip('/')}"
+    
     client.put_object(
         Bucket=settings.S3_BUCKET_NAME,
-        Key=key,
+        Key=s3_key,
         Body=content,
         ContentType=content_type,
     )
+    # 반환되는 URL은 기존 로직(build_url)을 그대로 타서 https://도메인/media/키 형태가 됩니다.
     return build_url(key)
 
 
 def _s3_delete(key: str) -> None:
     client = _get_s3_client()
-    client.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=key)
+    
+    # 💡 삭제할 때도 올바른 경로(media/...)를 바라보도록 수정합니다.
+    s3_key = key if key.startswith("media/") else f"media/{key.lstrip('/')}"
+    
+    client.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=s3_key)
 
 
 def _local_save(key: str, content: bytes, content_type: str) -> str:
