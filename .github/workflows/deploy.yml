@@ -1,3 +1,7 @@
+# CD: ECR 빌드·푸시 후 ECS 서비스 롤링 배포.
+# - DB 마이그레이션(Alembic)은 GitHub Actions에서 실행하지 않음(프라이빗 RDS + 러너 퍼블릭망·DB 시크릿 노출 방지).
+#   컨테이너 entrypoint 등에서 VPC 내부 DB로 alembic upgrade head 수행하도록 별도 구성 권장.
+# - 장기적으로 AWS 자격증명은 IAM User Access Key 대신 GitHub OIDC → IAM Role(aws-actions/configure-aws-credentials role-to-assume) 권장.
 name: Deploy Backend to Amazon ECS (Blue/Green)
 
 on:
@@ -9,38 +13,20 @@ env:
   ECR_REPOSITORY: puppytalk-be-ecs
   ECS_SERVICE: puppytalk-be-service
   ECS_CLUSTER: puppytalk-cluster
-  ECS_TASK_DEFINITION: task-definition.json
+  # describe-task-definition 대상 = Task Definition family (서비스 이름과 다를 수 있음)
+  ECS_TASK_DEFINITION_FAMILY: puppytalk-be-task
+  ECS_TASK_DEF_FILE: task-definition.json
   CONTAINER_NAME: puppytalk-be-container
 
 jobs:
   deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 1. 파이썬 환경 세팅 (Alembic 실행용)
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      # 2. DB 테이블 자동 생성 (마이그레이션 - Poetry 적용)
-      - name: Install Dependencies & Run Alembic
-        env:
-          DB_HOST: ${{ secrets.EC2_HOST }}  
-          DB_PORT: 5432
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-        run: |
-          pip install poetry
-          poetry install
-          poetry run alembic upgrade head
-
-      # 3. AWS 인증 설정
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -48,12 +34,26 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 4. Amazon ECR 로그인
+      - name: Fetch current ECS task definition from AWS
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "${ECS_TASK_DEFINITION_FAMILY}" \
+            --query taskDefinition \
+            --output json | jq 'del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )' > "${ECS_TASK_DEF_FILE}"
+          test -s "${ECS_TASK_DEF_FILE}"
+
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # 5. Docker 이미지 빌드 및 ECR 푸시 (SHA 태그 사용)
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
@@ -64,16 +64,14 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      # 6. ECS 태스크 정의서에 새 이미지 주소 주입
       - name: Fill in the new image ID in the Amazon ECS task definition
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ env.ECS_TASK_DEFINITION }}
+          task-definition: ${{ env.ECS_TASK_DEF_FILE }}
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.build-image.outputs.image }}
 
-      # 5. ECS 롤링 배포 실행
       - name: Deploy Amazon ECS task definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:

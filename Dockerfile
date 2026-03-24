@@ -49,6 +49,9 @@
     # 업로드 폴더 생성 및 소유권 부여
     RUN mkdir -p /app/upload && chown -R appuser:appgroup /app/upload
     
+    COPY --chown=appuser:appgroup scripts/entrypoint.sh /app/scripts/entrypoint.sh
+    RUN chmod +x /app/scripts/entrypoint.sh
+    
     ENV PYTHONUNBUFFERED=1
     ARG PORT=8000
     ENV PORT=${PORT}
@@ -57,7 +60,8 @@
     # 철저한 권한 분리: 이제부터 appuser로 실행
     USER appuser
     
-    CMD ["sh", "-c", "exec gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT}"]
+    ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+    CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000"]
     
     HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
         CMD curl -f http://127.0.0.1:${PORT}/v1/health || exit 1

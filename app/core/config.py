@@ -58,6 +58,20 @@ class Settings:
     # ----- Redis (비우면 연결 시도 안 함, rate limit 등 Fail-open) -----
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()
     REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "20"))
+    # POST /posts 멱등성: 성공 응답 캐시 TTL, in-flight 잠금 TTL(초)
+    IDEMPOTENCY_POST_CREATE_TTL_SECONDS: int = max(
+        60, int(os.getenv("IDEMPOTENCY_POST_CREATE_TTL_SECONDS", "3600"))
+    )
+    IDEMPOTENCY_POST_CREATE_LOCK_TTL_SECONDS: int = max(
+        5, int(os.getenv("IDEMPOTENCY_POST_CREATE_LOCK_TTL_SECONDS", "120"))
+    )
+    # POST /media/images* 멱등성 (업로드 지연 대비 잠금 TTL 여유)
+    IDEMPOTENCY_MEDIA_UPLOAD_TTL_SECONDS: int = max(
+        60, int(os.getenv("IDEMPOTENCY_MEDIA_UPLOAD_TTL_SECONDS", "3600"))
+    )
+    IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS: int = max(
+        30, int(os.getenv("IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS", "60"))
+    )
 
     # ----- Proxy·Trusted Host (Nginx/ALB 뒤 배포 시) -----
     TRUST_X_FORWARDED_FOR: bool = os.getenv("TRUST_X_FORWARDED_FOR", "false").lower() == "true"

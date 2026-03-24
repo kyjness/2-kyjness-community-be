@@ -46,7 +46,7 @@ class DogProfilesModel:
             .options(joinedload(DogProfile.profile_image))
         )
         result = await db.execute(stmt)
-        return result.unique().scalars().one_or_none()
+        return result.scalars().one_or_none()
 
     @classmethod
     async def get_by_owner_id(cls, owner_id: int, db: AsyncSession) -> list[DogProfile]:
@@ -57,7 +57,7 @@ class DogProfilesModel:
             .order_by(DogProfile.id)
         )
         result = await db.execute(stmt)
-        return list(result.unique().scalars().all())
+        return list(result.scalars().all())
 
     @classmethod
     async def update(

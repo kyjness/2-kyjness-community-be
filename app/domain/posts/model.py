@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     delete,
     exists,
     func,
@@ -76,13 +77,14 @@ class Post(Base):
 
 class PostImage(Base):
     __tablename__ = "post_images"
+    __table_args__ = (UniqueConstraint("image_id", name="uq_post_images_image_id"),)
 
     id = mapped_column(Integer, primary_key=True, autoincrement=True)
     post_id = mapped_column(
         Integer, ForeignKey("posts.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     image_id = mapped_column(
-        Integer, ForeignKey("images.id", ondelete="CASCADE"), nullable=False, index=True
+        Integer, ForeignKey("images.id", ondelete="CASCADE"), nullable=False
     )
     created_at = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -144,7 +146,7 @@ class PostsModel:
                     joinedload(User.profile_image),
                     selectinload(User.dogs).joinedload(DogProfile.profile_image),
                 ),
-                joinedload(Post.post_images).joinedload(PostImage.image),
+                selectinload(Post.post_images).joinedload(PostImage.image),
             )
         )
         if current_user_id is not None:
@@ -154,7 +156,7 @@ class PostsModel:
             )
             stmt = stmt.where(~block_exists)
         result = await db.execute(stmt)
-        return result.unique().scalars().one_or_none()
+        return result.scalars().one_or_none()
 
     @classmethod
     async def get_post_author_id(cls, post_id: int, db: AsyncSession) -> int | None:

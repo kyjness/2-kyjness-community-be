@@ -1,12 +1,10 @@
 # 게시글 비즈니스 로직. Full-Async.
-# 조회수 중복 방지: 현재는 로컬 인메모리 캐시(용량 제한 + TTL) 사용.
-# 향후 Redis의 SET NX EX로 즉시 전환 가능한 구조로 유지.
+# 조회수 중복 방지: Redis SET NX EX (멀티 워커). Redis 장애 시 Fail-open(매 요청 카운트).
 from __future__ import annotations
 
+import logging
 import os
-import threading
-import time
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,38 +18,32 @@ from app.media.service import MediaService
 from app.posts.model import PostsModel
 from app.posts.schema import PostCreateRequest, PostResponse, PostUpdateRequest
 
-VIEW_TTL_SECONDS = int(os.getenv("VIEW_CACHE_TTL_SECONDS", str(24 * 3600)))
-VIEW_CACHE_MAX_SIZE = 50_000
-_view_cache: dict[str, float] = {}
-_view_cache_lock = threading.Lock()
+log = logging.getLogger(__name__)
+
+# 0이면 dedup 비활성(매 조회마다 DB 증가). 기본 1시간 윈도우.
+_VIEW_REDIS_EX_SECONDS = max(0, int(os.getenv("VIEW_CACHE_TTL_SECONDS", "3600")))
 
 
-def _view_cache_key(post_id: int, identifier: str) -> str:
-    return f"view:post:{post_id}:ip:{identifier}"
+def _view_redis_key(post_id: int, viewer_key: str) -> str:
+    return f"view:post:{post_id}:viewer:{viewer_key}"
 
 
-def _evict_view_cache_if_needed() -> None:
-    now = time.time()
-    expired = [k for k, v in _view_cache.items() if v <= now]
-    for k in expired:
-        del _view_cache[k]
-    if len(_view_cache) >= VIEW_CACHE_MAX_SIZE:
-        ordered = list(_view_cache.keys())
-        for k in ordered[: VIEW_CACHE_MAX_SIZE // 2]:
-            _view_cache.pop(k, None)
-
-
-def _consume_view_if_new(post_id: int, identifier: str) -> bool:
-    if VIEW_TTL_SECONDS <= 0:
+async def _consume_view_if_new_redis(
+    post_id: int, viewer_key: str, redis_client: Any | None
+) -> bool:
+    """True면 이번 요청에서 DB 조회수를 올려도 됨. Redis 없음/오류 시 True(Fail-open)."""
+    if _VIEW_REDIS_EX_SECONDS <= 0:
         return True
-    key = _view_cache_key(post_id, identifier)
-    now = time.time()
-    expiry = now + VIEW_TTL_SECONDS
-    with _view_cache_lock:
-        if key in _view_cache and _view_cache[key] > now:
-            return False
-        _evict_view_cache_if_needed()
-        _view_cache[key] = expiry
+    if redis_client is None:
+        return True
+    key = _view_redis_key(post_id, viewer_key)
+    try:
+        created = await redis_client.set(
+            key, "1", nx=True, ex=_VIEW_REDIS_EX_SECONDS
+        )
+        return bool(created)
+    except Exception as e:
+        log.warning("조회수 dedup Redis 오류(Fail-open, 증가 허용): %s", e)
         return True
 
 
@@ -103,9 +95,10 @@ class PostService:
     async def record_post_view(
         cls,
         post_id: int,
-        client_identifier: str,
+        viewer_key: str,
         db: AsyncSession,
         current_user_id: Optional[int] = None,
+        redis_client: Any | None = None,
     ) -> None:
         async with db.begin():
             post = await PostsModel.get_post_by_id(
@@ -113,7 +106,7 @@ class PostService:
             )
             if not post:
                 raise PostNotFoundException()
-            if not _consume_view_if_new(post_id, client_identifier):
+            if not await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
                 return
             await PostsModel.increment_view_count(post_id, db=db)
 
@@ -123,6 +116,10 @@ class PostService:
         post_id: int,
         db: AsyncSession,
         current_user_id: Optional[int] = None,
+        *,
+        viewer_key: str,
+        redis_client: Any | None = None,
+        writer_db: AsyncSession | None = None,
     ) -> PostResponse:
         async with db.begin():
             post = await PostsModel.get_post_by_id(
@@ -138,6 +135,14 @@ class PostService:
 
                 is_liked = await LikeService.is_post_liked(post_id, current_user_id, db=db)
                 data = data.model_copy(update={"is_liked": is_liked})
+
+        if writer_db is not None and await _consume_view_if_new_redis(
+            post_id, viewer_key, redis_client
+        ):
+            async with writer_db.begin():
+                await PostsModel.increment_view_count(post_id, db=writer_db)
+            data = data.model_copy(update={"view_count": data.view_count + 1})
+
         return data
 
     @classmethod
