@@ -1,5 +1,7 @@
 # 댓글 CRUD. Comment ORM 반환, Controller/매퍼에서 Schema로 직렬화. AsyncSession.
 
+from datetime import datetime
+
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -15,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, mapped_column, relationship
+from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship
 
 from app.db import Base, utc_now
 from app.users.model import DogProfile, User, UserBlock
@@ -24,39 +26,39 @@ from app.users.model import DogProfile, User, UserBlock
 class Comment(Base):
     __tablename__ = "comments"
 
-    id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    post_id = mapped_column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    author_id = mapped_column(
+    author_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    parent_id = mapped_column(
+    parent_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    content = mapped_column(Text, nullable=False)
-    like_count = mapped_column(Integer, default=0, nullable=False)
-    report_count = mapped_column(Integer, default=0, nullable=False)
-    is_blinded = mapped_column(Boolean, default=False, nullable=False)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at = mapped_column(DateTime(timezone=True), nullable=False)
-    deleted_at = mapped_column(DateTime(timezone=True), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    like_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    report_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_blinded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    author = relationship(User, foreign_keys=[author_id], lazy="raise_on_sql")
-    parent = relationship(
+    author: Mapped[User] = relationship(User, foreign_keys=[author_id], lazy="raise_on_sql")
+    parent: Mapped["Comment | None"] = relationship(
         "Comment",
         remote_side="Comment.id",
         back_populates="replies",
         foreign_keys=[parent_id],
         lazy="raise_on_sql",
     )
-    replies = relationship(
+    replies: Mapped[list["Comment"]] = relationship(
         "Comment",
         back_populates="parent",
         foreign_keys=[parent_id],
         lazy="raise_on_sql",
     )
-    likes = relationship(
+    likes: Mapped[list["CommentLike"]] = relationship(
         "CommentLike",
         back_populates="comment",
         foreign_keys="CommentLike.comment_id",
@@ -67,14 +69,16 @@ class Comment(Base):
 class CommentLike(Base):
     __tablename__ = "comment_likes"
 
-    comment_id = mapped_column(
+    comment_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("comments.id", ondelete="CASCADE"), primary_key=True
     )
-    user_id = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    comment = relationship(Comment, back_populates="likes", lazy="raise_on_sql")
-    user = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
+    comment: Mapped[Comment] = relationship(Comment, back_populates="likes", lazy="raise_on_sql")
+    user: Mapped[User] = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
 
 
 class CommentsModel:

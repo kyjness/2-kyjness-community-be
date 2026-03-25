@@ -1,5 +1,6 @@
 # Redis 연결. Rate Limit·Refresh Token 저장. 앱 lifespan에서 init/close.
 import logging
+from typing import Any, cast
 
 from redis.asyncio import ConnectionPool, Redis
 
@@ -30,8 +31,9 @@ async def init_redis(app) -> None:
 async def close_redis(app) -> None:
     client = getattr(app.state, "redis", None)
     if isinstance(client, Redis):
-        pool = client.connection_pool
-        await client.aclose()
+        c = cast(Any, client)
+        pool = c.connection_pool
+        await c.aclose()
         if pool is not None:
             await pool.disconnect()
         app.state.redis = None

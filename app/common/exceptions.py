@@ -28,6 +28,17 @@ class PostNotFoundException(BaseProjectException):
         super().__init__(status_code=404, code=ApiCode.POST_NOT_FOUND, message=message)
 
 
+class ConcurrentUpdateException(BaseProjectException):
+    """낙관적 락 충돌(예: SQLAlchemy StaleDataError) 시 반환하는 409 예외."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            status_code=409,
+            code=ApiCode.CONFLICT,
+            message=message or "데이터가 다른 요청에 의해 변경되어 완료할 수 없습니다.",
+        )
+
+
 # --- Users / Auth ---
 class UserNotFoundException(BaseProjectException):
     def __init__(self, message: str | None = None):
@@ -179,5 +190,3 @@ class NotFoundException(BaseProjectException):
         message: str | None = None,
     ):
         super().__init__(status_code=404, code=code, message=message)
-
-

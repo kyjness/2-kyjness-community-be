@@ -34,6 +34,6 @@ def dump_api_response(
     data: Any = None,
     message: str | None = None,
 ) -> dict[str, Any]:
-    return api_response(
-        request, code=code, data=data, message=message
-    ).model_dump(mode="json", by_alias=True)
+    return api_response(request, code=code, data=data, message=message).model_dump(
+        mode="json", by_alias=True
+    )

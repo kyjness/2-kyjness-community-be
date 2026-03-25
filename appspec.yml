@@ -5,5 +5,5 @@ Resources:
       Properties:
         TaskDefinition: <TASK_DEFINITION>
         LoadBalancerInfo:
-          ContainerName: "puppytalk-be"
+          ContainerName: "puppytalk-be",
           ContainerPort: 8000

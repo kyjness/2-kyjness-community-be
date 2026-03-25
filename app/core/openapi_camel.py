@@ -21,7 +21,10 @@ def _convert_schema_object(obj: Any) -> Any:
         return obj
     out: dict[str, Any] = {}
     for k, v in obj.items():
-        if k == "properties" and isinstance(v, dict):
+        if k == "required" and isinstance(v, list):
+            # properties 키를 camelCase로 바꾸면 required 이름도 동일하게 맞춰야 스펙이 유효함
+            out[k] = [to_camel(item) if isinstance(item, str) else item for item in v]
+        elif k == "properties" and isinstance(v, dict):
             out[k] = {to_camel(key): _convert_schema_object(val) for key, val in v.items()}
         elif k == "items" and isinstance(v, dict):
             out[k] = _convert_schema_object(v)

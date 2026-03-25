@@ -153,7 +153,9 @@ def register_exception_handlers(app: FastAPI) -> None:
             if "email" in msg_lower or "key 'email'" in msg_lower:
                 return JSONResponse(
                     status_code=409,
-                    content=_error_payload(ApiCode.EMAIL_ALREADY_EXISTS.value, "", None, request=request),
+                    content=_error_payload(
+                        ApiCode.EMAIL_ALREADY_EXISTS.value, "", None, request=request
+                    ),
                 )
             if "nickname" in msg_lower or "key 'nickname'" in msg_lower:
                 return JSONResponse(
@@ -183,7 +185,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         _log_error_structured(request, "db_operational_error", exc)
         return JSONResponse(
             status_code=500,
-            content=_error_payload(ApiCode.DB_ERROR.value, MASKED_500_MESSAGE, None, request=request),
+            content=_error_payload(
+                ApiCode.DB_ERROR.value, MASKED_500_MESSAGE, None, request=request
+            ),
         )
 
     @app.exception_handler(DatabaseError)
@@ -191,7 +195,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         _log_error_structured(request, "db_database_error", exc)
         return JSONResponse(
             status_code=500,
-            content=_error_payload(ApiCode.DB_ERROR.value, MASKED_500_MESSAGE, None, request=request),
+            content=_error_payload(
+                ApiCode.DB_ERROR.value, MASKED_500_MESSAGE, None, request=request
+            ),
         )
 
     @app.exception_handler(BaseProjectException)

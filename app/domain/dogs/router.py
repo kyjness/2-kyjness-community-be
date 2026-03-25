@@ -14,7 +14,7 @@ router = APIRouter(prefix="/users/me/dogs", tags=["dogs"])
 @router.patch("/representative", status_code=200, response_model=ApiResponse[UserProfileResponse])
 async def set_representative_dog(
     request: Request,
-    body: SetRepresentativeDogRequest,
+    body: SetRepresentativeDogRequest,  # JSON: dogId → dog_id (BaseSchema alias)
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):

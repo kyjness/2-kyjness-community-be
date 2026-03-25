@@ -51,9 +51,7 @@ class Settings:
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
     # ----- 회원가입 임시 이미지 TTL 정리 (주기 초. 0이면 백그라운드 루프 비활성, 시작 시 1회는 항상 실행) -----
-    SIGNUP_IMAGE_CLEANUP_INTERVAL: int = int(
-        os.getenv("SIGNUP_IMAGE_CLEANUP_INTERVAL", "3600")
-    )
+    SIGNUP_IMAGE_CLEANUP_INTERVAL: int = int(os.getenv("SIGNUP_IMAGE_CLEANUP_INTERVAL", "3600"))
 
     # ----- Redis (비우면 연결 시도 안 함, rate limit 등 Fail-open) -----
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()

@@ -29,9 +29,7 @@ async def run_once() -> None:
                 len(failed_file_keys),
                 failed_file_keys,
             )
-            log.warning(
-                "[S3_DELETE_RETRY_NEEDED] task_id=%s keys=%s", task_id, failed_file_keys
-            )
+            log.warning("[S3_DELETE_RETRY_NEEDED] task_id=%s keys=%s", task_id, failed_file_keys)
         elif deleted_count:
             log.info(
                 "signup_image_cleanup_done task_id=%s deleted_count=%s", task_id, deleted_count

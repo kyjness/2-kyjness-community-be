@@ -26,6 +26,7 @@ T = TypeVar("T")
 
 class ApiResponse(BaseSchema, Generic[T]):
     """code는 ApiCode enum 또는 str. BaseSchema.use_enum_values로 직렬화 시 .value."""
+
     code: ApiCode | str
     data: T | None = None
     message: str | None = None

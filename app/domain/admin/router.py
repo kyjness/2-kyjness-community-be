@@ -1,10 +1,14 @@
 # 관리자 전용 API. 모든 엔드포인트 Depends(get_current_admin).
-from fastapi import APIRouter, Depends, Path, Query, Request
+import logging
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.schema import (
     ActivatedResponse,
     BlindedResponse,
+    MediaSweepResponse,
     ReportedPostItem,
     ResetReportsResponse,
     SuspendedResponse,
@@ -13,8 +17,43 @@ from app.admin.schema import (
 from app.admin.service import AdminService
 from app.api.dependencies import CurrentUser, get_current_admin, get_master_db
 from app.common import ApiCode, ApiResponse, PaginatedResponse, api_response
+from app.db import AsyncSessionLocal
+from app.media.service import MediaService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+log = logging.getLogger(__name__)
+
+
+@router.post(
+    "/media/sweep",
+    status_code=202,
+    response_model=ApiResponse[MediaSweepResponse],
+)
+async def sweep_unused_media(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    _admin: CurrentUser = Depends(get_current_admin),
+):
+    async def _sweep_task(session_maker: Any) -> None:
+        # BackgroundTasks는 응답 후 실행되므로, request-scoped db 세션이 아니라 독립 커넥션을 열어야 합니다.
+        try:
+            async with session_maker() as bg_db:
+                deleted_count = await MediaService.sweep_unused_images(db=bg_db)
+                if deleted_count:
+                    log.info("media_sweep_done deleted_count=%s", deleted_count)
+                else:
+                    log.info("media_sweep_done deleted_count=0")
+        except Exception:
+            # 백그라운드 실패는 클라이언트에 재전달하지 않음(202는 '시작'만 보장).
+            log.warning("media_sweep_failed", exc_info=True)
+
+    background_tasks.add_task(_sweep_task, AsyncSessionLocal)
+    return api_response(
+        request,
+        code=ApiCode.OK,
+        data=MediaSweepResponse(),
+        message="백그라운드에서 정리가 시작되었습니다.",
+    )
 
 
 @router.get(

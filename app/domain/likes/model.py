@@ -2,10 +2,12 @@
 # comment_likes·CommentLikesModel은 comments 도메인에 유지(순환 참조 방지).
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import DateTime, ForeignKey, Integer, delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, utc_now
 
@@ -13,9 +15,13 @@ from app.db import Base, utc_now
 class PostLike(Base):
     __tablename__ = "post_likes"
 
-    post_id = mapped_column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)
-    user_id = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
+    post_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class PostLikesModel:

@@ -10,7 +10,6 @@ from app.common.exceptions import (
 )
 from app.dogs.model import DogProfilesModel
 from app.dogs.schema import DogProfileUpsertItem
-from app.media.model import MediaModel
 from app.users.model import UsersModel
 from app.users.schema import UserProfileResponse
 
@@ -22,11 +21,8 @@ class DogService:
         owner_id: int,
         items: list[dict | DogProfileUpsertItem],
         db: AsyncSession,
-        to_decrement: list[int] | None = None,
     ) -> None:
         """강아지 목록 전체 교체(생성/수정/삭제). 대표 강아지 설정은 한 트랜잭션 내 원자적."""
-        if to_decrement is None:
-            to_decrement = []
         existing_ids = {d.id for d in await DogProfilesModel.get_by_owner_id(owner_id, db=db)}
         requested_ids: set[int] = set()
         representative_id: int | None = None
@@ -45,8 +41,6 @@ class DogService:
                     is_representative=item.is_representative,
                     db=db,
                 )
-                if item.profile_image_id:
-                    await MediaModel.increment_ref_count(item.profile_image_id, db=db)
                 requested_ids.add(dog.id)
                 if item.is_representative:
                     representative_id = dog.id
@@ -56,12 +50,6 @@ class DogService:
                 requested_ids.add(item.id)
                 if item.is_representative:
                     representative_id = item.id
-                old = await DogProfilesModel.get_by_id(item.id, owner_id, db=db)
-                if touch_dog_image and old and old.profile_image_id != item.profile_image_id:
-                    if old.profile_image_id:
-                        to_decrement.append(old.profile_image_id)
-                    if item.profile_image_id:
-                        await MediaModel.increment_ref_count(item.profile_image_id, db=db)
                 await DogProfilesModel.update(
                     item.id,
                     owner_id,
@@ -76,9 +64,6 @@ class DogService:
                 )
 
         for did in existing_ids - requested_ids:
-            dog = await DogProfilesModel.get_by_id(did, owner_id, db=db)
-            if dog and dog.profile_image_id:
-                to_decrement.append(dog.profile_image_id)
             await DogProfilesModel.delete(did, owner_id, db=db)
 
         if representative_id and requested_ids:

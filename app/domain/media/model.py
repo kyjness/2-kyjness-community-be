@@ -1,57 +1,57 @@
-# 이미지 CRUD. DB 쿼리·형상만. 비즈니스·I/O는 MediaService. AsyncSession.
-import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, select, update
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    column,
+    delete,
+    exists,
+    select,
+    table,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.security import hash_token
+from app.core.config import settings
 from app.db import Base, utc_now
 
 
 class Image(Base):
     __tablename__ = "images"
 
-    id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    file_key = mapped_column(String(255), nullable=False)
-    file_url = mapped_column(String(999), nullable=False)
-    content_type = mapped_column(String(255), nullable=True)
-    size = mapped_column(Integer, nullable=True)
-    uploader_id = mapped_column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_url: Mapped[str] = mapped_column(String(999), nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uploader_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    ref_count = mapped_column(Integer, nullable=False, default=0)
-    signup_token_hash = mapped_column(String(64), nullable=True)
-    signup_expires_at = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class MediaModel:
     @classmethod
-    async def create_signup_image(
+    async def create_temp_image(
         cls,
         file_key: str,
         file_url: str,
         content_type: str | None,
         size: int | None,
-        expires_at: datetime,
         *,
         db: AsyncSession,
-    ):
-        token = secrets.token_urlsafe(32)
-        token_hash = hash_token(token)
-        img = await cls.create_image(
+    ) -> Image:
+        return await cls.create_image(
             file_key=file_key,
             file_url=file_url,
             content_type=content_type,
             size=size,
             uploader_id=None,
-            signup_token_hash=token_hash,
-            signup_expires_at=expires_at,
             db=db,
         )
-        return img, token
 
     @classmethod
     async def create_image(
@@ -61,8 +61,6 @@ class MediaModel:
         content_type: str | None = None,
         size: int | None = None,
         uploader_id: int | None = None,
-        signup_token_hash: str | None = None,
-        signup_expires_at: datetime | None = None,
         *,
         db: AsyncSession,
     ) -> Image:
@@ -72,19 +70,11 @@ class MediaModel:
             content_type=content_type,
             size=size,
             uploader_id=uploader_id,
-            signup_token_hash=signup_token_hash,
-            signup_expires_at=signup_expires_at,
             created_at=utc_now(),
         )
         db.add(img)
         await db.flush()
         return img
-
-    @classmethod
-    async def get_signup_image(cls, image_id: int, db: AsyncSession) -> Image | None:
-        stmt = select(Image).where(Image.id == image_id)
-        result = await db.execute(stmt)
-        return result.scalars().one_or_none()
 
     @classmethod
     async def get_image_by_id(cls, image_id: int, db: AsyncSession) -> Image | None:
@@ -105,50 +95,14 @@ class MediaModel:
         r = await db.execute(
             update(Image)
             .where(Image.id == image_id)
+            .where(Image.uploader_id.is_(None))
             .values(
                 uploader_id=user_id,
-                ref_count=Image.ref_count + 1,
-                signup_token_hash=None,
-                signup_expires_at=None,
             )
             .returning(Image.id)
         )
         await db.flush()
         return r.scalar_one_or_none() is not None
-
-    @classmethod
-    async def increment_ref_count(cls, image_id: int, db: AsyncSession) -> bool:
-        r = await db.execute(
-            update(Image)
-            .where(Image.id == image_id)
-            .values(ref_count=Image.ref_count + 1)
-            .returning(Image.id)
-        )
-        await db.flush()
-        return r.scalar_one_or_none() is not None
-
-    @classmethod
-    async def increment_ref_count_bulk(cls, image_ids: list[int], db: AsyncSession) -> int:
-        if not image_ids:
-            return 0
-        r = await db.execute(
-            update(Image)
-            .where(Image.id.in_(image_ids))
-            .values(ref_count=Image.ref_count + 1)
-            .returning(Image.id)
-        )
-        await db.flush()
-        return len(list(r.scalars().all()))
-
-    @classmethod
-    async def decrement_ref_count(cls, image_id: int, db: AsyncSession) -> Image | None:
-        result = await db.execute(select(Image).where(Image.id == image_id).with_for_update())
-        image = result.scalars().one_or_none()
-        if not image:
-            return None
-        image.ref_count = max(0, image.ref_count - 1)
-        await db.flush()
-        return image
 
     @classmethod
     async def delete_image_record(cls, image: Image, db: AsyncSession) -> None:
@@ -156,14 +110,48 @@ class MediaModel:
         await db.flush()
 
     @classmethod
+    async def delete_images_by_ids(cls, image_ids: list[int], db: AsyncSession) -> int:
+        if not image_ids:
+            return 0
+        result = await db.execute(delete(Image).where(Image.id.in_(image_ids)).returning(Image.id))
+        await db.flush()
+        return len(list(result.scalars().all()))
+
+    @classmethod
     async def get_expired_signup_images(cls, db: AsyncSession) -> list[Image]:
-        now = utc_now()
+        cutoff = utc_now() - timedelta(seconds=settings.SIGNUP_IMAGE_TOKEN_TTL_SECONDS)
         result = await db.execute(
             select(Image).where(
                 Image.uploader_id.is_(None),
-                Image.signup_token_hash.is_not(None),
-                Image.signup_expires_at.is_not(None),
-                Image.signup_expires_at < now,
+                Image.created_at < cutoff,
             )
         )
+        return list(result.scalars().all())
+
+    @classmethod
+    async def get_orphan_images_older_than(
+        cls, *, older_than_hours: int, db: AsyncSession
+    ) -> list[Image]:
+        cutoff = utc_now() - timedelta(hours=older_than_hours)
+        users_t = table("users", column("profile_image_id", Integer))
+        dogs_t = table("dog_profiles", column("profile_image_id", Integer))
+        post_images_t = table("post_images", column("image_id", Integer))
+        stmt = (
+            select(Image)
+            .where(Image.created_at < cutoff)
+            .where(
+                ~exists(
+                    select(1).select_from(users_t).where(users_t.c.profile_image_id == Image.id)
+                )
+            )
+            .where(
+                ~exists(select(1).select_from(dogs_t).where(dogs_t.c.profile_image_id == Image.id))
+            )
+            .where(
+                ~exists(
+                    select(1).select_from(post_images_t).where(post_images_t.c.image_id == Image.id)
+                )
+            )
+        )
+        result = await db.execute(stmt)
         return list(result.scalars().all())

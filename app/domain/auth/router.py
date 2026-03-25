@@ -5,7 +5,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse
 
-from app.api.dependencies import get_master_db
+from app.api.dependencies import CurrentUser, get_current_user, get_master_db
 from app.auth.schema import (
     AccessTokenData,
     LoginRequest,
@@ -15,6 +15,7 @@ from app.auth.schema import (
 from app.auth.service import AuthService
 from app.common import ApiCode, ApiResponse, api_response, dump_api_response
 from app.core.config import settings
+from app.core.security import verify_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -29,7 +30,8 @@ async def signup(
     signup_data: SignUpRequest,
     db: AsyncSession = Depends(get_master_db),
 ):
-    await AuthService.signup(signup_data, db=db)
+    redis: Redis | None = getattr(request.app.state, "redis", None)
+    await AuthService.signup(signup_data, db=db, redis=redis)
     return api_response(request, code=ApiCode.SIGNUP_SUCCESS, data=None)
 
 
@@ -60,11 +62,25 @@ async def login(
 
 
 @router.post("/logout", status_code=200, response_model=ApiResponse[None])
-async def logout(request: Request):
+async def logout(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     redis: Redis | None = getattr(request.app.state, "redis", None)
-    await AuthService.logout(refresh_token, redis=redis)
-    response = JSONResponse(content=dump_api_response(request, code=ApiCode.LOGOUT_SUCCESS, data=None))
+    auth = request.headers.get("Authorization") or ""
+    access_token = auth[7:].strip() if auth.startswith("Bearer ") else ""
+    access_payload = verify_access_token(access_token) if access_token else {}
+    await AuthService.logout(
+        user_id=current_user.id,
+        refresh_token=refresh_token,
+        access_token=access_token,
+        access_payload=access_payload,
+        redis=redis,
+    )
+    response = JSONResponse(
+        content=dump_api_response(request, code=ApiCode.LOGOUT_SUCCESS, data=None)
+    )
     response.delete_cookie(key=settings.REFRESH_TOKEN_COOKIE_NAME, path="/")
     return response
 
@@ -76,5 +92,18 @@ async def refresh(
 ):
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
     redis: Redis | None = getattr(request.app.state, "redis", None)
-    data = await AuthService.refresh_tokens(refresh_token, redis, db)
-    return JSONResponse(content=dump_api_response(request, code=ApiCode.AUTH_SUCCESS, data=data))
+    ttl = _refresh_ttl_seconds()
+    data, new_refresh = await AuthService.refresh_tokens(refresh_token, redis, db, ttl)
+    response = JSONResponse(
+        content=dump_api_response(request, code=ApiCode.AUTH_SUCCESS, data=data)
+    )
+    response.set_cookie(
+        key=settings.REFRESH_TOKEN_COOKIE_NAME,
+        value=new_refresh,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        path="/",
+        samesite="lax",
+        max_age=ttl,
+    )
+    return response

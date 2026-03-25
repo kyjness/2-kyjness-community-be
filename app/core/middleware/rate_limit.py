@@ -113,9 +113,7 @@ async def _check_redis_fixed_window(
         raise
 
 
-async def _send_429(
-    send: Send, scope: Scope, code: ApiCode, retry_after_seconds: int
-) -> None:
+async def _send_429(send: Send, scope: Scope, code: ApiCode, retry_after_seconds: int) -> None:
     """순수 ASGI: 429 응답만 전송. ApiResponse·전역 에러와 동일 키(requestId 등)."""
     state = scope.get("state") or {}
     rid = state.get("request_id", "") or ""

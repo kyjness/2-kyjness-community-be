@@ -1,4 +1,6 @@
 # 사용자 CRUD. User ORM 반환, Controller에서 Schema.model_validate(user)로 직렬화. 프로필 이미지는 profile_image_id(FK). AsyncSession.
+from datetime import date as DateType
+from datetime import datetime as DateTimeType
 from typing import Any
 
 from sqlalchemy import (
@@ -15,35 +17,38 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, mapped_column, relationship, selectinload
+from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
 
 from app.common.enums import UserStatus
 from app.db import Base, utc_now
 from app.infra.storage import build_url
+from app.media.model import Image
 
 
 class DogProfile(Base):
     __tablename__ = "dog_profiles"
 
-    id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    owner_id = mapped_column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    name = mapped_column(String(100), nullable=False)
-    breed = mapped_column(String(100), nullable=False)
-    gender = mapped_column(String(20), nullable=False)
-    birth_date = mapped_column(Date, nullable=False)
-    profile_image_id = mapped_column(
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    breed: Mapped[str] = mapped_column(String(100), nullable=False)
+    gender: Mapped[str] = mapped_column(String(20), nullable=False)
+    birth_date: Mapped[DateType] = mapped_column(Date, nullable=False)
+    profile_image_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    is_representative = mapped_column(Boolean, nullable=False, default=False)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at = mapped_column(DateTime(timezone=True), nullable=False)
+    is_representative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    owner = relationship(
+    owner: Mapped["User"] = relationship(
         "User", back_populates="dogs", foreign_keys=[owner_id], lazy="raise_on_sql"
     )
-    profile_image = relationship("Image", foreign_keys=[profile_image_id], lazy="raise_on_sql")
+    profile_image: Mapped[Image | None] = relationship(
+        "Image", foreign_keys=[profile_image_id], lazy="raise_on_sql"
+    )
 
     @property
     def profile_image_url(self) -> str | None:
@@ -55,21 +60,25 @@ class DogProfile(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email = mapped_column(String(255), unique=True, nullable=False)
-    password = mapped_column(String(255), nullable=False)
-    nickname = mapped_column(String(255), unique=True, nullable=False)
-    profile_image_id = mapped_column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    __mapper_args__ = {"version_id_col": version}
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    password: Mapped[str] = mapped_column(String(255), nullable=False)
+    nickname: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    profile_image_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )
-    role = mapped_column(String(20), nullable=False, default="USER")
-    status = mapped_column(String(20), nullable=False, default=UserStatus.ACTIVE.value)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at = mapped_column(DateTime(timezone=True), nullable=False)
-    deleted_at = mapped_column(DateTime(timezone=True), nullable=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="USER")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=UserStatus.ACTIVE.value)
+    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[DateTimeType | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    profile_image = relationship("Image", foreign_keys=[profile_image_id], lazy="raise_on_sql")
-    dogs = relationship(
+    profile_image: Mapped[Image | None] = relationship(
+        "Image", foreign_keys=[profile_image_id], lazy="raise_on_sql"
+    )
+    dogs: Mapped[list[DogProfile]] = relationship(
         "DogProfile",
         back_populates="owner",
         foreign_keys=[DogProfile.owner_id],
@@ -102,32 +111,32 @@ class UserBlock(Base):
         UniqueConstraint("blocker_id", "blocked_id", name="uq_user_blocks_blocker_blocked"),
     )
 
-    blocker_id = mapped_column(
+    blocker_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    blocked_id = mapped_column(
+    blocked_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    blocker = relationship("User", foreign_keys=[blocker_id], lazy="raise_on_sql")
-    blocked = relationship("User", foreign_keys=[blocked_id], lazy="raise_on_sql")
+    blocker: Mapped["User"] = relationship("User", foreign_keys=[blocker_id], lazy="raise_on_sql")
+    blocked: Mapped["User"] = relationship("User", foreign_keys=[blocked_id], lazy="raise_on_sql")
 
 
 class Report(Base):
     __tablename__ = "reports"
 
-    id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    reporter_id = mapped_column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reporter_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    target_type = mapped_column(String(50), nullable=False)
-    target_id = mapped_column(Integer, nullable=False)
-    reason = mapped_column(Text, nullable=True)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
-    deleted_at = mapped_column(DateTime(timezone=True), nullable=True)
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[DateTimeType | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    reporter = relationship("User", foreign_keys=[reporter_id], lazy="raise_on_sql")
+    reporter: Mapped["User"] = relationship("User", foreign_keys=[reporter_id], lazy="raise_on_sql")
 
 
 class UsersModel:

@@ -12,4 +12,4 @@ class ImageUploadResponse(BaseSchema):
 class SignupImageUploadData(BaseSchema):
     id: int
     file_url: str = Field(..., description="이미지 URL")
-    signup_token: str = Field(..., description="회원가입 시 소유권 검증 토큰")
+    signup_token: str = Field(..., description="업로드 토큰 (Redis Upload Token)")

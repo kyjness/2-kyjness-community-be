@@ -23,6 +23,10 @@ class BlindedResponse(BaseSchema):
     blinded: bool = True
 
 
+class MediaSweepResponse(BaseSchema):
+    sweep_started: bool = True
+
+
 class ReportedPostAuthorInfo(BaseSchema):
     id: int
     nickname: str

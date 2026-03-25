@@ -1,8 +1,12 @@
 # 인증 의존성. Authorization Bearer 검증 → CurrentUser. Full-Async.
 
+import hashlib
+from typing import Any, cast
+
 import jwt
 from fastapi import Depends, Request
 from pydantic import Field
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common import BaseSchema, UserStatus, UtcDatetime
@@ -31,6 +35,27 @@ def _bearer_token(request: Request) -> str | None:
     return auth[7:].strip() or None
 
 
+def _sha256_hex(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+async def _ensure_not_blacklisted(token: str, request: Request) -> None:
+    """Access Token 블랙리스트(로그아웃) 선검사. Redis 장애 시 Fail-open(가용성 우선)."""
+    redis_raw = getattr(request.app.state, "redis", None)
+    if not isinstance(redis_raw, Redis):
+        return
+    key = f"blacklist:{_sha256_hex(token)}"
+    try:
+        redis = cast(Any, redis_raw)
+        if await redis.get(key) is not None:
+            raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.")
+    except UnauthorizedException:
+        raise
+    except Exception:
+        # Redis 장애로 인해 블랙리스트 확인 불가: 서비스 가용성 우선(Fail-open)
+        return
+
+
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_slave_db),
@@ -38,6 +63,7 @@ async def get_current_user_optional(
     token = _bearer_token(request)
     if not token:
         return None
+    await _ensure_not_blacklisted(token, request)
     try:
         payload = verify_access_token(token)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
@@ -63,6 +89,7 @@ async def get_current_user(
     token = _bearer_token(request)
     if not token:
         raise UnauthorizedException(message="로그인이 필요합니다.")
+    await _ensure_not_blacklisted(token, request)
     try:
         payload = verify_access_token(token)
     except jwt.ExpiredSignatureError:

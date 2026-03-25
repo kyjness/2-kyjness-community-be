@@ -1,4 +1,4 @@
-# 사용자 비즈니스 로직. 순수 데이터 반환·커스텀 예외. 이미지 ref_count는 서비스 내 처리. Full-Async.
+# 사용자 비즈니스 로직. 순수 데이터 반환·커스텀 예외. 프로필 이미지는 users.profile_image_id만 갱신(고아 정리는 Media sweeper). Full-Async.
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,6 @@ from app.common.exceptions import (
 from app.core.security import hash_password, verify_password
 from app.dogs.service import DogService
 from app.media.model import MediaModel
-from app.media.service import MediaService
 from app.users.model import UsersModel
 from app.users.schema import (
     AvailabilityData,
@@ -55,47 +54,52 @@ class UserService:
         data: UpdateUserRequest,
         db: AsyncSession,
     ) -> UserProfileResponse:
-        dump = data.model_dump(exclude_unset=True)
-        to_decrement: list[int] = []
+        fields_set = data.model_fields_set
+
         async with db.begin():
             user = await UsersModel.get_user_by_id(user_id, db=db)
             if not user:
                 raise UnauthorizedException()
-            if (
-                "nickname" in dump
-                and dump["nickname"] != user.nickname
-                and await UsersModel.nickname_exists(dump["nickname"], db=db)
-            ):
-                raise NicknameAlreadyExistsException()
+
+            # 1) 검증 + 명시적 필드 매핑
             updates: dict = {}
-            if dump.get("clear_profile_image") is True or (
-                "profile_image_id" in dump and dump["profile_image_id"] is None
-            ):
-                if user.profile_image_id:
-                    to_decrement.append(user.profile_image_id)
-                updates["profile_image_id"] = None
-            elif dump.get("profile_image_id"):
-                if await MediaModel.get_image_by_id(dump["profile_image_id"], db=db) is None:
-                    raise InvalidUserInfoException()
-                if user.profile_image_id:
-                    to_decrement.append(user.profile_image_id)
-                updates["profile_image_id"] = dump["profile_image_id"]
-                await MediaModel.increment_ref_count(dump["profile_image_id"], db=db)
-            if "nickname" in dump:
-                updates["nickname"] = dump["nickname"]
+            if data.nickname is not None:
+                if data.nickname != user.nickname and await UsersModel.nickname_exists(
+                    data.nickname, db=db
+                ):
+                    raise NicknameAlreadyExistsException()
+                updates["nickname"] = data.nickname
+
+            wants_profile_image_change = (
+                "profile_image_id" in fields_set or data.clear_profile_image is True
+            )
+            if wants_profile_image_change:
+                is_clear = data.clear_profile_image is True or (
+                    "profile_image_id" in fields_set and data.profile_image_id is None
+                )
+                if is_clear:
+                    updates["profile_image_id"] = None
+                else:
+                    new_pid = data.profile_image_id
+                    if new_pid is None or await MediaModel.get_image_by_id(new_pid, db=db) is None:
+                        raise InvalidUserInfoException()
+                    updates["profile_image_id"] = new_pid
+
+            # 2) 유저 행 갱신
             if updates and not await UsersModel.update_user(user_id, db=db, **updates):
                 raise InternalServerErrorException()
-            if "dogs" in dump:
-                await DogService.upsert_dog_profile(
-                    user_id, dump["dogs"] or [], db=db, to_decrement=to_decrement
-                )
+
+            # 3) 강아지 프로필(동일 트랜잭션)
+            if data.dogs is not None:
+                dog_rows = [item.model_dump(mode="python") for item in data.dogs]
+                await DogService.upsert_dog_profile(user_id, dog_rows, db=db)
+
             db.expire(user)
             user_updated = await UsersModel.get_user_by_id_with_dogs(user_id, db=db)
             if not user_updated:
                 raise InternalServerErrorException()
             result = UserProfileResponse.model_validate(user_updated)
-        for image_id in to_decrement:
-            await MediaService.decrement_ref_count(image_id, db=db)
+
         return result
 
     @classmethod
@@ -145,13 +149,9 @@ class UserService:
 
     @classmethod
     async def delete_user(cls, user_id: int, db: AsyncSession) -> None:
-        profile_image_id = None
         async with db.begin():
             user = await UsersModel.get_user_by_id(user_id, db=db)
             if not user:
                 raise InternalServerErrorException()
-            profile_image_id = user.profile_image_id
             if not await UsersModel.delete_user(user_id, db=db):
                 raise InternalServerErrorException()
-        if profile_image_id is not None:
-            await MediaService.decrement_ref_count(profile_image_id, db=db)

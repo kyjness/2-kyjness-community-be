@@ -1,7 +1,7 @@
 # 게시글 요청/응답 DTO. 이미지 개수 제한 검증은 상단 헬퍼 + Annotated로 응집.
 from typing import Annotated
 
-from pydantic import AfterValidator, Field, model_validator
+from pydantic import AfterValidator, Field, field_validator, model_validator
 
 from app.common import BaseSchema, UserStatus, UtcDatetime
 from app.common.codes import ApiCode
@@ -31,12 +31,16 @@ class PostCreateRequest(BaseSchema):
     title: str = Field(..., min_length=1, max_length=26)
     content: str = Field(..., min_length=1, max_length=50_000)
     image_ids: ImageIdsMaxFive = None
+    category_id: int | None = None
+    hashtags: list[str] | None = None
 
 
 class PostUpdateRequest(BaseSchema):
     title: str | None = Field(default=None, min_length=1, max_length=26)
     content: str | None = Field(default=None, min_length=1, max_length=50_000)
     image_ids: ImageIdsMaxFive = None
+    category_id: int | None = None
+    hashtags: list[str] | None = None
 
 
 class AuthorInfo(BaseSchema):
@@ -80,4 +84,20 @@ class PostResponse(BaseSchema):
     is_liked: bool = False
     author: AuthorInfo
     files: list[FileInfo] = Field(default_factory=list)
+    category_id: int | None = None
+    hashtags: list[str] = Field(default_factory=list)
     created_at: UtcDatetime
+
+    @field_validator("hashtags", mode="before")
+    @classmethod
+    def _hashtags_from_entities(cls, v: object):
+        # ORM에서 Post.hashtags는 Hashtag 엔티티 리스트이므로 이름만 추출.
+        if v is None:
+            return []
+        if isinstance(v, list):
+            if not v:
+                return []
+            if isinstance(v[0], str):
+                return v
+            return [getattr(x, "name", str(x)) for x in v]
+        return v

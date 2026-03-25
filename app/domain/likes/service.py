@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.comments.model import CommentLikesModel, CommentsModel
 from app.common.exceptions import (
     AlreadyLikedException,
     CommentNotFoundException,
+    ConcurrentUpdateException,
     PostNotFoundException,
 )
 from app.db import get_connection
@@ -50,17 +52,22 @@ class LikeService:
                         data={"likeCount": like_count, "isLiked": True},
                     ) from e
                 raise
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
 
     @classmethod
     async def unlike_post(cls, post_id: int, user_id: int, db: AsyncSession) -> tuple[bool, int]:
         async with db.begin():
             if await PostsModel.get_post_by_id(post_id, db=db) is None:
                 raise PostNotFoundException()
-            deleted = await PostLikesModel.delete(post_id, user_id, db=db)
-            if deleted:
-                like_count = await PostsModel.decrement_like_count(post_id, db=db)
-            else:
-                like_count = await PostsModel.get_like_count(post_id, db=db)
+            try:
+                deleted = await PostLikesModel.delete(post_id, user_id, db=db)
+                if deleted:
+                    like_count = await PostsModel.decrement_like_count(post_id, db=db)
+                else:
+                    like_count = await PostsModel.get_like_count(post_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
         return (False, like_count)
 
     @classmethod
@@ -86,6 +93,8 @@ class LikeService:
                         data={"likeCount": like_count, "isLiked": True},
                     ) from e
                 raise
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
 
     @classmethod
     async def unlike_comment(
@@ -94,9 +103,12 @@ class LikeService:
         async with db.begin():
             if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:
                 raise CommentNotFoundException()
-            deleted = await CommentLikesModel.delete(comment_id, user_id, db=db)
-            if deleted:
-                like_count = await CommentLikesModel.decrement_like_count(comment_id, db=db)
-            else:
-                like_count = await CommentsModel.get_like_count(comment_id, db=db)
+            try:
+                deleted = await CommentLikesModel.delete(comment_id, user_id, db=db)
+                if deleted:
+                    like_count = await CommentLikesModel.decrement_like_count(comment_id, db=db)
+                else:
+                    like_count = await CommentsModel.get_like_count(comment_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
         return (False, like_count)

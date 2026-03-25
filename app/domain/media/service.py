@@ -2,50 +2,75 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import logging
-from datetime import datetime, timedelta, timezone
+import secrets
+from typing import Any, cast
 
 from fastapi import UploadFile
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import (
-    ImageInUseException,
     ImageNotFoundException,
+    InternalServerErrorException,
     InvalidRequestException,
 )
 from app.core.config import settings
-from app.core.security import hash_token
-from app.db import utc_now
 from app.infra.storage import storage_delete
+from app.media.image_policy import save_image_for_media
 from app.media.model import MediaModel
 from app.media.schema import ImageUploadResponse, SignupImageUploadData
-from app.media.image_policy import save_image_for_media
 
 logger = logging.getLogger(__name__)
+
+_UPLOAD_TOKEN_KEY_PREFIX = "upload_token:"
 
 
 class MediaService:
     @classmethod
+    async def issue_upload_token(cls, image_id: int, redis: Redis | None) -> str:
+        if redis is None:
+            raise InternalServerErrorException("Redis unavailable for upload token issuance.")
+        token = secrets.token_urlsafe(32)
+        key = f"{_UPLOAD_TOKEN_KEY_PREFIX}{token}"
+        # Token이 소유권 검증/첨부 단회성임을 보장하기 위해 TTL로 제한.
+        r = cast(Any, redis)
+        await r.set(key, str(image_id), ex=settings.SIGNUP_IMAGE_TOKEN_TTL_SECONDS)
+        return token
+
+    @classmethod
+    async def verify_upload_token(cls, token: str, redis: Redis | None) -> int | None:
+        if not token or redis is None:
+            return None
+        key = f"{_UPLOAD_TOKEN_KEY_PREFIX}{token}"
+        try:
+            r = cast(Any, redis)
+            image_id_raw = await r.get(key)
+            if image_id_raw is None:
+                return None
+            # 사용 즉시 토큰 폐기(단일 사용). 경쟁 상황은 DB 첨부 조건(uploader_id is None)로 안전하게 처리.
+            await r.delete(key)
+            return int(image_id_raw)
+        except Exception as e:
+            logger.warning("verify_upload_token redis error: %s", e)
+            return None
+
+    @classmethod
     async def upload_image_for_signup(
-        cls, file: UploadFile, db: AsyncSession
+        cls, file: UploadFile, db: AsyncSession, redis: Redis | None
     ) -> SignupImageUploadData:
-        file_key, file_url, content_type, size = await save_image_for_media(
-            file, purpose="signup"
-        )
+        file_key, file_url, content_type, size = await save_image_for_media(file, purpose="signup")
+        image = None
         try:
             async with db.begin():
-                expires_at = utc_now() + timedelta(
-                    seconds=settings.SIGNUP_IMAGE_TOKEN_TTL_SECONDS
-                )
-                image, signup_token = await MediaModel.create_signup_image(
+                image = await MediaModel.create_temp_image(
                     file_key=file_key,
                     file_url=file_url,
                     content_type=content_type,
                     size=size,
-                    expires_at=expires_at,
                     db=db,
                 )
+            signup_token = await cls.issue_upload_token(image.id, redis=redis)
             return SignupImageUploadData(
                 id=image.id,
                 file_url=image.file_url,
@@ -53,6 +78,9 @@ class MediaService:
             )
         except Exception:
             try:
+                if image is not None:
+                    async with db.begin():
+                        await MediaModel.delete_images_by_ids([image.id], db=db)
                 await asyncio.to_thread(storage_delete, file_key)
             except Exception as rollback_e:
                 logger.warning(
@@ -72,9 +100,7 @@ class MediaService:
     ) -> ImageUploadResponse:
         if purpose not in ("profile", "post"):
             raise InvalidRequestException()
-        file_key, file_url, content_type, size = await save_image_for_media(
-            file, purpose=purpose
-        )
+        file_key, file_url, content_type, size = await save_image_for_media(file, purpose=purpose)
         try:
             async with db.begin():
                 image = await MediaModel.create_image(
@@ -98,65 +124,50 @@ class MediaService:
             raise
 
     @classmethod
-    async def verify_signup_token(cls, image_id: int, token: str, db: AsyncSession):
-        image = await MediaModel.get_signup_image(image_id, db)
-        if not image or image.uploader_id is not None:
-            return None
-        expected_hash = hash_token(token)
-        if not hmac.compare_digest(image.signup_token_hash or "", expected_hash):
-            return None
-        if image.signup_expires_at is None:
-            return None
-        now = utc_now()
-        expires_at = image.signup_expires_at
-        if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at <= now:
-            return None
-        return image
-
-    @classmethod
     async def delete_image(cls, image_id: int, user_id: int, db: AsyncSession) -> None:
         file_key = None
         async with db.begin():
             image = await MediaModel.get_image_by_id(image_id, db=db)
             if not image or image.uploader_id != user_id:
                 raise ImageNotFoundException()
-            if image.ref_count > 0:
-                raise ImageInUseException()
             file_key = image.file_key
             await MediaModel.delete_image_record(image, db=db)
         if file_key:
             await asyncio.to_thread(storage_delete, file_key)
 
     @classmethod
-    async def decrement_ref_count(cls, image_id: int, db: AsyncSession) -> None:
-        async def _run(session: AsyncSession):
-            image = await MediaModel.decrement_ref_count(image_id, db=session)
-            if image is None:
-                return None
-            if image.ref_count <= 0:
-                file_key = image.file_key
-                await MediaModel.delete_image_record(image, db=session)
-                return file_key
-            return None
+    async def sweep_unused_images(cls, db: AsyncSession) -> int:
+        """24시간 이상 경과 + users/dog_profiles/post_images 어디에도 연결되지 않은 이미지 정리."""
+        # 1) 조회 트랜잭션: orphan 이미지를 스냅샷으로 확보(네트워크 I/O는 트랜잭션 밖에서 수행).
+        async with db.begin():
+            orphan_images = await MediaModel.get_orphan_images_older_than(
+                older_than_hours=24, db=db
+            )
 
-        file_key_to_delete = None
-        if db.in_transaction():
-            file_key_to_delete = await _run(db)
-        else:
-            async with db.begin():
-                file_key_to_delete = await _run(db)
-        if file_key_to_delete:
+        if not orphan_images:
+            return 0
+
+        # 2) I/O 작업: DB 락/트랜잭션을 오래 물고 있지 않기 위해 storage_delete는 트랜잭션 밖에서 수행.
+        deletable_ids: list[int] = []
+        for img in orphan_images:
             try:
-                await asyncio.to_thread(storage_delete, file_key_to_delete)
+                await asyncio.to_thread(storage_delete, img.file_key)
+                deletable_ids.append(img.id)
             except Exception as e:
+                # 루프는 계속 진행: 단일 이미지 실패가 전체 스윕을 중단하지 않도록.
                 logger.warning(
-                    "Image file delete failed image_id=%s file_key=%s: %s",
-                    image_id,
-                    file_key_to_delete,
+                    "Sweep storage delete failed image_id=%s file_key=%s: %s",
+                    img.id,
+                    img.file_key,
                     e,
                 )
+
+        if not deletable_ids:
+            return 0
+
+        # 3) 삭제 트랜잭션: DB에 레코드 일괄 삭제(네트워크 I/O 없음).
+        async with db.begin():
+            return await MediaModel.delete_images_by_ids(deletable_ids, db=db)
 
     @classmethod
     async def cleanup_expired_signup_images(

@@ -3,6 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Header, Path, Query, Request, UploadFile
 from fastapi.responses import Response
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -41,12 +42,13 @@ async def upload_image_signup(
     image: UploadFile = File(..., description="회원가입용 프로필 이미지"),
     db: AsyncSession = Depends(get_master_db),
 ):
+    redis: Redis | None = getattr(request.app.state, "redis", None)
     hit = getattr(request.state, MEDIA_SIGNUP_IDEMPOTENT_RESPONSE_ATTR, None)
     if hit is not None:
         delattr(request.state, MEDIA_SIGNUP_IDEMPOTENT_RESPONSE_ATTR)
         return hit
     try:
-        data = await MediaService.upload_image_for_signup(image, db=db)
+        data = await MediaService.upload_image_for_signup(image, db=db, redis=redis)
         out = api_response(request, code=ApiCode.IMAGE_UPLOADED, data=data)
         await media_signup_upload_idempotency_after_success(request, x_idempotency_key, out)
         return out
@@ -84,9 +86,7 @@ async def upload_image(
         )
         return out
     except Exception:
-        await media_upload_idempotency_after_failure(
-            request, user.id, purpose, x_idempotency_key
-        )
+        await media_upload_idempotency_after_failure(request, user.id, purpose, x_idempotency_key)
         raise
 
 

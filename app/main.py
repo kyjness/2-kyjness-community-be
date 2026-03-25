@@ -7,14 +7,15 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from mangum import Mangum
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import v1_router
 from app.common import ApiCode, ApiResponse, RootData, api_response, get_request_id, setup_logging
-from app.db import check_database
 from app.core.cleanup import run_loop_async
 from app.core.cleanup import run_once as cleanup_once
 from app.core.config import settings
@@ -26,6 +27,8 @@ from app.core.middleware import (
 )
 from app.core.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
+from app.core.openapi_camel import openapi_schema_to_camel
+from app.db import check_database
 
 
 @asynccontextmanager
@@ -108,9 +111,11 @@ if settings.STORAGE_BACKEND == "local":
     upload_dir.mkdir(exist_ok=True)
     app.mount("/upload", StaticFiles(directory=str(upload_dir)), name="upload")
 
+
 @app.get("/")
 def alb_health_check():
     return {"status": "ok", "message": "PuppyTalk API is running!"}
+
 
 # 3. 루트 및 헬스체크용 공통 라우터 생성
 base_router = APIRouter(prefix=_prefix)
@@ -148,12 +153,8 @@ async def health(request: Request):
 app.include_router(base_router)  # /v1, /v1/health 등록
 app.include_router(v1_router)  # /v1/auth, /v1/users 등 기존 도메인 등록
 
+
 # 5. OpenAPI 스키마를 실제 응답(camelCase)과 일치시키기 위해 스키마 property 키를 camelCase로 변환
-from fastapi.openapi.utils import get_openapi
-
-from app.core.openapi_camel import openapi_schema_to_camel
-
-
 def _custom_openapi():
     if app.openapi_schema is not None:
         return app.openapi_schema
@@ -174,5 +175,6 @@ app.openapi = _custom_openapi
 
 
 # --- AWS Lambda 배포를 위한 Mangum 핸들러 추가 ---
-from mangum import Mangum
-handler = Mangum(app, lifespan="on") # lifespan="on" 설정을 해야 위에서 정의한 DB 연결 로직이 작동합니다.
+handler = Mangum(
+    app, lifespan="on"
+)  # lifespan="on" 설정을 해야 위에서 정의한 DB 연결 로직이 작동합니다.

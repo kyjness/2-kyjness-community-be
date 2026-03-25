@@ -9,14 +9,12 @@ class SignUpRequest(BaseSchema):
     password: PasswordStr = Field(..., min_length=8, max_length=20, description="비밀번호 (8-20자)")
     nickname: NicknameStr = Field(..., min_length=1, max_length=10, description="닉네임 (1-10자)")
     profile_image_id: int | None = None
-    signup_token: str | None = Field(default=None, description="프로필 이미지 소유권 검증 토큰")
+    signup_token: str | None = Field(default=None, description="업로드 토큰 (Redis Upload Token)")
 
     @model_validator(mode="after")
     def profile_image_requires_token(self) -> "SignUpRequest":
         if self.profile_image_id is not None and not self.signup_token:
             raise ValueError("profileImageId 사용 시 signupToken이 필요합니다.")
-        if self.signup_token and self.profile_image_id is None:
-            raise ValueError("signupToken은 profileImageId와 함께 보내야 합니다.")
         return self
 
 

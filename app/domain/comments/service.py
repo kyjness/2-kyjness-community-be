@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.comments.model import CommentLikesModel, CommentsModel
 from app.comments.schema import (
@@ -10,7 +11,11 @@ from app.comments.schema import (
     CommentsPageData,
     CommentUpsertRequest,
 )
-from app.common.exceptions import CommentNotFoundException, PostNotFoundException
+from app.common.exceptions import (
+    CommentNotFoundException,
+    ConcurrentUpdateException,
+    PostNotFoundException,
+)
 
 
 async def _increment_post_comment_count(post_id: int, db: AsyncSession) -> None:
@@ -116,7 +121,10 @@ class CommentService:
             comment = await CommentsModel.create_comment(
                 post_id, user_id, data.content, db=db, parent_id=parent_id
             )
-            await _increment_post_comment_count(post_id, db=db)
+            try:
+                await _increment_post_comment_count(post_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
             comment_id = comment.id
         return CommentIdData(id=comment_id)
 
@@ -185,4 +193,7 @@ class CommentService:
             deleted = await CommentsModel.delete_comment(post_id, comment_id, db=db)
             if not deleted:
                 raise CommentNotFoundException()
-            await _decrement_post_comment_count(post_id, db=db)
+            try:
+                await _decrement_post_comment_count(post_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e

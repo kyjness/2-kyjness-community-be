@@ -1,11 +1,17 @@
 # 관리자 전용: 신고 게시글/댓글 목록·블라인드 해제·유저 정지·게시글 삭제. AsyncSession.
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.admin.schema import ReportedPostAuthorInfo, ReportedPostItem
 from app.comments.model import CommentsModel
 from app.common import UserStatus
-from app.common.exceptions import CommentNotFoundException, PostNotFoundException, UserNotFoundException
+from app.common.exceptions import (
+    CommentNotFoundException,
+    ConcurrentUpdateException,
+    PostNotFoundException,
+    UserNotFoundException,
+)
 from app.posts.model import PostsModel
 from app.posts.service import PostService
 from app.reports.model import ReportsModel
@@ -39,9 +45,7 @@ class AdminService:
         async with db.begin():
             # 각각 최대 500건씩 조회 후 병합·정렬·페이지 슬라이스
             fetch_size = min(500, max(size * 2, (page) * size))
-            posts, total_posts = await PostsModel.get_reported_posts(
-                page=1, size=fetch_size, db=db
-            )
+            posts, total_posts = await PostsModel.get_reported_posts(page=1, size=fetch_size, db=db)
             comments, total_comments = await CommentsModel.get_reported_comments(
                 page=1, size=fetch_size, db=db
             )
@@ -75,9 +79,7 @@ class AdminService:
             comment_items: list[ReportedPostItem] = []
             for c in comments:
                 author, author_status = _author_from_user(c.author)
-                report_reasons = await ReportsModel.get_reasons_for_target(
-                    "COMMENT", c.id, db=db
-                )
+                report_reasons = await ReportsModel.get_reasons_for_target("COMMENT", c.id, db=db)
                 last_reported_at = await ReportsModel.get_last_reported_at_for_target(
                     "COMMENT", c.id, db=db
                 )
@@ -103,7 +105,7 @@ class AdminService:
                 )
             merged = post_items + comment_items
             merged.sort(
-                key=lambda x: (x.last_reported_at or x.created_at),
+                key=lambda x: x.last_reported_at or x.created_at,
                 reverse=True,
             )
             total = total_posts + total_comments
@@ -114,7 +116,10 @@ class AdminService:
     @classmethod
     async def unblind_post(cls, post_id: int, db: AsyncSession) -> None:
         async with db.begin():
-            ok = await PostsModel.unblind_post(post_id, db=db)
+            try:
+                ok = await PostsModel.unblind_post(post_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
         if not ok:
             raise PostNotFoundException()
 
@@ -123,7 +128,10 @@ class AdminService:
         async with db.begin():
             await ReportsModel.delete_by_post_id(post_id, db=db)
             await db.flush()  # delete 반영 후 reset_reports 실행해 재신고 시 목록 노출 보장
-            ok = await PostsModel.reset_reports(post_id, db=db)
+            try:
+                ok = await PostsModel.reset_reports(post_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
         if not ok:
             raise PostNotFoundException()
 
@@ -146,7 +154,10 @@ class AdminService:
     @classmethod
     async def blind_post(cls, post_id: int, db: AsyncSession) -> None:
         async with db.begin():
-            ok = await PostsModel.set_blinded(post_id, db=db)
+            try:
+                ok = await PostsModel.set_blinded(post_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e
         if not ok:
             raise PostNotFoundException()
 
@@ -187,4 +198,7 @@ class AdminService:
             deleted = await CommentsModel.delete_comment(post_id, comment_id, db=db)
             if not deleted:
                 raise CommentNotFoundException()
-            await PostsModel.decrement_comment_count(post_id, db=db)
+            try:
+                await PostsModel.decrement_comment_count(post_id, db=db)
+            except StaleDataError as e:
+                raise ConcurrentUpdateException() from e

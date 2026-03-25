@@ -20,9 +20,7 @@ class ReportService:
         reason: str | None,
         db: AsyncSession,
     ) -> bool:
-        await ReportsModel.create_report(
-            reporter_id, target_type, target_id, reason, db=db
-        )
+        await ReportsModel.create_report(reporter_id, target_type, target_id, reason, db=db)
         if target_type == TargetType.POST:
             new_count = await PostsModel.increment_report_count(target_id, db=db)
         else:

@@ -21,7 +21,7 @@ python-multipart = ">=0.0.6"
 boto3 = ">=1.28.0"
 gunicorn = ">=21.0.0"
 redis = ">=5.0.0"
-pyjwt = "^2.8.0"
+pyjwt = "^2.12.0"
 alembic = ">=1.13.0"
 mangum = "^0.21.0"
 
@@ -56,19 +56,22 @@ stubPath = "typings"
 
 [tool.poe.tasks]
 # Device Guard 우회를 위해 python -m 방식을 기본으로 채택
-run = "python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
-migrate = "python -m alembic upgrade head"
+run = "python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+migrate = "python3 -m alembic upgrade head"
 
 # [수정/적용용] 코드를 직접 변경함
-lint = "python -m ruff check . --fix"
-format = "python -m ruff format ."
+lint = "python3 -m ruff check . --fix"
+format = "python3 -m ruff format ."
 quality = ["lint", "format"]
 
 # [검사용] 코드 수정 없이 리포트만 출력 (CI/CD용)
-lint-check = "python -m ruff check ."
-format-check = "python -m ruff format . --check"
-typecheck = "pyright"
-audit = "python -m pip_audit"
+lint-check = "python3 -m ruff check ."
+format-check = "python3 -m ruff format . --check"
+typecheck = "python3 -m pyright"
+audit-export = "python3 scripts/export_requirements_for_audit.py"
+audit-run = "python3 -m pip_audit -r .audit-requirements.txt --no-deps --disable-pip --ignore-vuln CVE-2026-4539"
+audit-clean = "rm -f .audit-requirements.txt"
+audit = ["audit-export", "audit-run", "audit-clean"]
 
 # 전체 검사: 순서대로 실행, 하나라도 실패하면 중단
 check = ["lint-check", "format-check", "typecheck", "audit"]

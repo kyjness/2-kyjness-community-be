@@ -13,7 +13,7 @@
 
 | 구분 | 기술 |
 |------|------|
-| **언어** | Python 3.8+ |
+| **언어** | Python 3.11+ |
 | **패키지 관리** | Poetry 2.x |
 | **프레임워크** | FastAPI (Starlette 기반) |
 | **서버** | Uvicorn (개발), Gunicorn + Uvicorn worker (프로덕션) |
@@ -22,7 +22,7 @@
 | **마이그레이션** | Alembic |
 | **스토리지** | 로컬 파일 / AWS S3 (boto3) |
 | **검증** | Pydantic v2 |
-| **인증** | JWT (PyJWT), bcrypt (비밀번호), Redis (Refresh Token·Rate Limit) |
+| **인증** | JWT (PyJWT), bcrypt (비밀번호), Redis (Refresh Token·Access Token 블랙리스트·Rate Limit) |
 
 ---
 
@@ -48,7 +48,7 @@
 │   │   ├── comments/                       # 댓글 CRUD·페이지네이션
 │   │   ├── dogs/                           # 강아지 프로필
 │   │   ├── likes/                          # 게시글·댓글 좋아요
-│   │   ├── media/                          # 이미지 업로드(로컬/S3), signupToken·ref_count
+│   │   ├── media/                          # 이미지 업로드(로컬/S3), Redis Upload Token, 미사용 이미지 sweeper
 │   │   ├── posts/                          # 게시글 CRUD·피드·조회수
 │   │   ├── reports/                        # 신고 접수(POST/COMMENT)·누적 Insert·자동 블라인드
 │   │   └── users/                          # 프로필·비밀번호·탈퇴·차단
@@ -80,10 +80,10 @@
 | 포인트 | 설명 |
 |--------|------|
 | **피드·댓글** | 게시글 무한 스크롤(has_more), 댓글 페이지네이션. |
-| **인증** | JWT Access/Refresh. Refresh는 Redis·HttpOnly 쿠키, 멀티 디바이스(SADD/SREM). 만료 시 TOKEN_EXPIRED로 프론트 Refresh 유도. |
+| **인증** | JWT Access/Refresh. Refresh는 Redis·HttpOnly 쿠키로 저장하고 Refresh Token Rotation(RTR)을 적용합니다. 로그아웃 시 Access Token은 Redis 블랙리스트로 즉시 무효화합니다. |
 | **좋아요** | POST/DELETE 명시적 API. ON CONFLICT DO NOTHING + RETURNING으로 멱등·like_count 동기화. |
 | **조회수** | GET 멱등 유지 위해 전용 POST `/view`. 인메모리 캐시(TTL·용량 한계)로 중복 방지, 추후 Redis 전환 가능. |
-| **이미지** | 미리 업로드 후 본문/가입 연결. 가입 전 이미지는 signupToken·ref_count로 소유·참조 관리. |
+| **이미지** | 미리 업로드 후 본문/가입 연결. 가입 전 임시 업로드는 Redis Upload Token(단회성·TTL)로 검증하고, 고아 이미지는 배치 sweeper로 정리합니다. |
 | **DB 읽기/쓰기 분리** | get_master_db / get_slave_db, WRITER_DB_URL / READER_DB_URL 분리(확장성 고려). 트랜잭션은 서비스의 `async with db.begin():`으로만 관리. |
 | **요청 추적** | 순수 ASGI RequestIdMiddleware로 UUID4 발급·scope.state·X-Request-ID 응답 헤더(4xx/5xx 포함). contextvars·RequestIdFilter로 로그에 request_id 자동 포함. |
 | **에러 응답** | 전역 예외 핸들러로 모든 에러를 { code, message, data } 형식 통일. 500 시 클라이언트에는 스택/쿼리 노출 없이 마스킹 메시지만 반환. |
@@ -96,7 +96,7 @@
 
 ## 로컬 실행 방법
 
-로컬에서 서버를 띄우려면 **Python 3.8+**, **PostgreSQL**이 필요합니다. Redis는 선택이며, 없으면 Rate Limit이 비활성(Fail-open)됩니다.
+로컬에서 서버를 띄우려면 **Python 3.11+**, **PostgreSQL**이 필요합니다. Redis는 선택이며, 없으면 Rate Limit은 비활성(Fail-open)되지만 Refresh/로그아웃(블랙리스트)은 일부 제한될 수 있습니다.
 
 ### 1. 저장소 클론 및 패키지 설치
 
@@ -157,7 +157,7 @@ poetry run poe typecheck    # pyright (타입 체크)
 poetry run poe audit        # pip-audit (의존성 보안 취약점 스캔)
 ```
 
-**보안·의존성 스캔**: `poe audit`은 현재 가상환경에 설치된 패키지(FastAPI, SQLAlchemy 등)를 [PyPA 알려진 취약점 DB](https://github.com/pypa/advisory-database) 기준으로 검사합니다. 취약 패키지가 있으면 목록과 조치 방법을 출력하고 종료 코드 1로 끝납니다.
+**보안·의존성 스캔**: `poe audit`은 `pip freeze` 기반으로 `.audit-requirements.txt`를 생성한 뒤 `pip-audit`로 취약점을 검사합니다. 일부 환경(WSL 등)에서 `ensurepip`가 비활성화된 경우에도 동작하도록 `--no-deps --disable-pip` 모드로 실행합니다.
 
 ### 6. 관리자 기능 (Admin)
 
@@ -181,10 +181,9 @@ Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-ky
 
 ### 기능
 
-- **콘텐츠 구조화 및 검색 최적화**: 카테고리(Category) 기반 분류와 해시태그(Hashtag) 인덱싱을 도입하여 게시글 탐색 편의성 및 검색 정확도 강화.
 - **실시간 소통(1:1 DM)**: WebSocket 기반의 실시간 메시징 시스템 구축 및 대화 내역의 영속성(Persistence) 관리.
 - **실시간 알림**: 댓글 및 상호작용 발생 시 실시간 알림 리스트 제공.
-- **비동기 태스크**: FastAPI BackgroundTasks를 활용한 가벼운 로그 기록부터, Celery 기반의 대용량 비동기 작업 처리까지 단계적 확장.
+- **비동기 태스크**: Celery 기반의 대용량 비동기 작업 처리
 - **데이터 무결성**: Pydantic V2의 `model_validate_json` 등을 활용해 Redis/Queue와의 데이터 교환 시 타입 검증·성능 최적화 (추후 적용 예정).
 
 ### AI
@@ -200,10 +199,8 @@ Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-ky
 ### 인프라
 
 - **전역 캐싱 전략**: Redis를 활용해 DB 부하를 분산하고, 자주 조회되는 카테고리 메타데이터 및 실시간 인기 해시태그 랭킹의 응답 속도 최적화.
-- **인증 및 세션 고도화**: Redis를 활용한 Refresh Token 관리 및 보안 강화를 위한 토큰 블랙리스트 시스템 구축.
 - **분산 환경 최적화**: 멀티 인스턴스 환경에서 Redis 클러스터를 통한 인증 상태 일관성 유지 및 Stateless 아키텍처 준수.
-- **고가용성 확보**: 로드밸런서(ALB)를 통한 수평 확장(Scale-out) 대응 및 SSL/헬스체크 기반의 안정적인 라우팅.
-- **성능 가속**: 백엔드에 GZip 미들웨어(1KB 이상 응답 압축) 적용됨. 트래픽 증가 시 CloudFront(CDN)·Brotli 등 추가 적용 및 메시지 큐(SQS/Kafka)를 활용한 시스템 간 결합도 완화 검토.
+- **성능 가속**: 메시지 큐(SQS/Kafka)를 활용한 시스템 간 결합도 완화 검토.
 
 
 

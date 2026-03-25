@@ -1,13 +1,17 @@
 # 게시글·post_images CRUD. 좋아요(PostLike)는 app.domain.likes에 있음. AsyncSession.
-from typing import Optional
+from __future__ import annotations
+
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    Column,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
+    Table,
     Text,
     UniqueConstraint,
     delete,
@@ -17,12 +21,49 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, mapped_column, relationship, selectinload
+from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
 
 from app.db import Base, utc_now
-from app.media.model import Image, MediaModel
+from app.media.model import Image
 from app.users.model import DogProfile, User, UserBlock
+
+post_hashtags = Table(
+    "post_hashtags",
+    Base.metadata,
+    Column("post_id", Integer, ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "hashtag_id",
+        Integer,
+        ForeignKey("hashtags.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+class Category(Base):
+    __tablename__ = "categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    posts: Mapped[list[Post]] = relationship("Post", back_populates="category", lazy="raise_on_sql")
+
+
+class Hashtag(Base):
+    __tablename__ = "hashtags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+
+    posts: Mapped[list[Post]] = relationship(
+        "Post",
+        secondary=post_hashtags,
+        back_populates="hashtags",
+        lazy="raise_on_sql",
+    )
 
 
 class Post(Base):
@@ -42,27 +83,41 @@ class Post(Base):
         ),
     )
 
-    id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id = mapped_column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    title = mapped_column(String(255), nullable=False)
-    content = mapped_column(Text, nullable=False)
-    category = mapped_column(String(50), nullable=True)
-    view_count = mapped_column(Integer, default=0, nullable=False)
-    like_count = mapped_column(Integer, default=0, nullable=False)
-    comment_count = mapped_column(Integer, default=0, nullable=False)
-    report_count = mapped_column(Integer, default=0, nullable=False)
-    is_blinded = mapped_column(Boolean, default=False, nullable=False)
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at = mapped_column(DateTime(timezone=True), nullable=False)
-    deleted_at = mapped_column(DateTime(timezone=True), nullable=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    category_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    view_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    like_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    comment_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    report_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_blinded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
-    post_images = relationship(
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    __mapper_args__ = {"version_id_col": version}
+
+    user: Mapped[User] = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
+    category: Mapped[Category | None] = relationship(
+        "Category", back_populates="posts", foreign_keys=[category_id], lazy="raise_on_sql"
+    )
+    post_images: Mapped[list[PostImage]] = relationship(
         "PostImage",
         back_populates="post",
         order_by="PostImage.id",
+        lazy="raise_on_sql",
+    )
+    hashtags: Mapped[list[Hashtag]] = relationship(
+        "Hashtag",
+        secondary=post_hashtags,
+        back_populates="posts",
         lazy="raise_on_sql",
     )
 
@@ -79,17 +134,17 @@ class PostImage(Base):
     __tablename__ = "post_images"
     __table_args__ = (UniqueConstraint("image_id", name="uq_post_images_image_id"),)
 
-    id = mapped_column(Integer, primary_key=True, autoincrement=True)
-    post_id = mapped_column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("posts.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    image_id = mapped_column(
+    image_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("images.id", ondelete="CASCADE"), nullable=False
     )
-    created_at = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    post = relationship("Post", back_populates="post_images", lazy="raise_on_sql")
-    image = relationship(Image, foreign_keys=[image_id], lazy="raise_on_sql")
+    post: Mapped[Post] = relationship("Post", back_populates="post_images", lazy="raise_on_sql")
+    image: Mapped[Image] = relationship(Image, foreign_keys=[image_id], lazy="raise_on_sql")
 
     @property
     def file_url(self) -> str | None:
@@ -100,12 +155,58 @@ class PostsModel:
     MAX_POST_IMAGES = 5
 
     @classmethod
+    async def sync_post_hashtags(
+        cls,
+        post_id: int,
+        hashtag_names: list[str],
+        *,
+        db: AsyncSession,
+    ) -> None:
+        # 연결 테이블은 매번 초기화 후 재삽입(트랜잭션 내 원자성 확보).
+        await db.execute(delete(post_hashtags).where(post_hashtags.c.post_id == post_id))
+
+        if not hashtag_names:
+            return
+
+        # 1) 이미 존재하는 해시태그 ID 수집.
+        result = await db.execute(
+            select(Hashtag.id, Hashtag.name).where(Hashtag.name.in_(hashtag_names))
+        )
+        existing_by_name = {row[1]: row[0] for row in result.all()}
+        missing = set(hashtag_names) - set(existing_by_name.keys())
+
+        # 2) 없는 해시태그는 생성(유니크 충돌 시 무시).
+        if missing:
+            await db.execute(
+                pg_insert(Hashtag)
+                .values([{"name": n} for n in missing])
+                .on_conflict_do_nothing(index_elements=[Hashtag.name])
+            )
+
+        # 3) 최종 ID 다시 조회.
+        result2 = await db.execute(
+            select(Hashtag.id, Hashtag.name).where(Hashtag.name.in_(hashtag_names))
+        )
+        existing_by_name = {row[1]: row[0] for row in result2.all()}
+        hashtag_ids = [existing_by_name[n] for n in hashtag_names if n in existing_by_name]
+
+        # 4) M:N 연결 삽입(중복은 ON CONFLICT DO NOTHING).
+        if hashtag_ids:
+            await db.execute(
+                pg_insert(post_hashtags)
+                .values([{"post_id": post_id, "hashtag_id": hid} for hid in hashtag_ids])
+                .on_conflict_do_nothing(index_elements=["post_id", "hashtag_id"])
+            )
+
+    @classmethod
     async def create_post(
         cls,
         user_id: int,
         title: str,
         content: str,
         image_ids: list[int] | None = None,
+        category_id: int | None = None,
+        hashtag_names: list[str] | None = None,
         *,
         db: AsyncSession,
     ) -> int:
@@ -115,6 +216,7 @@ class PostsModel:
             user_id=user_id,
             title=title,
             content=content,
+            category_id=category_id,
             created_at=now,
             updated_at=now,
             deleted_at=None,
@@ -124,7 +226,8 @@ class PostsModel:
         limited = image_ids[: cls.MAX_POST_IMAGES]
         if limited:
             db.add_all(PostImage(post_id=post.id, image_id=iid, created_at=now) for iid in limited)
-            await MediaModel.increment_ref_count_bulk(limited, db=db)
+        if hashtag_names is not None:
+            await cls.sync_post_hashtags(post.id, hashtag_names, db=db)
         return post.id
 
     @classmethod
@@ -133,7 +236,7 @@ class PostsModel:
         post_id: int,
         db: AsyncSession,
         current_user_id: int | None = None,
-    ) -> Optional["Post"]:
+    ) -> Post | None:
         stmt = (
             select(Post)
             .where(
@@ -146,6 +249,8 @@ class PostsModel:
                     joinedload(User.profile_image),
                     selectinload(User.dogs).joinedload(DogProfile.profile_image),
                 ),
+                joinedload(Post.category),
+                selectinload(Post.hashtags),
                 selectinload(Post.post_images).joinedload(PostImage.image),
             )
         )
@@ -166,15 +271,11 @@ class PostsModel:
         return result.scalar_one_or_none()
 
     @classmethod
-    async def get_titles_by_ids(
-        cls, post_ids: list[int], db: AsyncSession
-    ) -> dict[int, str]:
+    async def get_titles_by_ids(cls, post_ids: list[int], db: AsyncSession) -> dict[int, str]:
         if not post_ids:
             return {}
         result = await db.execute(
-            select(Post.id, Post.title).where(
-                Post.id.in_(post_ids), Post.deleted_at.is_(None)
-            )
+            select(Post.id, Post.title).where(Post.id.in_(post_ids), Post.deleted_at.is_(None))
         )
         return {row[0]: row[1] for row in result.all()}
 
@@ -188,7 +289,7 @@ class PostsModel:
         search_q: str | None = None,
         sort: str | None = None,
         current_user_id: int | None = None,
-    ) -> tuple[list["Post"], bool]:
+    ) -> tuple[list[Post], bool]:
         offset = (page - 1) * size
         fetch_limit = size + 1
         stmt = (
@@ -197,6 +298,8 @@ class PostsModel:
             .options(
                 joinedload(Post.user).joinedload(User.profile_image),
                 joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_image),
+                joinedload(Post.category),
+                selectinload(Post.hashtags),
                 selectinload(Post.post_images).joinedload(PostImage.image),
             )
         )
@@ -255,24 +358,36 @@ class PostsModel:
         title: str | None = None,
         content: str | None = None,
         image_ids: list[int] | None = None,
+        category_id: int | None = None,
+        hashtag_names: list[str] | None = None,
         *,
         db: AsyncSession,
-    ) -> list[int] | None:
+    ) -> tuple[list[int], list[int]] | None:
         now = utc_now()
-        values: dict = {"updated_at": now}
-        if title is not None:
-            values["title"] = title
-        if content is not None:
-            values["content"] = content
-        r = await db.execute(
-            update(Post)
-            .where(Post.id == post_id, Post.deleted_at.is_(None))
-            .values(**values)
-            .returning(Post.id)
-        )
-        if r.one_or_none() is None:
+        post_obj = (
+            await db.execute(
+                select(Post).where(
+                    Post.id == post_id,
+                    Post.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if post_obj is None:
             return None
-        to_delete: list[int] = []
+
+        if title is not None:
+            post_obj.title = title
+        if content is not None:
+            post_obj.content = content
+        if category_id is not None:
+            post_obj.category_id = category_id
+        post_obj.updated_at = now
+
+        if hashtag_names is not None:
+            await cls.sync_post_hashtags(post_id, hashtag_names, db=db)
+
+        released_ids: list[int] = []
+        added_ids: list[int] = []
         if image_ids is not None:
             old_result = await db.execute(
                 select(PostImage.image_id).where(PostImage.post_id == post_id)
@@ -281,22 +396,20 @@ class PostsModel:
             old_image_ids = set(old) if old else set()
             new_image_ids_set = set(image_ids[: cls.MAX_POST_IMAGES])
             to_add = new_image_ids_set - old_image_ids
-            to_delete = list(old_image_ids - new_image_ids_set)
+            released_ids = list(old_image_ids - new_image_ids_set)
             if to_add:
                 to_add_list = list(to_add)
+                added_ids = to_add_list
                 db.add_all(
                     PostImage(post_id=post_id, image_id=iid, created_at=now) for iid in to_add_list
                 )
-            if to_delete:
+            if released_ids:
                 await db.execute(
                     delete(PostImage).where(
-                        PostImage.post_id == post_id, PostImage.image_id.in_(to_delete)
+                        PostImage.post_id == post_id, PostImage.image_id.in_(released_ids)
                     )
                 )
-            # 실무에서는 update(...).where(id.in_(image_ids)) 방식의 벌크 업데이트가 더 효율적임.
-            if to_add:
-                await MediaModel.increment_ref_count_bulk(list(to_add), db=db)
-        return to_delete
+        return released_ids, added_ids
 
     @classmethod
     async def delete_post(cls, post_id: int, db: AsyncSession) -> tuple[bool, list[int]]:
@@ -313,70 +426,98 @@ class PostsModel:
             delete(PostImage).where(PostImage.post_id == post_id).returning(PostImage.image_id)
         )
         image_ids = list(r_img.scalars().all()) or []
-        r = await db.execute(
-            update(Post)
-            .where(Post.id == post_id, Post.deleted_at.is_(None))
-            .values(deleted_at=utc_now())
-            .returning(Post.id)
-        )
-        return (r.scalar_one_or_none() is not None, image_ids)
+        post_obj = (
+            await db.execute(
+                select(Post).where(
+                    Post.id == post_id,
+                    Post.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if post_obj is None:
+            return (False, image_ids)
+        post_obj.deleted_at = utc_now()
+        await db.flush()
+        return (True, image_ids)
 
     @classmethod
     async def increment_view_count(cls, post_id: int, db: AsyncSession) -> bool:
-        await db.execute(
-            update(Post)
-            .where(Post.id == post_id, Post.deleted_at.is_(None))
-            .values(view_count=Post.view_count + 1)
-        )
+        post_obj = (
+            await db.execute(
+                select(Post).where(
+                    Post.id == post_id,
+                    Post.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if post_obj is None:
+            return False
+        post_obj.view_count += 1
+        await db.flush()
         return True
 
     @classmethod
     async def increment_report_count(cls, post_id: int, db: AsyncSession) -> int | None:
-        stmt = (
-            update(Post)
-            .where(Post.id == post_id, Post.deleted_at.is_(None))
-            .values(report_count=Post.report_count + 1)
-            .returning(Post.report_count)
-        )
-        result = await db.execute(stmt)
-        row = result.one_or_none()
-        return row[0] if row is not None else None
+        post_obj = (
+            await db.execute(
+                select(Post).where(
+                    Post.id == post_id,
+                    Post.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if post_obj is None:
+            return None
+        post_obj.report_count += 1
+        await db.flush()
+        return post_obj.report_count
 
     @classmethod
     async def set_blinded(cls, post_id: int, db: AsyncSession) -> bool:
-        r = await db.execute(
-            update(Post)
-            .where(Post.id == post_id, Post.deleted_at.is_(None))
-            .values(is_blinded=True, updated_at=utc_now())
-            .returning(Post.id)
-        )
-        return r.scalar_one_or_none() is not None
+        post_obj = (
+            await db.execute(
+                select(Post).where(
+                    Post.id == post_id,
+                    Post.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if post_obj is None:
+            return False
+        post_obj.is_blinded = True
+        post_obj.updated_at = utc_now()
+        await db.flush()
+        return True
 
     @classmethod
     async def unblind_post(cls, post_id: int, db: AsyncSession) -> bool:
         """블라인드만 해제. report_count는 유지하여 관리자 목록에 계속 노출."""
-        r = await db.execute(
-            update(Post)
-            .where(Post.id == post_id)
-            .values(is_blinded=False, updated_at=utc_now())
-            .returning(Post.id)
-        )
-        return r.scalar_one_or_none() is not None
+        post_obj = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
+        if post_obj is None:
+            return False
+        post_obj.is_blinded = False
+        post_obj.updated_at = utc_now()
+        await db.flush()
+        return True
 
     @classmethod
     async def reset_reports(cls, post_id: int, db: AsyncSession) -> bool:
         """신고 무시: report_count=0, is_blinded=False 로 초기화."""
-        r = await db.execute(
-            update(Post)
-            .where(Post.id == post_id, Post.deleted_at.is_(None))
-            .values(
-                report_count=0,
-                is_blinded=False,
-                updated_at=utc_now(),
+        post_obj = (
+            await db.execute(
+                select(Post).where(
+                    Post.id == post_id,
+                    Post.deleted_at.is_(None),
+                )
             )
-            .returning(Post.id)
-        )
-        return r.scalar_one_or_none() is not None
+        ).scalar_one_or_none()
+        if post_obj is None:
+            return False
+        post_obj.report_count = 0
+        post_obj.is_blinded = False
+        post_obj.updated_at = utc_now()
+        await db.flush()
+        return True
 
     @classmethod
     async def get_reported_posts(
@@ -385,7 +526,7 @@ class PostsModel:
         size: int = 20,
         *,
         db: AsyncSession,
-    ) -> tuple[list["Post"], int]:
+    ) -> tuple[list[Post], int]:
         offset = (page - 1) * size
         stmt_base = (
             select(Post)
@@ -394,6 +535,8 @@ class PostsModel:
             .options(
                 joinedload(Post.user).joinedload(User.profile_image),
                 joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_image),
+                joinedload(Post.category),
+                selectinload(Post.hashtags),
                 selectinload(Post.post_images).joinedload(PostImage.image),
             )
             .order_by(Post.report_count.desc(), Post.created_at.desc())
@@ -417,40 +560,36 @@ class PostsModel:
 
     @classmethod
     async def increment_like_count(cls, post_id: int, db: AsyncSession) -> int:
-        stmt = (
-            update(Post)
-            .where(Post.id == post_id)
-            .values(like_count=Post.like_count + 1)
-            .returning(Post.like_count)
-        )
-        result = await db.execute(stmt)
-        row = result.one_or_none()
-        return row[0] if row is not None else 0
+        post_obj = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
+        if post_obj is None:
+            return 0
+        post_obj.like_count += 1
+        await db.flush()
+        return post_obj.like_count
 
     @classmethod
     async def decrement_like_count(cls, post_id: int, db: AsyncSession) -> int:
-        stmt = (
-            update(Post)
-            .where(Post.id == post_id)
-            .values(like_count=func.greatest(Post.like_count - 1, 0))
-            .returning(Post.like_count)
-        )
-        result = await db.execute(stmt)
-        row = result.one_or_none()
-        return row[0] if row is not None else 0
+        post_obj = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
+        if post_obj is None:
+            return 0
+        post_obj.like_count = max(post_obj.like_count - 1, 0)
+        await db.flush()
+        return post_obj.like_count
 
     @classmethod
     async def increment_comment_count(cls, post_id: int, db: AsyncSession) -> bool:
-        await db.execute(
-            update(Post).where(Post.id == post_id).values(comment_count=Post.comment_count + 1)
-        )
+        post_obj = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
+        if post_obj is None:
+            return False
+        post_obj.comment_count += 1
+        await db.flush()
         return True
 
     @classmethod
     async def decrement_comment_count(cls, post_id: int, db: AsyncSession) -> bool:
-        await db.execute(
-            update(Post)
-            .where(Post.id == post_id)
-            .values(comment_count=func.greatest(Post.comment_count - 1, 0))
-        )
+        post_obj = (await db.execute(select(Post).where(Post.id == post_id))).scalar_one_or_none()
+        if post_obj is None:
+            return False
+        post_obj.comment_count = max(post_obj.comment_count - 1, 0)
+        await db.flush()
         return True
