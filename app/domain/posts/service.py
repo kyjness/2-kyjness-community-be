@@ -13,6 +13,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.common.exceptions import (
     ConcurrentUpdateException,
     InvalidImageException,
+    InvalidRequestException,
     PostNotFoundException,
     UserNotFoundException,
 )
@@ -22,8 +23,17 @@ from app.posts.schema import PostCreateRequest, PostResponse, PostUpdateRequest
 
 log = logging.getLogger(__name__)
 
-# 0이면 dedup 비활성. >0이면 viewer·post당 TTL 초 동안 1회만(환경변수로 조정).
-_VIEW_REDIS_EX_SECONDS = max(0, int(os.getenv("VIEW_CACHE_TTL_SECONDS", "0")))
+# viewer·post당 TTL 초 동안 1회만 조회수 증가(SET NX EX).
+# 개발/로컬에서 새로고침·중복 호출로 조회수가 튀는 문제가 잦아 기본값은 1시간으로 둔다.
+#
+# NOTE: 과거 설정에서 VIEW_CACHE_TTL_SECONDS=0(비활성)로 남아 있는 경우가 있어,
+#       0 이하 값은 안전하게 기본값(3600)으로 보정한다.
+_raw_view_ttl = os.getenv("VIEW_CACHE_TTL_SECONDS")
+try:
+    _parsed_view_ttl = int(_raw_view_ttl) if _raw_view_ttl is not None else 3600
+except ValueError:
+    _parsed_view_ttl = 3600
+_VIEW_REDIS_EX_SECONDS = _parsed_view_ttl if _parsed_view_ttl > 0 else 3600
 
 _HASHTAG_ALLOWED_RE = re.compile(r"[^0-9a-z가-힣_]")
 
@@ -88,6 +98,10 @@ class PostService:
         db: AsyncSession,
     ) -> int:
         async with db.begin():
+            if data.category_id is not None:
+                ok = await PostsModel.category_exists(data.category_id, db=db)
+                if not ok:
+                    raise InvalidRequestException("존재하지 않는 카테고리입니다.")
             if data.image_ids:
                 images = await MediaModel.get_images_by_ids(data.image_ids, db=db)
                 if set(i.id for i in images) != set(data.image_ids):
@@ -112,22 +126,32 @@ class PostService:
         db: AsyncSession,
         q: str | None = None,
         sort: str | None = None,
+        category_id: int | None = None,
         current_user_id: int | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
         search_q = q.strip() if (q and q.strip()) else None
         async with db.begin():
+            if category_id is not None:
+                ok = await PostsModel.category_exists(category_id, db=db)
+                if not ok:
+                    raise InvalidRequestException("존재하지 않는 카테고리입니다.")
             posts, has_more = await PostsModel.get_all_posts(
                 page,
                 size,
                 db=db,
                 search_q=search_q,
                 sort=sort,
+                category_id=category_id,
                 current_user_id=current_user_id,
             )
             total = await PostsModel.get_posts_count(
-                db=db, search_q=search_q, current_user_id=current_user_id
+                db=db,
+                search_q=search_q,
+                category_id=category_id,
+                current_user_id=current_user_id,
             )
-            result = [PostResponse.model_validate(p) for p in posts if p.user]
+            # 유저가 하드 삭제되면 posts.user_id가 NULL이 될 수 있으므로, 게시글은 보존하고 author만 None 처리.
+            result = [PostResponse.model_validate(p) for p in posts]
         return result, has_more, total
 
     @classmethod
@@ -165,8 +189,6 @@ class PostService:
             post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id)
             if not post:
                 raise PostNotFoundException()
-            if not post.user:
-                raise UserNotFoundException()
             data = PostResponse.model_validate(post)
             if current_user_id is not None:
                 from app.domain.likes.service import LikeService
@@ -198,11 +220,20 @@ class PostService:
             post = await PostsModel.get_post_by_id(post_id, db=db)
             if not post:
                 raise PostNotFoundException()
+            if "version" in fs and data.version is not None:
+                if int(data.version) != int(post.version):
+                    raise ConcurrentUpdateException(
+                        "다른 사용자가 이미 글을 수정했습니다. 최신 데이터를 확인해주세요."
+                    )
             title = data.title if "title" in fs else None
             content = data.content if "content" in fs else None
             image_ids = data.image_ids if "image_ids" in fs else None
             category_id = data.category_id if "category_id" in fs else None
             hashtags_raw = data.hashtags if "hashtags" in fs else None
+            if category_id is not None:
+                ok = await PostsModel.category_exists(category_id, db=db)
+                if not ok:
+                    raise InvalidRequestException("존재하지 않는 카테고리입니다.")
             if image_ids is not None:
                 images = await MediaModel.get_images_by_ids(image_ids, db=db)
                 if set(i.id for i in images) != set(image_ids):

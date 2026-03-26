@@ -30,12 +30,13 @@ class DogService:
         for raw in items:
             item: DogProfileUpsertItem = DogProfileUpsertItem.model_validate(raw)
             touch_dog_image = "profile_image_id" in item.model_fields_set
+            gender_value = getattr(item.gender, "value", item.gender)
             if item.id is None:
                 dog = await DogProfilesModel.create(
                     owner_id=owner_id,
                     name=item.name,
                     breed=item.breed,
-                    gender=item.gender.value,
+                    gender=gender_value,
                     birth_date=item.birth_date,
                     profile_image_id=item.profile_image_id,
                     is_representative=item.is_representative,
@@ -56,7 +57,7 @@ class DogService:
                     db=db,
                     name=item.name,
                     breed=item.breed,
-                    gender=item.gender.value,
+                    gender=gender_value,
                     birth_date=item.birth_date,
                     profile_image_id=item.profile_image_id,
                     touch_profile_image=touch_dog_image,

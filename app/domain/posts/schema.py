@@ -41,6 +41,10 @@ class PostUpdateRequest(BaseSchema):
     image_ids: ImageIdsMaxFive = None
     category_id: int | None = None
     hashtags: list[str] | None = None
+    version: int | None = Field(
+        default=None,
+        description="낙관적 락: 직전 GET 응답의 version과 일치해야 수정 성공",
+    )
 
 
 class AuthorInfo(BaseSchema):
@@ -82,10 +86,11 @@ class PostResponse(BaseSchema):
     like_count: int = 0
     comment_count: int = 0
     is_liked: bool = False
-    author: AuthorInfo
+    author: AuthorInfo | None = None
     files: list[FileInfo] = Field(default_factory=list)
     category_id: int | None = None
     hashtags: list[str] = Field(default_factory=list)
+    version: int = 1
     created_at: UtcDatetime
 
     @field_validator("hashtags", mode="before")

@@ -155,3 +155,20 @@ class UserService:
                 raise InternalServerErrorException()
             if not await UsersModel.delete_user(user_id, db=db):
                 raise InternalServerErrorException()
+
+    @classmethod
+    async def purge_withdrawn_users(cls, *, older_than_days: int, db: AsyncSession) -> int:
+        """탈퇴 유저 하드 삭제(청크 반복)."""
+        total = 0
+        # 단일 트랜잭션에 너무 많이 태우면 락/부하가 커질 수 있어, 청크별 begin()으로 끊는다.
+        while True:
+            async with db.begin():
+                deleted_ids = await UsersModel.purge_withdrawn_users_older_than(
+                    older_than_days=older_than_days,
+                    limit=200,
+                    db=db,
+                )
+            if not deleted_ids:
+                break
+            total += len(deleted_ids)
+        return total

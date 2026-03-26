@@ -30,8 +30,8 @@ class Comment(Base):
     post_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    author_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    author_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     parent_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True
@@ -44,7 +44,7 @@ class Comment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    author: Mapped[User] = relationship(User, foreign_keys=[author_id], lazy="raise_on_sql")
+    author: Mapped[User | None] = relationship(User, foreign_keys=[author_id], lazy="raise_on_sql")
     parent: Mapped["Comment | None"] = relationship(
         "Comment",
         remote_side="Comment.id",

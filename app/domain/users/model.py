@@ -1,6 +1,6 @@
 # 사용자 CRUD. User ORM 반환, Controller에서 Schema.model_validate(user)로 직렬화. 프로필 이미지는 profile_image_id(FK). AsyncSession.
 from datetime import date as DateType
-from datetime import datetime as DateTimeType
+from datetime import datetime as DateTimeType, timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -172,6 +172,12 @@ class UsersModel:
             .where(User.id == user_id, User.deleted_at.is_(None))
             .options(joinedload(User.profile_image))
         )
+        result = await db.execute(stmt)
+        return result.unique().scalars().one_or_none()
+
+    @classmethod
+    async def get_user_by_id_including_deleted(cls, user_id: int, db: AsyncSession) -> User | None:
+        stmt = select(User).where(User.id == user_id).options(joinedload(User.profile_image))
         result = await db.execute(stmt)
         return result.unique().scalars().one_or_none()
 
@@ -356,3 +362,30 @@ class UsersModel:
             .returning(User.id)
         )
         return r.scalar_one_or_none() is not None
+
+    @classmethod
+    async def purge_withdrawn_users_older_than(
+        cls,
+        *,
+        older_than_days: int,
+        limit: int,
+        db: AsyncSession,
+    ) -> list[int]:
+        """탈퇴(WITHDRAWN) + deleted_at 기준 N일 경과 유저를 하드 삭제.
+
+        - 대량 삭제로 인한 락을 줄이기 위해 limit 단위로 청크 처리한다.
+        - FK ondelete(CASCADE/SET NULL)에 의존해 연관 데이터 정합성 유지.
+        """
+        cutoff = utc_now() - timedelta(days=older_than_days)
+        id_stmt = (
+            select(User.id)
+            .where(
+                User.status == UserStatus.WITHDRAWN.value,
+                User.deleted_at.is_not(None),
+                User.deleted_at < cutoff,
+            )
+            .limit(int(limit))
+        )
+        result = await db.execute(delete(User).where(User.id.in_(id_stmt)).returning(User.id))
+        await db.flush()
+        return list(result.scalars().all())

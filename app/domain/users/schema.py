@@ -39,7 +39,7 @@ def _validate_nickname_format(nickname: str) -> bool:
 
 def _ensure_password_format(v: str) -> str:
     if not _validate_password_format(v):
-        raise ValueError(ApiCode.INVALID_REQUEST_BODY.name)
+        raise ValueError(ApiCode.INVALID_PASSWORD_FORMAT.name)
     return v
 
 

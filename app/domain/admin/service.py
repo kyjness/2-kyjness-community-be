@@ -11,6 +11,7 @@ from app.common.exceptions import (
     ConcurrentUpdateException,
     PostNotFoundException,
     UserNotFoundException,
+    UserWithdrawnException,
 )
 from app.posts.model import PostsModel
 from app.posts.service import PostService
@@ -138,17 +139,25 @@ class AdminService:
     @classmethod
     async def suspend_user(cls, user_id: int, db: AsyncSession) -> None:
         async with db.begin():
-            user = await UsersModel.get_user_by_id(user_id, db=db)
+            user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
                 raise UserNotFoundException()
+            if getattr(user, "deleted_at", None) is not None or UserStatus.is_withdrawn_value(
+                getattr(user, "status", None)
+            ):
+                raise UserWithdrawnException()
             await UsersModel.update_user(user_id, db=db, status=UserStatus.SUSPENDED.value)
 
     @classmethod
     async def activate_user(cls, user_id: int, db: AsyncSession) -> None:
         async with db.begin():
-            user = await UsersModel.get_user_by_id(user_id, db=db)
+            user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
                 raise UserNotFoundException()
+            if getattr(user, "deleted_at", None) is not None or UserStatus.is_withdrawn_value(
+                getattr(user, "status", None)
+            ):
+                raise UserWithdrawnException()
             await UsersModel.update_user(user_id, db=db, status=UserStatus.ACTIVE.value)
 
     @classmethod

@@ -50,7 +50,7 @@ class CommentAuthorInfo(BaseSchema):
 class CommentResponse(BaseSchema):
     id: int
     content: str
-    author: CommentAuthorInfo
+    author: CommentAuthorInfo | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
     post_id: int | None = None

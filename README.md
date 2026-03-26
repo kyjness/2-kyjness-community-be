@@ -14,7 +14,7 @@
 | 구분 | 기술 |
 |------|------|
 | **언어** | Python 3.11+ |
-| **패키지 관리** | Poetry 2.x |
+| **패키지 관리** | uv (Rust 기반 고성능 매니저, pyproject.toml 및 uv.lock 기반 결정적 빌드) |
 | **프레임워크** | FastAPI (Starlette 기반) |
 | **서버** | Uvicorn (개발), Gunicorn + Uvicorn worker (프로덕션) |
 | **DB** | PostgreSQL (psycopg3, Full-Async) |
@@ -41,7 +41,6 @@
 │   ├── core/                               # config, security(JWT·비밀번호), exception_handlers, cleanup
 │   │   └── middleware/                     # RequestId, ProxyHeaders, RateLimit, GZip, AccessLog, SecurityHeaders
 │   ├── db/                                 # SQLAlchemy Base·엔진·세션·연결
-│   │   └── alembic/                        # 마이그레이션 env, versions(리비전)
 │   ├── domain/                             # 기능별 도메인 (router → service → model → schema)
 │   │   ├── admin/                          # 관리자: 신고된 게시글·댓글 통합 목록, 블라인드/신고 무시/삭제, 유저 정지·해제
 │   │   ├── auth/                           # 회원가입·로그인·로그아웃·리프레시
@@ -54,9 +53,12 @@
 │   │   └── users/                          # 프로필·비밀번호·탈퇴·차단
 │   └── infra/                              # Redis(Refresh·RateLimit), storage(로컬/S3)
 ├── docs/                                   # 아키텍처·API 코드·인프라 설계 문서
-├── alembic.ini                             # Alembic 설정(script_location 등)
-├── pyproject.toml                         # Poetry 의존성·스크립트(poe run, migrate, test 등)
-└── Dockerfile                              # 멀티스테이지 빌드·Gunicorn+Uvicorn
+├── migrations/                             # Alembic env.py, versions(리비전)
+│   ├── env.py                              # Alembic 실행 환경(경로/엔진/metadata) 구성, offline/online 모드
+│   └── versions/                           # 마이그레이션 리비전 스크립트(순서대로 upgrade/downgrade)
+├── alembic.ini                             # Alembic 설정 (script_location=migrations)
+├── pyproject.toml                          # PEP 621 의존성·optional-dev·Poe 태스크
+└── Dockerfile                              # uv 멀티스테이지 빌드·Gunicorn+Uvicorn
 ```
 
 ---
@@ -82,8 +84,9 @@
 | **피드·댓글** | 게시글 무한 스크롤(has_more), 댓글 페이지네이션. |
 | **인증** | JWT Access/Refresh. Refresh는 Redis·HttpOnly 쿠키로 저장하고 Refresh Token Rotation(RTR)을 적용합니다. 로그아웃 시 Access Token은 Redis 블랙리스트로 즉시 무효화합니다. |
 | **좋아요** | POST/DELETE 명시적 API. ON CONFLICT DO NOTHING + RETURNING으로 멱등·like_count 동기화. |
-| **조회수** | GET 멱등 유지 위해 전용 POST `/view`. 인메모리 캐시(TTL·용량 한계)로 중복 방지, 추후 Redis 전환 가능. |
-| **이미지** | 미리 업로드 후 본문/가입 연결. 가입 전 임시 업로드는 Redis Upload Token(단회성·TTL)로 검증하고, 고아 이미지는 배치 sweeper로 정리합니다. |
+| **조회수** | 상세 조회(GET `/posts/{id}`)에서 조회수 증가를 처리하며, Redis `SET NX EX`로 중복을 방지합니다. (Writer DB에서 +1 반영 후 응답에도 낙관적 반영) |
+| **이미지** | 미리 업로드 후 본문/가입 연결. 가입 전 임시 업로드는 Redis Upload Token(단회성·TTL)로 검증하고, 24시간 경과 고아 이미지는 sweeper로 정리합니다. |
+| **Cleanup(정리)** | 회원가입 임시 이미지 정리 + 24시간 경과 고아 이미지 정리 + 탈퇴 30일 경과 유저 하드 삭제(청크) 작업을 주기적으로 수행합니다. |
 | **DB 읽기/쓰기 분리** | get_master_db / get_slave_db, WRITER_DB_URL / READER_DB_URL 분리(확장성 고려). 트랜잭션은 서비스의 `async with db.begin():`으로만 관리. |
 | **요청 추적** | 순수 ASGI RequestIdMiddleware로 UUID4 발급·scope.state·X-Request-ID 응답 헤더(4xx/5xx 포함). contextvars·RequestIdFilter로 로그에 request_id 자동 포함. |
 | **에러 응답** | 전역 예외 핸들러로 모든 에러를 { code, message, data } 형식 통일. 500 시 클라이언트에는 스택/쿼리 노출 없이 마스킹 메시지만 반환. |
@@ -96,17 +99,22 @@
 
 ## 로컬 실행 방법
 
-로컬에서 서버를 띄우려면 **Python 3.11+**, **PostgreSQL**이 필요합니다. Redis는 선택이며, 없으면 Rate Limit은 비활성(Fail-open)되지만 Refresh/로그아웃(블랙리스트)은 일부 제한될 수 있습니다.
+로컬에서 서버를 띄우려면 **Python 3.11+**가 필요합니다.
+
+- **DB(PostgreSQL) / Redis는 Docker 사용을 권장**합니다. (OS/WSL 환경차, 포트/유저/서비스 관리 이슈를 줄이고 팀 환경을 동일하게 맞출 수 있음)
+- 로컬(네이티브) 설치로도 가능하지만, 설치/서비스 기동/계정/소켓 이슈로 트러블슈팅 비용이 커질 수 있습니다.
 
 ### 1. 저장소 클론 및 패키지 설치
 
-**Poetry**가 가상환경을 자동으로 생성·사용하므로 별도 `python -m venv`는 필요 없습니다. (`poetry run`으로 실행하거나, 가상환경 안에서 쓰려면 `poetry shell` 입력.)
+**uv**로 가상환경·의존성을 관리합니다. ([설치 안내](https://docs.astral.sh/uv/getting-started/installation/))
 
 ```bash
 cd 2-kyjness-community-be
-poetry lock    # pyproject.toml 변경 시 lock 파일 갱신
-poetry install
+uv lock                    # pyproject.toml 변경 시 (또는 최초 1회) lock 갱신
+uv sync --extra dev        # 런타임 + dev(테스트·ruff·pyright·poe 등)
 ```
+
+실행 시에는 `uv run …`으로 프로젝트 환경의 Python을 쓰거나, `uv run poe <task>`로 Poe 태스크를 돌립니다.
 
 ### 2. 환경 변수 설정
 
@@ -114,15 +122,28 @@ poetry install
 
 ```bash
 cp .env.example .env
-# .env 편집: DB_PASSWORD, JWT_SECRET_KEY, REDIS_URL 등. Docker 사용 시 DB_HOST=postgres, 로컬 PostgreSQL이면 DB_HOST=localhost
+# .env 편집: DB_PASSWORD, JWT_SECRET_KEY, REDIS_URL 등
+# - Docker(DB/Redis) 권장: DB_HOST=postgres(또는 compose 서비스명), REDIS_URL=redis://redis:6379/0
+# - 로컬(Postgres/Redis 직접 설치): DB_HOST=127.0.0.1(또는 localhost), REDIS_URL=redis://127.0.0.1:6379/0
 ```
 
 ### 3. DB 생성 및 스키마 적용
 
+#### 3-A. Docker로 DB/Redis 실행 (권장)
+
+- Docker Compose 파일은 인프라 레포에 있습니다: [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra)
+- DB/Redis를 기동한 뒤, 아래처럼 마이그레이션만 적용하면 됩니다.
+
+```bash
+uv run poe migrate
+```
+
+#### 3-B. 로컬(PostgreSQL 직접 설치)로 실행 (선택)
+
 ```bash
 createdb -U postgres puppytalk
 
-poetry run poe migrate
+uv run poe migrate
 ```
 
 **DB 데이터만 비우기(초기화)** 
@@ -134,7 +155,7 @@ psql -U postgres -d puppytalk -f docs/clear_db.sql
 ### 4. 서버 실행
 
 ```bash
-poetry run poe run
+uv run poe run
 ```
 
 ### 5. 개발 도구 (Ruff, Pyright, pip-audit)
@@ -142,19 +163,19 @@ poetry run poe run
 **수정/적용용** (코드를 직접 변경):
 
 ```bash
-poetry run poe quality   # lint(--fix) + format 한 방에
-poetry run poe lint      # ruff check . --fix (문법·미사용 import 등)
-poetry run poe format    # ruff format . (포맷팅)
+uv run poe quality   # lint(--fix) + format 한 방에
+uv run poe lint      # ruff check . --fix (문법·미사용 import 등)
+uv run poe format    # ruff format . (포맷팅)
 ```
 
 **검사용** (코드 수정 없이 리포트만, CI/CD용):
 
 ```bash
-poetry run poe check        # lint-check + format-check + typecheck + audit (하나라도 실패 시 중단)
-poetry run poe lint-check   # ruff check . (자동 수정 없음)
-poetry run poe format-check # ruff format . --check (포맷 검사만)
-poetry run poe typecheck    # pyright (타입 체크)
-poetry run poe audit        # pip-audit (의존성 보안 취약점 스캔)
+uv run poe check        # lint-check + format-check + typecheck + audit (하나라도 실패 시 중단)
+uv run poe lint-check   # ruff check . (자동 수정 없음)
+uv run poe format-check # ruff format . --check (포맷 검사만)
+uv run poe typecheck    # pyright (타입 체크)
+uv run poe audit        # pip-audit (의존성 보안 취약점 스캔)
 ```
 
 **보안·의존성 스캔**: `poe audit`은 `pip freeze` 기반으로 `.audit-requirements.txt`를 생성한 뒤 `pip-audit`로 취약점을 검사합니다. 일부 환경(WSL 등)에서 `ensurepip`가 비활성화된 경우에도 동작하도록 `--no-deps --disable-pip` 모드로 실행합니다.
@@ -184,7 +205,10 @@ Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-ky
 - **실시간 소통(1:1 DM)**: WebSocket 기반의 실시간 메시징 시스템 구축 및 대화 내역의 영속성(Persistence) 관리.
 - **실시간 알림**: 댓글 및 상호작용 발생 시 실시간 알림 리스트 제공.
 - **비동기 태스크**: Celery 기반의 대용량 비동기 작업 처리
-- **데이터 무결성**: Pydantic V2의 `model_validate_json` 등을 활용해 Redis/Queue와의 데이터 교환 시 타입 검증·성능 최적화 (추후 적용 예정).
+- **데이터 무결성**: Pydantic V2의 `model_validate_json` 등을 활용해 Redis/Queue와의 데이터 교환 시 타입
+- **검증·성능 최적화**: 고성능 전문 검색 (Full-Text Search) PostgreSQL의 GIN(Generalized Inverted Index) 인덱스와 n-gram 형태소 분석을 활용하여, 단순 LIKE 조회의 한계를 극복하고 수만 건 이상의 게시글 및 커뮤니티 데이터에 대한 초저지연 검색 성능 확보.
+- **하이브리드 검색 레이어**: '우리 아이 건강 척척박사(RAG)' 서비스와 연계하여, Vector DB(pgvector)의 의미론적 유사도 검색과 Full-Text 기반의 키워드 검색을 결합. LLM에 전달되는 컨텍스트의 정밀도를 높여 답변의 신뢰성 극대화.
+- **검색 엔진 점진적 확장**: 사용자 활동량 증가 및 검색 트래픽 급증 시, Meilisearch 또는 Elasticsearch로의 검색 엔진 분리를 검토하여 오타 교정(Fuzzy Search), 유의어 처리, 다국어 검색 지원 등 사용자 경험(UX) 고도화.
 
 ### AI
 
@@ -202,6 +226,17 @@ Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-ky
 - **분산 환경 최적화**: 멀티 인스턴스 환경에서 Redis 클러스터를 통한 인증 상태 일관성 유지 및 Stateless 아키텍처 준수.
 - **성능 가속**: 메시지 큐(SQS/Kafka)를 활용한 시스템 간 결합도 완화 검토.
 
+## 구독 및 비즈니스 운영영
+
+- **AI 운영 비용 최적화**:
+  - **Tiered Quota 관리**: Redis 기반의 실시간 사용량 제한(Rate Limiting) 로직을 구축하여, 사용자 등급별(Basic/Premium) AI 호출 횟수를 차등 제어하고 LLM 추론 비용(Token Cost) 리스크를 최소화.
+  - **하이브리드 모델 라우팅**: 요청의 난이도에 따라 경량 모델(GPT-4o mini)과 고성능 모델(GPT-4o)을 동적으로 할당하는 인프라 구조를 설계하여 답변 품질과 운영 비용의 최적 균형 달성.
+- **이벤트 기반 결제 및 권한 아키텍처**
+  - **Webhook 기반 실시간 동기화**: 결제 대행사(Stripe/Toss)의 Webhook 이벤트를 비동기적으로 수신하여, 결제 상태 변화에 따른 유저 권한(RBAC) 및 서비스 접근성을 즉각적으로 업데이트하는 안정적인 결제 파이프라인 구축.
+  - **결제 무결성 보장**: 분산 트랜잭션 상황에서의 결제 누락 방지를 위한 재시도(Retry) 로직 및 멱등성(Idempotency) 설계로 데이터 정합성 확보.
+- **데이터 기반 건강 인사이트**
+  - **자동화된 배치 리포트**: Celery Beat를 활용해 사용자의 활동 데이터(산책, 음수량 등)를 주기적으로 분석하고, AI가 생성한 '맞춤형 건강 분석 리포트'를 자동 발행하는 스케줄링 시스템 구현.
+  - **개인화 푸시 알림**: 누적된 시계열 데이터의 통계적 유의미성을 분석하여, 이상 징후(Anomaly Detection) 감지 시 보호자에게 즉시 알림을 발송하는 사용자 유지(Retention) 전략 고도화.
 
 
 ---

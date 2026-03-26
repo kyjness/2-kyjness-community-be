@@ -4,15 +4,17 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-# 프로젝트 루트를 path에 추가 (script_location이 app/db/alembic 이므로 상위 3단계)
-_root = Path(__file__).resolve().parent.parent.parent.parent
-sys.path.insert(0, str(_root))
+# 프로젝트 루트 (migrations/env.py → 상위 1단계)
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
+# app 패키지 로드 시 app/__init__.py에서 app.users → app.domain.users 등 별칭이 등록됨.
 from app.comments.model import Comment, CommentLike  # noqa: E402, F401
 from app.db.base import Base  # noqa: E402
-from app.domain.likes.model import PostLike  # noqa: E402, F401
+from app.likes.model import PostLike  # noqa: E402, F401
 from app.media.model import Image  # noqa: E402, F401
-from app.posts.model import Post, PostImage  # noqa: E402, F401
+from app.posts.model import Category, Hashtag, Post, PostImage  # noqa: E402, F401
 from app.users.model import DogProfile, Report, User, UserBlock  # noqa: E402, F401
 
 config = context.config

@@ -76,6 +76,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         {
             ApiCode.INVALID_REQUEST_BODY.name,
             ApiCode.INVALID_REQUEST.name,
+            ApiCode.INVALID_PASSWORD_FORMAT.name,
             ApiCode.INVALID_FILE_FORMAT.name,
             ApiCode.MISSING_REQUIRED_FIELD.name,
             ApiCode.POST_FILE_LIMIT_EXCEEDED.name,

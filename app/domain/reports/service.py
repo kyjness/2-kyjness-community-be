@@ -49,11 +49,13 @@ class ReportService:
                 if await CommentsModel.get_comment_by_id(data.target_id, db=db) is None:
                     raise CommentNotFoundException()
 
+            # Pydantic/Config(use_enum_values 등) 조합에 따라 reason이 Enum이 아니라 str로 들어올 수 있음.
+            reason_value = getattr(data.reason, "value", data.reason)
             blinded = await cls._create_report_and_maybe_blind(
                 reporter_id,
                 data.target_type,
                 data.target_id,
-                data.reason.value,
+                reason_value,
                 db=db,
             )
             return ReportSubmitData(reported=True, blinded=blinded)

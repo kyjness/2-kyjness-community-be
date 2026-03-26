@@ -1,47 +1,51 @@
-[tool.poetry]
+[build-system]
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
+
+[project]
 name = "puppytalk-api"
 version = "1.0.0"
 description = "FastAPI 기반의 커뮤니티 백엔드 API 서버"
-authors = ["kyjness <kyjness@naver.com>"]
 readme = "README.md"
-license = "MIT"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "kyjness", email = "kyjness@naver.com" }]
 keywords = ["fastapi", "api", "community", "backend"]
-packages = [{ include = "app" }]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic[email]>=2.11.0",
+    "python-dotenv>=1.0.0",
+    "bcrypt==4.1.2",
+    "sqlalchemy>=2.0.0",
+    "psycopg[binary]>=3.1.0",
+    "python-multipart>=0.0.6",
+    "boto3>=1.28.0",
+    "gunicorn>=21.0.0",
+    "redis>=5.0.0",
+    "pyjwt>=2.12.0,<3",
+    "alembic>=1.13.0",
+    "mangum>=0.21.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-fastapi = ">=0.115.0"
-uvicorn = { extras = ["standard"], version = ">=0.24.0" }
-pydantic = { version = ">=2.11.0", extras = ["email"] }
-python-dotenv = "^1.0.0"
-bcrypt = "4.1.2"
-sqlalchemy = ">=2.0.0"
-psycopg = { extras = ["binary"], version = "^3.1.0" }
-python-multipart = ">=0.0.6"
-boto3 = ">=1.28.0"
-gunicorn = ">=21.0.0"
-redis = ">=5.0.0"
-pyjwt = "^2.12.0"
-alembic = ">=1.13.0"
-mangum = "^0.21.0"
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "pip-audit>=2.0.0",
+    "poethepoet>=0.29.0",
+    "pyright>=1.1.0",
+    "ruff>=0.15.5",
+]
 
-[tool.poetry.group.dev.dependencies]
-pytest = ">=7.0.0"
-pytest-asyncio = ">=0.21.0"
-httpx = ">=0.24.0"
-pip-audit = ">=2.0.0"
-poethepoet = "^0.29.0"
-pyright = "^1.1.0"
-ruff = "^0.15.5"
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["app"]
+src = ["app", "migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]  # pycodestyle, Pyflakes, isort, pyupgrade
@@ -54,17 +58,15 @@ typeCheckingMode = "standard"
 reportMissingImports = false  # app.* 등 런타임 경로는 IDE/CI에서 제외 가능
 stubPath = "typings"
 
+# Poe the Poet: `uv sync --extra dev` 후 `uv run poe <task>` 로 실행 (내부는 python -m 고정).
 [tool.poe.tasks]
-# Device Guard 우회를 위해 python -m 방식을 기본으로 채택
 run = "python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 migrate = "python3 -m alembic upgrade head"
 
-# [수정/적용용] 코드를 직접 변경함
 lint = "python3 -m ruff check . --fix"
 format = "python3 -m ruff format ."
 quality = ["lint", "format"]
 
-# [검사용] 코드 수정 없이 리포트만 출력 (CI/CD용)
 lint-check = "python3 -m ruff check ."
 format-check = "python3 -m ruff format . --check"
 typecheck = "python3 -m pyright"
@@ -73,5 +75,4 @@ audit-run = "python3 -m pip_audit -r .audit-requirements.txt --no-deps --disable
 audit-clean = "rm -f .audit-requirements.txt"
 audit = ["audit-export", "audit-run", "audit-clean"]
 
-# 전체 검사: 순서대로 실행, 하나라도 실패하면 중단
 check = ["lint-check", "format-check", "typecheck", "audit"]

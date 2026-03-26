@@ -30,11 +30,11 @@
 
 | 구분             | 기술                                                     | 비고                                                                                  |
 | -------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| **언어·패키지**     | Python 3.8+, Poetry 2.x                                | `pyproject.toml`, `poetry.lock`; 의존성·스크립트 정의                                        |
+| **언어·패키지**     | Python 3.11+, uv                                       | `pyproject.toml` (PEP 621), `uv.lock`; 의존성·optional `dev`, Poe 태스크                        |
 | **클라이언트**      | React 19, Vite 8, Tailwind CSS 4, TypeScript           | SPA (`src/`), `src/config.js`·환경변수 `VITE_API_BASE_URL`로 API 베이스 URL 설정 (기본 `/api/v1`) |
 | **WAS**        | FastAPI, Uvicorn(개발) / Gunicorn + Uvicorn worker(프로덕션) | `Dockerfile`: `-w 4`, `UvicornWorker`; `app/main.py` 진입                             |
 | **DB**         | PostgreSQL (psycopg 비동기)                             | `app/db/engine.py`, SQLAlchemy 2.x AsyncSession, Alembic; RDS 배포 시 동일 스택              |
-| **ORM·마이그레이션** | SQLAlchemy 2.x, Alembic                                | `app/db/` 하위; 스키마 변경은 `alembic/versions/` 리비전으로 관리                                  |
+| **ORM·마이그레이션** | SQLAlchemy 2.x, Alembic                                | 루트 `migrations/` (`env.py`, `versions/`); `alembic.ini`의 `script_location=migrations`          |
 | **캐시/세션**      | **현재** JWT + Redis(Refresh Token·Rate Limit) / 세션 테이블 없음     | README·`.env.example`: `REDIS_URL` 설정 시 Redis; `pyproject.toml`에 redis 의존성 있음 |
 | **스토리지**       | 로컬 파일 / S3 (boto3)                                     | `app/core/config.py`: `STORAGE_BACKEND=local` 또는 `s3`; `app/core/storage.py`에서 분기      |
 | **검증·암호화**     | Pydantic v2, bcrypt(비밀번호)                              | 요청·응답 DTO 검증; `app/core/security.py`                                                |

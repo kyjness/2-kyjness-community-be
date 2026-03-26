@@ -55,6 +55,7 @@ async def get_posts(
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
     q: str | None = Query(None, description="검색어 (title, content ILIKE)"),
     sort: str | None = Query(None, description="정렬: latest|popular|views|oldest"),
+    category_id: int | None = Query(None, ge=1, description="카테고리 ID 필터"),
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
@@ -64,6 +65,7 @@ async def get_posts(
         db=db,
         q=q,
         sort=sort,
+        category_id=category_id,
         current_user_id=current_user.id if current_user else None,
     )
     return api_response(

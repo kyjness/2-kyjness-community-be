@@ -84,8 +84,8 @@ class Post(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -104,7 +104,7 @@ class Post(Base):
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     __mapper_args__ = {"version_id_col": version}
 
-    user: Mapped[User] = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
+    user: Mapped[User | None] = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
     category: Mapped[Category | None] = relationship(
         "Category", back_populates="posts", foreign_keys=[category_id], lazy="raise_on_sql"
     )
@@ -153,6 +153,11 @@ class PostImage(Base):
 
 class PostsModel:
     MAX_POST_IMAGES = 5
+
+    @classmethod
+    async def category_exists(cls, category_id: int, *, db: AsyncSession) -> bool:
+        r = await db.execute(select(exists().where(Category.id == int(category_id))))
+        return bool(r.scalar())
 
     @classmethod
     async def sync_post_hashtags(
@@ -288,6 +293,7 @@ class PostsModel:
         db: AsyncSession,
         search_q: str | None = None,
         sort: str | None = None,
+        category_id: int | None = None,
         current_user_id: int | None = None,
     ) -> tuple[list[Post], bool]:
         offset = (page - 1) * size
@@ -312,6 +318,8 @@ class PostsModel:
         if search_q and search_q.strip():
             pattern = f"%{search_q.strip()}%"
             stmt = stmt.where(or_(Post.title.ilike(pattern), Post.content.ilike(pattern)))
+        if category_id is not None:
+            stmt = stmt.where(Post.category_id == int(category_id))
         if sort == "popular":
             stmt = stmt.order_by(Post.like_count.desc(), Post.created_at.desc())
         elif sort == "views":
@@ -332,6 +340,7 @@ class PostsModel:
         *,
         db: AsyncSession,
         search_q: str | None = None,
+        category_id: int | None = None,
         current_user_id: int | None = None,
     ) -> int:
         """삭제되지 않은 게시글 전체 개수 (페이지네이션 total용). search_q 시 검색 조건 반영."""
@@ -347,6 +356,8 @@ class PostsModel:
         if search_q and search_q.strip():
             pattern = f"%{search_q.strip()}%"
             stmt = stmt.where(or_(Post.title.ilike(pattern), Post.content.ilike(pattern)))
+        if category_id is not None:
+            stmt = stmt.where(Post.category_id == int(category_id))
         result = await db.execute(stmt)
         row = result.scalar_one_or_none()
         return row or 0

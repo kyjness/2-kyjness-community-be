@@ -45,6 +45,15 @@ class UserNotFoundException(BaseProjectException):
         super().__init__(status_code=404, code=ApiCode.USER_NOT_FOUND, message=message)
 
 
+class UserWithdrawnException(BaseProjectException):
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            status_code=400,
+            code=ApiCode.USER_WITHDRAWN,
+            message=message or "탈퇴한 유저입니다.",
+        )
+
+
 class EmailAlreadyExistsException(BaseProjectException):
     def __init__(self, message: str | None = None):
         super().__init__(status_code=409, code=ApiCode.EMAIL_ALREADY_EXISTS, message=message)
