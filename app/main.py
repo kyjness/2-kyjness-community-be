@@ -48,11 +48,12 @@ async def lifespan(app: FastAPI):
 
     await init_redis(app)
 
-    await cleanup_once()
+    redis_client = getattr(app.state, "redis", None)
+    await cleanup_once(redis=redis_client)
     stop_event = asyncio.Event()
     cleanup_task = None
     if settings.SIGNUP_IMAGE_CLEANUP_INTERVAL > 0:
-        cleanup_task = asyncio.create_task(run_loop_async(stop_event))
+        cleanup_task = asyncio.create_task(run_loop_async(stop_event, redis=redis_client))
 
     yield
 

@@ -92,7 +92,7 @@ async def upload_image(
 
 @router.delete("/images/{image_id}", status_code=204)
 async def delete_image(
-    image_id: int = Path(..., ge=1, description="이미지 ID"),
+    image_id: str = Path(..., min_length=26, max_length=26, description="이미지 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):

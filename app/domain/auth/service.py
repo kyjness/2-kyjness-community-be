@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import secrets
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -18,6 +19,7 @@ from app.auth.schema import (
 )
 from app.common.enums import UserStatus
 from app.common.exceptions import (
+    ConcurrentUpdateException,
     EmailAlreadyExistsException,
     ForbiddenException,
     InvalidCredentialsException,
@@ -41,13 +43,15 @@ logger = logging.getLogger(__name__)
 
 _USER_REFRESH_KEY_PREFIX = "user_refresh:"
 _BLACKLIST_KEY_PREFIX = "blacklist:"
+_REFRESH_LOCK_KEY_PREFIX = "lock:refresh:"
+_REFRESH_LOCK_TTL_SECONDS = 5
 
 
 def _sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-def _user_refresh_key(user_id: int) -> str:
+def _user_refresh_key(user_id: str) -> str:
     return f"{_USER_REFRESH_KEY_PREFIX}{user_id}"
 
 
@@ -58,6 +62,31 @@ def _blacklist_key(access_token: str) -> str:
 
 def _refresh_token_digest(refresh_token: str) -> str:
     return _sha256_hex(refresh_token)
+
+
+def _refresh_lock_key(user_id: str) -> str:
+    return f"{_REFRESH_LOCK_KEY_PREFIX}{user_id}"
+
+
+async def _release_refresh_lock(
+    redis: Any,
+    *,
+    lock_key: str,
+    lock_value: str,
+) -> None:
+    """락 소유자만 해제(compare-and-delete)."""
+    try:
+        # KEYS[1] == key, ARGV[1] == owner token
+        await redis.eval(
+            "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+            "return redis.call('DEL', KEYS[1]) else return 0 end",
+            1,
+            lock_key,
+            lock_value,
+        )
+    except Exception as e:
+        # 락 TTL이 짧아 자동 만료되므로, 해제 실패는 경고만 남기고 흐름을 막지 않는다.
+        logger.warning("refresh lock release failed key=%s err=%s", lock_key, e)
 
 
 def _remaining_ttl_seconds_from_access_payload(payload: dict) -> int:
@@ -108,7 +137,9 @@ class AuthService:
                 db=db,
             )
             if profile_image_id is not None:
-                attached = await MediaModel.attach_signup_image(profile_image_id, created.id, db=db)
+                attached = await MediaModel.claim_image_ownership(
+                    profile_image_id, created.id, db=db
+                )
                 if not attached:
                     # 토큰 경쟁/재사용 등으로 인해 DB 첨부가 실패한 경우.
                     raise SignupImageTokenInvalidException()
@@ -154,7 +185,7 @@ class AuthService:
     async def logout(
         cls,
         *,
-        user_id: int,
+        user_id: str,
         refresh_token: str | None,
         access_token: str,
         access_payload: dict,
@@ -172,10 +203,10 @@ class AuthService:
             await cast(Any, redis).set(_blacklist_key(access_token), "logout", ex=ttl)
 
         # 2) refresh token 폐기(회전 전제이므로 user_id 키 삭제).
-        await cast(Any, redis).delete(_user_refresh_key(int(user_id)))
+        await cast(Any, redis).delete(_user_refresh_key(user_id))
 
     @classmethod
-    async def revoke_refresh_for_user(cls, user_id: int, redis: Redis | None = None) -> None:
+    async def revoke_refresh_for_user(cls, user_id: str, redis: Redis | None = None) -> None:
         if redis:
             await cast(Any, redis).delete(_user_refresh_key(user_id))
 
@@ -190,28 +221,58 @@ class AuthService:
         if not refresh_token:
             raise UnauthorizedException()
         payload = verify_refresh_token(refresh_token)
-        user_id = int(payload["sub"])
+        sub = payload.get("sub")
+        if not isinstance(sub, str) or not sub:
+            raise UnauthorizedException()
+        user_id = sub
         # RTR: Redis에 저장된 refresh_token과 정확히 일치해야 함. 검증 후 새 refresh로 교체.
         if redis is None:
             raise UnauthorizedException(
                 message="인증을 갱신할 수 없습니다. 잠시 후 다시 시도하세요."
             )
         r = cast(Any, redis)
-        stored_digest = await r.get(_user_refresh_key(user_id))
-        if stored_digest is None or stored_digest != _refresh_token_digest(refresh_token):
-            raise UnauthorizedException()
-        async with db.begin():
-            user = await UsersModel.get_user_by_id(user_id, db=db)
-            if not user:
+        lock_key = _refresh_lock_key(user_id)
+        lock_value = secrets.token_urlsafe(24)
+        lock_acquired = False
+        try:
+            try:
+                lock_acquired = bool(
+                    await r.set(lock_key, lock_value, nx=True, ex=_REFRESH_LOCK_TTL_SECONDS)
+                )
+            except Exception as e:
+                # Redis 일시 장애 시 전체 인증 갱신 마비를 피하기 위해 fail-open.
+                logger.warning(
+                    "refresh lock unavailable, fallback without lock user_id=%s err=%s", user_id, e
+                )
+                lock_acquired = True
+
+            if not lock_acquired:
+                raise ConcurrentUpdateException(
+                    "동일 계정의 토큰 갱신 요청이 동시에 처리 중입니다. 잠시 후 다시 시도해주세요."
+                )
+
+            stored_digest = await r.get(_user_refresh_key(user_id))
+            if stored_digest is None or stored_digest != _refresh_token_digest(refresh_token):
                 raise UnauthorizedException()
-            if not UserStatus.is_active_value(user.status):
-                raise UnauthorizedException()
-        new_access = create_access_token(sub=user_id)
-        new_refresh = create_refresh_token(sub=user_id)
-        if refresh_ttl_seconds > 0:
-            await r.set(
-                _user_refresh_key(user_id),
-                _refresh_token_digest(new_refresh),
-                ex=refresh_ttl_seconds,
-            )
-        return AccessTokenData(access_token=new_access), new_refresh
+            async with db.begin():
+                user = await UsersModel.get_user_by_id(user_id, db=db)
+                if not user:
+                    raise UnauthorizedException()
+                if not UserStatus.is_active_value(user.status):
+                    raise UnauthorizedException()
+            new_access = create_access_token(sub=user_id)
+            new_refresh = create_refresh_token(sub=user_id)
+            if refresh_ttl_seconds > 0:
+                await r.set(
+                    _user_refresh_key(user_id),
+                    _refresh_token_digest(new_refresh),
+                    ex=refresh_ttl_seconds,
+                )
+            return AccessTokenData(access_token=new_access), new_refresh
+        finally:
+            if lock_acquired:
+                await _release_refresh_lock(
+                    r,
+                    lock_key=lock_key,
+                    lock_value=lock_value,
+                )

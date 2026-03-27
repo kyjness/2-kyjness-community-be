@@ -84,7 +84,7 @@ async def get_reported_posts(
 )
 async def unblind_post(
     request: Request,
-    post_id: int = Path(..., ge=1),
+    post_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -99,7 +99,7 @@ async def unblind_post(
 )
 async def reset_post_reports(
     request: Request,
-    post_id: int = Path(..., ge=1),
+    post_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -114,7 +114,7 @@ async def reset_post_reports(
 )
 async def suspend_user(
     request: Request,
-    user_id: int = Path(..., ge=1),
+    user_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -129,7 +129,7 @@ async def suspend_user(
 )
 async def activate_user(
     request: Request,
-    user_id: int = Path(..., ge=1),
+    user_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -144,7 +144,7 @@ async def activate_user(
 )
 async def blind_post(
     request: Request,
-    post_id: int = Path(..., ge=1),
+    post_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -159,7 +159,7 @@ async def blind_post(
 )
 async def delete_post_admin(
     request: Request,
-    post_id: int = Path(..., ge=1),
+    post_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -174,7 +174,7 @@ async def delete_post_admin(
 )
 async def unblind_comment(
     request: Request,
-    comment_id: int = Path(..., ge=1),
+    comment_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -189,7 +189,7 @@ async def unblind_comment(
 )
 async def blind_comment(
     request: Request,
-    comment_id: int = Path(..., ge=1),
+    comment_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -204,7 +204,7 @@ async def blind_comment(
 )
 async def reset_comment_reports(
     request: Request,
-    comment_id: int = Path(..., ge=1),
+    comment_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -219,8 +219,8 @@ async def reset_comment_reports(
 )
 async def delete_comment_admin(
     request: Request,
-    post_id: int = Path(..., ge=1),
-    comment_id: int = Path(..., ge=1),
+    post_id: str = Path(..., min_length=26, max_length=26),
+    comment_id: str = Path(..., min_length=26, max_length=26),
     admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):

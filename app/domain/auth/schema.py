@@ -8,7 +8,7 @@ class SignUpRequest(BaseSchema):
     email: EmailStr = Field(..., description="사용자 이메일")
     password: PasswordStr = Field(..., min_length=8, max_length=20, description="비밀번호 (8-20자)")
     nickname: NicknameStr = Field(..., min_length=1, max_length=10, description="닉네임 (1-10자)")
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     signup_token: str | None = Field(default=None, description="업로드 토큰 (Redis Upload Token)")
 
     @model_validator(mode="after")
@@ -24,11 +24,11 @@ class LoginRequest(BaseSchema):
 
 
 class LoginSuccessData(BaseSchema):
-    id: int
+    id: str
     email: str
     nickname: str
     status: UserStatus = UserStatus.ACTIVE
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     profile_image_url: str | None = None
     access_token: str
 

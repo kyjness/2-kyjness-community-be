@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common import BaseSchema, UserStatus, UtcDatetime
 from app.common.exceptions import ForbiddenException, UnauthorizedException
+from app.core.ids import is_valid_ulid_str
 from app.core.security import verify_access_token
 from app.db import utc_now
 from app.users.model import UsersModel
@@ -19,11 +20,11 @@ from .db import get_slave_db
 
 
 class CurrentUser(BaseSchema):
-    id: int = Field(..., description="사용자 ID")
+    id: str = Field(..., description="사용자 ID (ULID)")
     email: str = ""
     nickname: str = ""
     role: str | None = Field(default="USER", description="USER|ADMIN")
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     profile_image_url: str | None = None
     created_at: UtcDatetime = Field(default_factory=utc_now)
 
@@ -71,10 +72,9 @@ async def get_current_user_optional(
     sub = payload.get("sub")
     if sub is None:
         return None
-    try:
-        user_id = int(sub)
-    except (TypeError, ValueError):
+    if not isinstance(sub, str) or not is_valid_ulid_str(sub):
         return None
+    user_id = sub
     async with db.begin():
         user = await UsersModel.get_user_by_id(user_id, db=db)
         if not user or not UserStatus.is_active_value(user.status):
@@ -99,10 +99,9 @@ async def get_current_user(
     sub = payload.get("sub")
     if sub is None:
         raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.")
-    try:
-        user_id = int(sub)
-    except (TypeError, ValueError):
+    if not isinstance(sub, str) or not is_valid_ulid_str(sub):
         raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.")
+    user_id = sub
     async with db.begin():
         user = await UsersModel.get_user_by_id(user_id, db=db)
         if not user:

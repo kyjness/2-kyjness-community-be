@@ -14,9 +14,9 @@ class ReportService:
     @classmethod
     async def _create_report_and_maybe_blind(
         cls,
-        reporter_id: int,
+        reporter_id: str,
         target_type: TargetType,
-        target_id: int,
+        target_id: str,
         reason: str | None,
         db: AsyncSession,
     ) -> bool:
@@ -37,7 +37,7 @@ class ReportService:
     @classmethod
     async def submit_report(
         cls,
-        reporter_id: int,
+        reporter_id: str,
         data: ReportCreateRequest,
         db: AsyncSession,
     ) -> ReportSubmitData:

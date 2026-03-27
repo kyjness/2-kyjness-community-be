@@ -26,12 +26,12 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
 
 class LikeService:
     @classmethod
-    async def is_post_liked(cls, post_id: int, user_id: int, db: AsyncSession) -> bool:
+    async def is_post_liked(cls, post_id: str, user_id: str, db: AsyncSession) -> bool:
         return await PostLikesModel.has_like(post_id, user_id, db=db)
 
     @classmethod
     async def like_post(
-        cls, post_id: int, user_id: int, db: AsyncSession
+        cls, post_id: str, user_id: str, db: AsyncSession
     ) -> tuple[bool, int, bool]:
         async with db.begin():
             if await PostsModel.get_post_by_id(post_id, db=db) is None:
@@ -56,7 +56,7 @@ class LikeService:
                 raise ConcurrentUpdateException() from e
 
     @classmethod
-    async def unlike_post(cls, post_id: int, user_id: int, db: AsyncSession) -> tuple[bool, int]:
+    async def unlike_post(cls, post_id: str, user_id: str, db: AsyncSession) -> tuple[bool, int]:
         async with db.begin():
             if await PostsModel.get_post_by_id(post_id, db=db) is None:
                 raise PostNotFoundException()
@@ -72,7 +72,7 @@ class LikeService:
 
     @classmethod
     async def like_comment(
-        cls, comment_id: int, user_id: int, db: AsyncSession
+        cls, comment_id: str, user_id: str, db: AsyncSession
     ) -> tuple[bool, int, bool]:
         async with db.begin():
             if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:
@@ -98,7 +98,7 @@ class LikeService:
 
     @classmethod
     async def unlike_comment(
-        cls, comment_id: int, user_id: int, db: AsyncSession
+        cls, comment_id: str, user_id: str, db: AsyncSession
     ) -> tuple[bool, int]:
         async with db.begin():
             if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:

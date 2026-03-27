@@ -15,7 +15,6 @@ from app.common.exceptions import (
     InvalidImageException,
     InvalidRequestException,
     PostNotFoundException,
-    UserNotFoundException,
 )
 from app.media.model import MediaModel
 from app.posts.model import PostsModel
@@ -69,12 +68,12 @@ def _normalize_hashtags(raw: list[str]) -> list[str]:
     return out
 
 
-def _view_redis_key(post_id: int, viewer_key: str) -> str:
+def _view_redis_key(post_id: str, viewer_key: str) -> str:
     return f"view:post:{post_id}:viewer:{viewer_key}"
 
 
 async def _consume_view_if_new_redis(
-    post_id: int, viewer_key: str, redis_client: Any | None
+    post_id: str, viewer_key: str, redis_client: Any | None
 ) -> bool:
     if _VIEW_REDIS_EX_SECONDS <= 0:
         return True
@@ -93,7 +92,7 @@ class PostService:
     @classmethod
     async def create_post(
         cls,
-        user_id: int,
+        user_id: str,
         data: PostCreateRequest,
         db: AsyncSession,
     ) -> int:
@@ -127,7 +126,7 @@ class PostService:
         q: str | None = None,
         sort: str | None = None,
         category_id: int | None = None,
-        current_user_id: int | None = None,
+        current_user_id: str | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
         search_q = q.strip() if (q and q.strip()) else None
         async with db.begin():
@@ -157,10 +156,10 @@ class PostService:
     @classmethod
     async def record_post_view(
         cls,
-        post_id: int,
+        post_id: str,
         viewer_key: str,
         db: AsyncSession,
-        current_user_id: int | None = None,
+        current_user_id: str | None = None,
         redis_client: Any | None = None,
     ) -> None:
         async with db.begin():
@@ -177,24 +176,28 @@ class PostService:
     @classmethod
     async def get_post_detail(
         cls,
-        post_id: int,
+        post_id: str,
         db: AsyncSession,
-        current_user_id: int | None = None,
+        current_user_id: str | None = None,
         *,
         viewer_key: str,
         redis_client: Any | None = None,
         writer_db: AsyncSession | None = None,
     ) -> PostResponse:
         async with db.begin():
-            post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id)
-            if not post:
-                raise PostNotFoundException()
-            data = PostResponse.model_validate(post)
             if current_user_id is not None:
-                from app.domain.likes.service import LikeService
-
-                is_liked = await LikeService.is_post_liked(post_id, current_user_id, db=db)
-                data = data.model_copy(update={"is_liked": is_liked})
+                post_with_like = await PostsModel.get_post_by_id_with_like_flag(
+                    post_id, current_user_id, db=db
+                )
+                if not post_with_like:
+                    raise PostNotFoundException()
+                post, is_liked = post_with_like
+                data = PostResponse.model_validate(post).model_copy(update={"is_liked": is_liked})
+            else:
+                post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=None)
+                if not post:
+                    raise PostNotFoundException()
+                data = PostResponse.model_validate(post)
 
         if writer_db is not None and await _consume_view_if_new_redis(
             post_id, viewer_key, redis_client
@@ -211,7 +214,7 @@ class PostService:
     @classmethod
     async def update_post(
         cls,
-        post_id: int,
+        post_id: str,
         data: PostUpdateRequest,
         db: AsyncSession,
     ) -> None:
@@ -221,7 +224,7 @@ class PostService:
             if not post:
                 raise PostNotFoundException()
             if "version" in fs and data.version is not None:
-                if int(data.version) != int(post.version):
+                if data.version != post.version:
                     raise ConcurrentUpdateException(
                         "다른 사용자가 이미 글을 수정했습니다. 최신 데이터를 확인해주세요."
                     )
@@ -256,7 +259,7 @@ class PostService:
                 raise PostNotFoundException()
 
     @classmethod
-    async def delete_post(cls, post_id: int, db: AsyncSession) -> None:
+    async def delete_post(cls, post_id: str, db: AsyncSession) -> None:
         async with db.begin():
             success, _image_ids = await PostsModel.delete_post(post_id, db=db)
             if not success:

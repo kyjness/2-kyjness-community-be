@@ -7,7 +7,7 @@ from app.users.schema import RepresentativeDogInfo
 
 
 class CommentIdData(BaseSchema):
-    id: int
+    id: str
 
 
 class CommentsPageData(BaseSchema):
@@ -19,13 +19,13 @@ class CommentsPageData(BaseSchema):
 
 class CommentUpsertRequest(BaseSchema):
     content: str = Field(..., min_length=1, max_length=500, description="댓글 내용 (1~500자)")
-    parent_id: int | None = None
+    parent_id: str | None = None
 
 
 class CommentAuthorInfo(BaseSchema):
-    id: int
+    id: str
     nickname: str
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     profile_image_url: str | None = None
     representative_dog: RepresentativeDogInfo | None = None
 
@@ -48,13 +48,13 @@ class CommentAuthorInfo(BaseSchema):
 
 
 class CommentResponse(BaseSchema):
-    id: int
+    id: str
     content: str
     author: CommentAuthorInfo | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
-    post_id: int | None = None
-    parent_id: int | None = None
+    post_id: str | None = None
+    parent_id: str | None = None
     like_count: int = 0
     is_liked: bool = False
     is_edited: bool = False

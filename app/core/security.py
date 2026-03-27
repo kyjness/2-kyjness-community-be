@@ -33,15 +33,16 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def create_access_token(sub: int) -> str:
-    """sub=user_id. ACCESS_TOKEN_EXPIRE_SECONDS 후 만료. JWT spec에 따라 sub는 문자열로 저장."""
+def create_access_token(sub: str) -> str:
+    """sub=user_id(ULID 문자열). ACCESS_TOKEN_EXPIRE_SECONDS 후 만료."""
     expire = _now_utc() + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
+    # JWT 표준·PyJWT 호환: sub는 문자열 claim이 가장 안전(숫자는 구형 라이브러리에서 타입 혼동 가능).
     payload = {"sub": str(sub), "exp": expire, "iat": _now_utc(), "type": "access"}
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_refresh_token(sub: int) -> str:
-    """sub=user_id. REFRESH_TOKEN_EXPIRE_DAYS 후 만료. Redis rt:{user_id}에 저장해 무효화 가능. JWT spec에 따라 sub는 문자열로 저장."""
+def create_refresh_token(sub: str) -> str:
+    """sub=user_id(ULID). REFRESH_TOKEN_EXPIRE_DAYS 후 만료. sub는 항상 str(...)로 직렬화."""
     expire = _now_utc() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": str(sub), "exp": expire, "iat": _now_utc(), "type": "refresh"}
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)

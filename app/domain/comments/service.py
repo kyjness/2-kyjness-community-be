@@ -18,22 +18,22 @@ from app.common.exceptions import (
 )
 
 
-async def _increment_post_comment_count(post_id: int, db: AsyncSession) -> None:
+async def _increment_post_comment_count(post_id: str, db: AsyncSession) -> None:
     from app.posts.model import PostsModel
 
     await PostsModel.increment_comment_count(post_id, db=db)
 
 
-async def _decrement_post_comment_count(post_id: int, db: AsyncSession) -> None:
+async def _decrement_post_comment_count(post_id: str, db: AsyncSession) -> None:
     from app.posts.model import PostsModel
 
     await PostsModel.decrement_comment_count(post_id, db=db)
 
 
 async def _ensure_post_visible(
-    post_id: int,
+    post_id: str,
     db: AsyncSession,
-    current_user_id: int | None = None,
+    current_user_id: str | None = None,
 ) -> None:
     from app.posts.model import PostsModel
 
@@ -104,8 +104,8 @@ class CommentService:
     @classmethod
     async def create_comment(
         cls,
-        post_id: int,
-        user_id: int,
+        post_id: str,
+        user_id: str,
         data: CommentUpsertRequest,
         db: AsyncSession,
     ) -> CommentIdData:
@@ -131,12 +131,12 @@ class CommentService:
     @classmethod
     async def get_comments(
         cls,
-        post_id: int,
+        post_id: str,
         page: int,
         size: int,
         db: AsyncSession,
         sort: str | None = None,
-        current_user_id: int | None = None,
+        current_user_id: str | None = None,
     ) -> CommentsPageData:
         async with db.begin():
             from app.posts.model import PostsModel
@@ -172,8 +172,8 @@ class CommentService:
     @classmethod
     async def update_comment(
         cls,
-        post_id: int,
-        comment_id: int,
+        post_id: str,
+        comment_id: str,
         data: CommentUpsertRequest,
         db: AsyncSession,
     ) -> None:
@@ -183,7 +183,7 @@ class CommentService:
                 raise CommentNotFoundException()
 
     @classmethod
-    async def delete_comment(cls, post_id: int, comment_id: int, db: AsyncSession) -> None:
+    async def delete_comment(cls, post_id: str, comment_id: str, db: AsyncSession) -> None:
         async with db.begin():
             comment = await CommentsModel.get_comment_by_id(comment_id, db=db, include_deleted=True)
             if comment is None or comment.post_id != post_id:

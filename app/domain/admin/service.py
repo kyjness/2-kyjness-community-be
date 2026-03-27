@@ -1,11 +1,14 @@
 # 관리자 전용: 신고 게시글/댓글 목록·블라인드 해제·유저 정지·게시글 삭제. AsyncSession.
 
+import asyncio
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.admin.schema import ReportedPostAuthorInfo, ReportedPostItem
 from app.comments.model import CommentsModel
 from app.common import UserStatus
+from app.common.enums import TargetType
 from app.common.exceptions import (
     CommentNotFoundException,
     ConcurrentUpdateException,
@@ -50,11 +53,26 @@ class AdminService:
             comments, total_comments = await CommentsModel.get_reported_comments(
                 page=1, size=fetch_size, db=db
             )
+            post_ids = [p.id for p in posts]
+            comment_ids = [c.id for c in comments]
+            (
+                last_at_by_post,
+                last_at_by_comment,
+                reasons_by_post,
+                reasons_by_comment,
+            ) = await asyncio.gather(
+                ReportsModel.bulk_max_created_at_by_target_ids(TargetType.POST, post_ids, db=db),
+                ReportsModel.bulk_max_created_at_by_target_ids(
+                    TargetType.COMMENT, comment_ids, db=db
+                ),
+                ReportsModel.bulk_reasons_ordered_by_target_ids(TargetType.POST, post_ids, db=db),
+                ReportsModel.bulk_reasons_ordered_by_target_ids(
+                    TargetType.COMMENT, comment_ids, db=db
+                ),
+            )
             post_items: list[ReportedPostItem] = []
             for p in posts:
                 author, author_status = _author_from_user(p.user)
-                report_reasons = await ReportsModel.get_reasons_for_post(p.id, db=db)
-                last_reported_at = await ReportsModel.get_last_reported_at(p.id, db=db)
                 content_preview = (p.content or "")[:CONTENT_PREVIEW_LEN]
                 if len(p.content or "") > CONTENT_PREVIEW_LEN:
                     content_preview += "…"
@@ -69,21 +87,17 @@ class AdminService:
                         author=author,
                         author_status=author_status,
                         report_count=p.report_count,
-                        report_reasons=report_reasons,
+                        report_reasons=reasons_by_post.get(p.id, []),
                         is_blinded=p.is_blinded,
                         created_at=p.created_at,
-                        last_reported_at=last_reported_at,
+                        last_reported_at=last_at_by_post.get(p.id),
                     )
                 )
-            post_ids = list({c.post_id for c in comments})
-            titles_map = await PostsModel.get_titles_by_ids(post_ids, db=db)
+            title_post_ids = list({c.post_id for c in comments})
+            titles_map = await PostsModel.get_titles_by_ids(title_post_ids, db=db)
             comment_items: list[ReportedPostItem] = []
             for c in comments:
                 author, author_status = _author_from_user(c.author)
-                report_reasons = await ReportsModel.get_reasons_for_target("COMMENT", c.id, db=db)
-                last_reported_at = await ReportsModel.get_last_reported_at_for_target(
-                    "COMMENT", c.id, db=db
-                )
                 content_preview = (c.content or "")[:CONTENT_PREVIEW_LEN]
                 if len(c.content or "") > CONTENT_PREVIEW_LEN:
                     content_preview += "…"
@@ -98,10 +112,10 @@ class AdminService:
                         author=author,
                         author_status=author_status,
                         report_count=c.report_count,
-                        report_reasons=report_reasons,
+                        report_reasons=reasons_by_comment.get(c.id, []),
                         is_blinded=c.is_blinded,
                         created_at=c.created_at,
-                        last_reported_at=last_reported_at,
+                        last_reported_at=last_at_by_comment.get(c.id),
                     )
                 )
             merged = post_items + comment_items
@@ -115,7 +129,7 @@ class AdminService:
             return items, total
 
     @classmethod
-    async def unblind_post(cls, post_id: int, db: AsyncSession) -> None:
+    async def unblind_post(cls, post_id: str, db: AsyncSession) -> None:
         async with db.begin():
             try:
                 ok = await PostsModel.unblind_post(post_id, db=db)
@@ -125,7 +139,7 @@ class AdminService:
             raise PostNotFoundException()
 
     @classmethod
-    async def reset_post_reports(cls, post_id: int, db: AsyncSession) -> None:
+    async def reset_post_reports(cls, post_id: str, db: AsyncSession) -> None:
         async with db.begin():
             await ReportsModel.delete_by_post_id(post_id, db=db)
             await db.flush()  # delete 반영 후 reset_reports 실행해 재신고 시 목록 노출 보장
@@ -137,7 +151,7 @@ class AdminService:
             raise PostNotFoundException()
 
     @classmethod
-    async def suspend_user(cls, user_id: int, db: AsyncSession) -> None:
+    async def suspend_user(cls, user_id: str, db: AsyncSession) -> None:
         async with db.begin():
             user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
@@ -149,7 +163,7 @@ class AdminService:
             await UsersModel.update_user(user_id, db=db, status=UserStatus.SUSPENDED.value)
 
     @classmethod
-    async def activate_user(cls, user_id: int, db: AsyncSession) -> None:
+    async def activate_user(cls, user_id: str, db: AsyncSession) -> None:
         async with db.begin():
             user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
@@ -161,7 +175,7 @@ class AdminService:
             await UsersModel.update_user(user_id, db=db, status=UserStatus.ACTIVE.value)
 
     @classmethod
-    async def blind_post(cls, post_id: int, db: AsyncSession) -> None:
+    async def blind_post(cls, post_id: str, db: AsyncSession) -> None:
         async with db.begin():
             try:
                 ok = await PostsModel.set_blinded(post_id, db=db)
@@ -171,27 +185,27 @@ class AdminService:
             raise PostNotFoundException()
 
     @classmethod
-    async def delete_post(cls, post_id: int, db: AsyncSession) -> None:
+    async def delete_post(cls, post_id: str, db: AsyncSession) -> None:
         if await PostsModel.get_post_author_id(post_id, db=db) is None:
             raise PostNotFoundException()
         await PostService.delete_post(post_id, db=db)
 
     @classmethod
-    async def unblind_comment(cls, comment_id: int, db: AsyncSession) -> None:
+    async def unblind_comment(cls, comment_id: str, db: AsyncSession) -> None:
         async with db.begin():
             ok = await CommentsModel.unblind_comment(comment_id, db=db)
         if not ok:
             raise CommentNotFoundException()
 
     @classmethod
-    async def blind_comment(cls, comment_id: int, db: AsyncSession) -> None:
+    async def blind_comment(cls, comment_id: str, db: AsyncSession) -> None:
         async with db.begin():
             ok = await CommentsModel.set_blinded(comment_id, db=db)
         if not ok:
             raise CommentNotFoundException()
 
     @classmethod
-    async def reset_comment_reports(cls, comment_id: int, db: AsyncSession) -> None:
+    async def reset_comment_reports(cls, comment_id: str, db: AsyncSession) -> None:
         async with db.begin():
             await ReportsModel.delete_by_comment_id(comment_id, db=db)
             await db.flush()
@@ -200,7 +214,7 @@ class AdminService:
             raise CommentNotFoundException()
 
     @classmethod
-    async def delete_comment(cls, post_id: int, comment_id: int, db: AsyncSession) -> None:
+    async def delete_comment(cls, post_id: str, comment_id: str, db: AsyncSession) -> None:
         if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:
             raise CommentNotFoundException()
         async with db.begin():

@@ -18,10 +18,10 @@ from .db import get_slave_db
 
 
 async def require_post_author(
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
-) -> int:
+) -> str:
     async with db.begin():
         author_id = await PostsModel.get_post_author_id(post_id, db=db)
     if author_id is None:
@@ -32,47 +32,55 @@ async def require_post_author(
 
 
 class CommentAuthorContext(NamedTuple):
-    post_id: int
-    user_id: int
-    comment_id: int
+    post_id: str
+    user_id: str
+    comment_id: str
 
 
 async def require_comment_author(
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
-    comment_id: int = Path(..., ge=1, description="댓글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
+    comment_id: str = Path(..., min_length=26, max_length=26, description="댓글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
 ) -> CommentAuthorContext:
     async with db.begin():
-        author_id = await PostsModel.get_post_author_id(post_id, db=db)
-        comment = await CommentsModel.get_comment_by_id(comment_id, db=db)
-        if author_id is None:
-            raise PostNotFoundException()
-        if not comment:
-            raise CommentNotFoundException()
-        if comment.post_id != post_id:
-            raise InvalidPostIdFormatException()
-        if comment.author_id != user.id:
-            raise ForbiddenException()
-        return CommentAuthorContext(post_id=post_id, user_id=user.id, comment_id=comment_id)
+        row = await CommentsModel.load_comment_author_permission_row(
+            post_id,
+            comment_id,
+            db=db,
+            include_deleted_comment=False,
+        )
+    if row is None:
+        raise PostNotFoundException()
+    if row.comment_id is None:
+        raise CommentNotFoundException()
+    if row.comment_post_id != post_id:
+        raise InvalidPostIdFormatException()
+    if row.comment_author_id != user.id:
+        raise ForbiddenException()
+    return CommentAuthorContext(post_id=post_id, user_id=user.id, comment_id=comment_id)
 
 
 async def require_comment_author_for_delete(
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
-    comment_id: int = Path(..., ge=1, description="댓글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
+    comment_id: str = Path(..., min_length=26, max_length=26, description="댓글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
 ) -> CommentAuthorContext:
     """삭제 시 이미 삭제된 댓글도 작성자로 인정해 204 멱등 응답."""
     async with db.begin():
-        author_id = await PostsModel.get_post_author_id(post_id, db=db)
-        comment = await CommentsModel.get_comment_by_id(comment_id, db=db, include_deleted=True)
-        if author_id is None:
-            raise PostNotFoundException()
-        if not comment:
-            raise CommentNotFoundException()
-        if comment.post_id != post_id:
-            raise InvalidPostIdFormatException()
-        if comment.author_id != user.id:
-            raise ForbiddenException()
-        return CommentAuthorContext(post_id=post_id, user_id=user.id, comment_id=comment_id)
+        row = await CommentsModel.load_comment_author_permission_row(
+            post_id,
+            comment_id,
+            db=db,
+            include_deleted_comment=True,
+        )
+    if row is None:
+        raise PostNotFoundException()
+    if row.comment_id is None:
+        raise CommentNotFoundException()
+    if row.comment_post_id != post_id:
+        raise InvalidPostIdFormatException()
+    if row.comment_author_id != user.id:
+        raise ForbiddenException()
+    return CommentAuthorContext(post_id=post_id, user_id=user.id, comment_id=comment_id)

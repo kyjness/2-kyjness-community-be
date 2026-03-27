@@ -5,11 +5,11 @@ from app.common import BaseSchema
 
 
 class ImageUploadResponse(BaseSchema):
-    id: int
+    id: str
     file_url: str = Field(..., description="이미지 URL")
 
 
 class SignupImageUploadData(BaseSchema):
-    id: int
+    id: str
     file_url: str = Field(..., description="이미지 URL")
     signup_token: str = Field(..., description="업로드 토큰 (Redis Upload Token)")

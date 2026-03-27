@@ -1,6 +1,7 @@
 # 사용자 CRUD. User ORM 반환, Controller에서 Schema.model_validate(user)로 직렬화. 프로필 이미지는 profile_image_id(FK). AsyncSession.
 from datetime import date as DateType
-from datetime import datetime as DateTimeType, timedelta
+from datetime import datetime as DateTimeType
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import (
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
 
 from app.common.enums import UserStatus
+from app.core.ids import new_ulid_str
 from app.db import Base, utc_now
 from app.infra.storage import build_url
 from app.media.model import Image
@@ -28,16 +30,16 @@ from app.media.model import Image
 class DogProfile(Base):
     __tablename__ = "dog_profiles"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    owner_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
+    owner_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     breed: Mapped[str] = mapped_column(String(100), nullable=False)
     gender: Mapped[str] = mapped_column(String(20), nullable=False)
     birth_date: Mapped[DateType] = mapped_column(Date, nullable=False)
-    profile_image_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
+    profile_image_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_representative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -60,14 +62,14 @@ class DogProfile(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     __mapper_args__ = {"version_id_col": version}
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(String(255), nullable=False)
     nickname: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    profile_image_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    profile_image_id: Mapped[str | None] = mapped_column(
+        String(26), ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="USER")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=UserStatus.ACTIVE.value)
@@ -111,11 +113,11 @@ class UserBlock(Base):
         UniqueConstraint("blocker_id", "blocked_id", name="uq_user_blocks_blocker_blocked"),
     )
 
-    blocker_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    blocker_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    blocked_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    blocked_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -126,12 +128,12 @@ class UserBlock(Base):
 class Report(Base):
     __tablename__ = "reports"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    reporter_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
+    reporter_id: Mapped[str] = mapped_column(
+        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     target_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    target_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_id: Mapped[str] = mapped_column(String(26), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
     deleted_at: Mapped[DateTimeType | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -146,7 +148,7 @@ class UsersModel:
         email: str,
         hashed_password: str,
         nickname: str,
-        profile_image_id: int | None = None,
+        profile_image_id: str | None = None,
         *,
         db: AsyncSession,
     ) -> User:
@@ -166,7 +168,7 @@ class UsersModel:
         return user
 
     @classmethod
-    async def get_user_by_id(cls, user_id: int, db: AsyncSession) -> User | None:
+    async def get_user_by_id(cls, user_id: str, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -176,13 +178,13 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_user_by_id_including_deleted(cls, user_id: int, db: AsyncSession) -> User | None:
+    async def get_user_by_id_including_deleted(cls, user_id: str, db: AsyncSession) -> User | None:
         stmt = select(User).where(User.id == user_id).options(joinedload(User.profile_image))
         result = await db.execute(stmt)
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_user_by_id_with_dogs(cls, user_id: int, db: AsyncSession) -> User | None:
+    async def get_user_by_id_with_dogs(cls, user_id: str, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -195,7 +197,7 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_users_by_ids(cls, user_ids: list[int], db: AsyncSession) -> dict[int, User]:
+    async def get_users_by_ids(cls, user_ids: list[str], db: AsyncSession) -> dict[str, User]:
         if not user_ids:
             return {}
         stmt = (
@@ -218,7 +220,7 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_password_hash(cls, user_id: int, db: AsyncSession) -> str | None:
+    async def get_password_hash(cls, user_id: str, db: AsyncSession) -> str | None:
         result = await db.execute(
             select(User.password).where(User.id == user_id, User.deleted_at.is_(None))
         )
@@ -243,7 +245,7 @@ class UsersModel:
     @classmethod
     async def update_user(
         cls,
-        user_id: int,
+        user_id: str,
         *,
         db: AsyncSession,
         **fields: Any,
@@ -261,7 +263,7 @@ class UsersModel:
         return r.scalar_one_or_none() is not None
 
     @classmethod
-    async def update_password(cls, user_id: int, hashed_password: str, db: AsyncSession) -> bool:
+    async def update_password(cls, user_id: str, hashed_password: str, db: AsyncSession) -> bool:
         r = await db.execute(
             update(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -271,7 +273,7 @@ class UsersModel:
         return r.scalar_one_or_none() is not None
 
     @classmethod
-    async def get_blocked_users(cls, blocker_id: int, db: AsyncSession) -> list[User]:
+    async def get_blocked_users(cls, blocker_id: str, db: AsyncSession) -> list[User]:
         """내가 차단한 유저 목록 (삭제되지 않은 유저만, 차단 시점 최신순)."""
         stmt = (
             select(User)
@@ -287,7 +289,7 @@ class UsersModel:
         return list(result.unique().scalars().all())
 
     @classmethod
-    async def block_exists(cls, blocker_id: int, blocked_id: int, db: AsyncSession) -> bool:
+    async def block_exists(cls, blocker_id: str, blocked_id: str, db: AsyncSession) -> bool:
         result = await db.execute(
             select(UserBlock.blocker_id)
             .where(
@@ -299,7 +301,7 @@ class UsersModel:
         return result.first() is not None
 
     @classmethod
-    async def block_user(cls, blocker_id: int, blocked_id: int, db: AsyncSession) -> None:
+    async def block_user(cls, blocker_id: str, blocked_id: str, db: AsyncSession) -> None:
         db.add(
             UserBlock(
                 blocker_id=blocker_id,
@@ -310,7 +312,7 @@ class UsersModel:
         await db.flush()
 
     @classmethod
-    async def unblock_user(cls, blocker_id: int, blocked_id: int, db: AsyncSession) -> int:
+    async def unblock_user(cls, blocker_id: str, blocked_id: str, db: AsyncSession) -> int:
         r = await db.execute(
             delete(UserBlock)
             .where(
@@ -324,7 +326,7 @@ class UsersModel:
     _DELETED_AT_MAX_LEN = 255
 
     @classmethod
-    def _deleted_at_suffix(cls, user_id: int) -> str:
+    def _deleted_at_suffix(cls, user_id: str) -> str:
         ts = int(utc_now().timestamp())
         return f"_deleted_{user_id}_{ts}"
 
@@ -336,7 +338,7 @@ class UsersModel:
         return (base + suffix)[:max_len]
 
     @classmethod
-    async def delete_user(cls, user_id: int, db: AsyncSession) -> bool:
+    async def delete_user(cls, user_id: str, db: AsyncSession) -> bool:
         stmt = select(User.id, User.email, User.nickname).where(
             User.id == user_id, User.deleted_at.is_(None)
         )
@@ -370,7 +372,7 @@ class UsersModel:
         older_than_days: int,
         limit: int,
         db: AsyncSession,
-    ) -> list[int]:
+    ) -> list[str]:
         """탈퇴(WITHDRAWN) + deleted_at 기준 N일 경과 유저를 하드 삭제.
 
         - 대량 삭제로 인한 락을 줄이기 위해 limit 단위로 청크 처리한다.

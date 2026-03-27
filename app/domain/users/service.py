@@ -40,7 +40,7 @@ class UserService:
             )
 
     @classmethod
-    async def get_user_profile(cls, user_id: int, db: AsyncSession) -> UserProfileResponse:
+    async def get_user_profile(cls, user_id: str, db: AsyncSession) -> UserProfileResponse:
         async with db.begin():
             user_with_dogs = await UsersModel.get_user_by_id_with_dogs(user_id, db=db)
             if not user_with_dogs:
@@ -50,7 +50,7 @@ class UserService:
     @classmethod
     async def update_user_profile(
         cls,
-        user_id: int,
+        user_id: str,
         data: UpdateUserRequest,
         db: AsyncSession,
     ) -> UserProfileResponse:
@@ -104,7 +104,7 @@ class UserService:
 
     @classmethod
     async def update_password(
-        cls, user_id: int, data: UpdatePasswordRequest, db: AsyncSession
+        cls, user_id: str, data: UpdatePasswordRequest, db: AsyncSession
     ) -> None:
         async with db.begin():
             hashed = await UsersModel.get_password_hash(user_id, db=db)
@@ -119,7 +119,7 @@ class UserService:
                 raise InternalServerErrorException()
 
     @classmethod
-    async def get_blocked_list(cls, blocker_id: int, db: AsyncSession) -> BlocksData:
+    async def get_blocked_list(cls, blocker_id: str, db: AsyncSession) -> BlocksData:
         async with db.begin():
             users = await UsersModel.get_blocked_users(blocker_id, db=db)
         items = [
@@ -134,7 +134,7 @@ class UserService:
 
     @classmethod
     async def toggle_block_user(
-        cls, blocker_id: int, target_user_id: int, db: AsyncSession
+        cls, blocker_id: str, target_user_id: str, db: AsyncSession
     ) -> bool:
         """이미 차단되어 있으면 해제(delete), 아니면 차단(insert). 반환: 차단 여부(True=차단됨, False=해제됨)."""
         if blocker_id == target_user_id:
@@ -148,7 +148,7 @@ class UserService:
             return True
 
     @classmethod
-    async def delete_user(cls, user_id: int, db: AsyncSession) -> None:
+    async def delete_user(cls, user_id: str, db: AsyncSession) -> None:
         async with db.begin():
             user = await UsersModel.get_user_by_id(user_id, db=db)
             if not user:

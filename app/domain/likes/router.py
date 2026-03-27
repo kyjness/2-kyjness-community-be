@@ -13,7 +13,7 @@ router = APIRouter(prefix="/likes", tags=["likes"])
 @router.post("/posts/{post_id}", status_code=200, response_model=ApiResponse[LikeResponseData])
 async def like_post(
     request: Request,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -27,7 +27,7 @@ async def like_post(
 @router.delete("/posts/{post_id}", status_code=200, response_model=ApiResponse[LikeResponseData])
 async def unlike_post(
     request: Request,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -46,7 +46,7 @@ async def unlike_post(
 )
 async def like_comment(
     request: Request,
-    comment_id: int = Path(..., ge=1, description="댓글 ID"),
+    comment_id: str = Path(..., min_length=26, max_length=26, description="댓글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -64,7 +64,7 @@ async def like_comment(
 )
 async def unlike_comment(
     request: Request,
-    comment_id: int = Path(..., ge=1, description="댓글 ID"),
+    comment_id: str = Path(..., min_length=26, max_length=26, description="댓글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):

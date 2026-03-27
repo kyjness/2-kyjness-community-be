@@ -30,12 +30,12 @@ class DogProfileCreate(BaseSchema):
 
 
 class DogProfileResponse(BaseSchema):
-    id: int
+    id: str
     name: str
     breed: str
     gender: DogGender
     birth_date: date
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     profile_image_url: str | None = None
     is_representative: bool = False
 
@@ -48,14 +48,16 @@ class RepresentativeDogInfo(BaseSchema):
 
 
 class DogProfileUpsertItem(BaseSchema):
-    id: int | None = Field(default=None, description="있으면 수정, 없으면 생성")
+    id: str | None = Field(default=None, description="있으면 수정, 없으면 생성")
     name: str = Field(..., min_length=1, max_length=100)
     breed: str = Field(..., min_length=1, max_length=100)
     gender: DogGender = Field(...)
     birth_date: BirthDateNotFuture = Field(...)
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     is_representative: bool = False
 
 
 class SetRepresentativeDogRequest(BaseSchema):
-    dog_id: int = Field(..., gt=0, description="대표로 지정할 강아지 ID")
+    dog_id: str = Field(
+        ..., min_length=26, max_length=26, description="대표로 지정할 강아지 ID (ULID)"
+    )

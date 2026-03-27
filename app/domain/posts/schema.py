@@ -11,20 +11,20 @@ from app.users.schema import RepresentativeDogInfo
 # --- 2. 내부 헬퍼 ---
 
 
-def _image_ids_max_five(v: list[int] | None) -> list[int] | None:
+def _image_ids_max_five(v: list[str] | None) -> list[str] | None:
     if v is not None and len(v) > 5:
         raise ValueError(ApiCode.POST_FILE_LIMIT_EXCEEDED.name)
     return v
 
 
 # --- 3. Annotated 재사용 타입 ---
-ImageIdsMaxFive = Annotated[list[int] | None, AfterValidator(_image_ids_max_five)]
+ImageIdsMaxFive = Annotated[list[str] | None, AfterValidator(_image_ids_max_five)]
 
 # --- 4. 스키마 모델 ---
 
 
 class PostIdData(BaseSchema):
-    id: int
+    id: str
 
 
 class PostCreateRequest(BaseSchema):
@@ -48,9 +48,9 @@ class PostUpdateRequest(BaseSchema):
 
 
 class AuthorInfo(BaseSchema):
-    id: int
+    id: str
     nickname: str
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     profile_image_url: str | None = None
     representative_dog: RepresentativeDogInfo | None = None
 
@@ -73,13 +73,13 @@ class AuthorInfo(BaseSchema):
 
 
 class FileInfo(BaseSchema):
-    id: int
+    id: str
     file_url: str | None = None
-    image_id: int | None = None
+    image_id: str | None = None
 
 
 class PostResponse(BaseSchema):
-    id: int
+    id: str
     title: str
     content: str
     view_count: int = 0

@@ -78,7 +78,7 @@ async def get_posts(
 @router.post("/{post_id}/view", status_code=200, response_model=ApiResponse[None])
 async def record_view(
     request: Request,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     client_id: str = Depends(get_client_identifier),
     db: AsyncSession = Depends(get_master_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
@@ -98,7 +98,7 @@ async def record_view(
 @router.get("/{post_id}", status_code=200, response_model=ApiResponse[PostResponse])
 async def get_post(
     request: Request,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     client_id: str = Depends(get_client_identifier),
     db: AsyncSession = Depends(get_slave_db),
     writer_db: AsyncSession = Depends(get_master_db),
@@ -126,7 +126,7 @@ async def get_post(
 async def update_post(
     request: Request,
     post_data: PostUpdateRequest,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.update_post(post_id, post_data, db=db)
@@ -141,7 +141,7 @@ async def update_post(
 )
 async def delete_post(
     request: Request,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.delete_post(post_id, db=db)

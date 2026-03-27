@@ -25,7 +25,7 @@ router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
 async def create_comment(
     request: Request,
     comment_data: CommentUpsertRequest,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
@@ -36,7 +36,7 @@ async def create_comment(
 @router.get("", status_code=200, response_model=ApiResponse[CommentsPageData])
 async def get_comments(
     request: Request,
-    post_id: int = Path(..., ge=1, description="게시글 ID"),
+    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
     sort: str | None = Query(None, description="정렬: latest|oldest|popular"),

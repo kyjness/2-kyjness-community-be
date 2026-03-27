@@ -74,7 +74,7 @@ class AvailabilityData(BaseSchema):
 
 
 class BlockedUserItem(BaseSchema):
-    id: int
+    id: str
     nickname: str
     profile_image_url: str | None = None
 
@@ -107,7 +107,7 @@ class UserAvailabilityQuery(BaseSchema):
 
 class UpdateUserRequest(BaseSchema):
     nickname: OptionalNicknameStr = None
-    profile_image_id: int | None = Field(default=None, description="null이면 프로필 이미지 제거")
+    profile_image_id: str | None = Field(default=None, description="null이면 프로필 이미지 제거")
     clear_profile_image: bool = Field(
         default=False,
         description="프로필 이미지 강제 삭제 플래그 (camelCase: clearProfileImage)",
@@ -142,12 +142,12 @@ class UpdatePasswordRequest(BaseSchema):
 
 
 class UserProfileResponse(BaseSchema):
-    id: int
+    id: str
     email: str
     nickname: str
     role: str = Field(default="USER", description="USER|ADMIN")
     status: UserStatus = Field(..., description="ACTIVE|SUSPENDED|WITHDRAWN")
-    profile_image_id: int | None = None
+    profile_image_id: str | None = None
     profile_image_url: str | None = None
     created_at: UtcDatetime
     dogs: list[DogProfileResponse] = Field(default_factory=list, description="등록된 강아지 목록")

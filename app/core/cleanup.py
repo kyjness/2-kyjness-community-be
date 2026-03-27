@@ -4,13 +4,15 @@ import asyncio
 import logging
 import uuid
 
+from redis.asyncio import Redis
+
 from app.core.config import settings
 from app.db import get_connection
 
 log = logging.getLogger(__name__)
 
 
-async def run_once() -> None:
+async def run_once(redis: Redis | None = None) -> None:
     task_id = str(uuid.uuid4())
     log.info("cleanup_start task_id=%s", task_id)
 
@@ -20,7 +22,7 @@ async def run_once() -> None:
 
         async with get_connection() as db:
             deleted_count, failed_file_keys = await MediaService.cleanup_expired_signup_images(
-                db, task_id=task_id
+                db, task_id=task_id, redis=redis
             )
         if failed_file_keys:
             log.warning(
@@ -32,7 +34,9 @@ async def run_once() -> None:
             )
             log.warning("[S3_DELETE_RETRY_NEEDED] task_id=%s keys=%s", task_id, failed_file_keys)
         elif deleted_count:
-            log.info("signup_image_cleanup_done task_id=%s deleted_count=%s", task_id, deleted_count)
+            log.info(
+                "signup_image_cleanup_done task_id=%s deleted_count=%s", task_id, deleted_count
+            )
     except Exception as e:
         log.warning("signup_image_cleanup_failed task_id=%s error=%s", task_id, e)
 
@@ -41,7 +45,7 @@ async def run_once() -> None:
         from app.media.service import MediaService
 
         async with get_connection() as db:
-            deleted = await MediaService.sweep_unused_images(db)
+            deleted = await MediaService.sweep_unused_images(db, redis=redis)
         if deleted:
             log.info("orphan_post_image_cleanup_done task_id=%s deleted_count=%s", task_id, deleted)
     except Exception as e:
@@ -54,15 +58,17 @@ async def run_once() -> None:
         async with get_connection() as db:
             deleted_users = await UserService.purge_withdrawn_users(older_than_days=30, db=db)
         if deleted_users:
-            log.info("withdrawn_user_purge_done task_id=%s deleted_count=%s", task_id, deleted_users)
+            log.info(
+                "withdrawn_user_purge_done task_id=%s deleted_count=%s", task_id, deleted_users
+            )
     except Exception as e:
         log.warning("withdrawn_user_purge_failed task_id=%s error=%s", task_id, e)
 
 
-async def run_loop_async(stop_event: asyncio.Event) -> None:
+async def run_loop_async(stop_event: asyncio.Event, redis: Redis | None = None) -> None:
     interval = max(60, settings.SIGNUP_IMAGE_CLEANUP_INTERVAL)
     while not stop_event.is_set():
-        await run_once()
+        await run_once(redis=redis)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=float(interval))
         except TimeoutError:
