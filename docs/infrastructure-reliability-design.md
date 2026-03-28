@@ -106,7 +106,7 @@ graph TD
   - GZip: 응답 1KB 이상 시 압축(`minimum_size=1024`), 대역폭 절감.  
   - rate_limit: IP당 전역 제한, 로그인은 별도(분당 5회), 회원가입 업로드 별도.  
   - ProxyHeaders: X-Forwarded-For 등 프록시 헤더 신뢰(클라이언트 IP).  
-  - RequestId: 요청별 UUID 발급, 응답 헤더 `X-Request-ID`(에러 응답 포함)로 추적.  
+  - RequestId: 요청별 ULID 발급, 응답 헤더 `X-Request-ID`(에러 응답 포함)로 추적.  
   - access_log: 4xx/5xx 시 request_id·Path·Status·소요 시간 로깅.
 
 **인프라 관점 요청 흐름 (단계)**:

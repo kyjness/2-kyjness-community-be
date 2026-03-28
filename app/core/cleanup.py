@@ -1,19 +1,19 @@
 # 만료된 회원가입용 임시 이미지 정리. Full-Async: run_once 비동기, run_loop_async(lifespan).
-# HTTP request가 없으므로 실행마다 task_id(UUID)를 발급해 로그 상관관계에 사용.
+# HTTP request가 없으므로 실행마다 task_id(ULID)를 발급해 로그 상관관계에 사용.
 import asyncio
 import logging
-import uuid
 
 from redis.asyncio import Redis
 
 from app.core.config import settings
+from app.core.ids import new_ulid_str
 from app.db import get_connection
 
 log = logging.getLogger(__name__)
 
 
 async def run_once(redis: Redis | None = None) -> None:
-    task_id = str(uuid.uuid4())
+    task_id = new_ulid_str()
     log.info("cleanup_start task_id=%s", task_id)
 
     # 1) 회원가입 임시 이미지 정리

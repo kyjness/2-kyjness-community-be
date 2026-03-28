@@ -1,6 +1,5 @@
-import uuid
-
 import pytest
+from app.core.ids import new_ulid_str
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.asyncio
@@ -28,7 +27,7 @@ async def setup_post_and_headers(client: AsyncClient) -> tuple[dict[str, str], s
     post_res = await client.post(
         "/v1/posts",
         json={"title": "좋아요 테스트", "content": "내용"},
-        headers={**headers, "X-Idempotency-Key": str(uuid.uuid4())},
+        headers={**headers, "X-Idempotency-Key": new_ulid_str()},
     )
     assert post_res.status_code == 201, post_res.text
     body = post_res.json()

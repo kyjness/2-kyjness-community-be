@@ -66,13 +66,14 @@
 
 ## API 문서
 
-서버를 실행한 뒤, 브라우저에서 **아래 주소**로 접속하시면 API 명세를 보실 수 있습니다.  
-(Swagger UI는 요청 테스트용, ReDoc은 읽기용 정리 문서입니다.)
+FastAPI는 API 프리픽스가 `/v1`이므로, **문서·OpenAPI JSON도 `/v1` 뒤에 붙는 경로**입니다. 로컬과 AWS에 배포한 환경 모두 동일한 패턴입니다.
 
-| 문서 | 주소 |
-|------|------|
-| **Swagger UI** | http://localhost:8000/docs |
-| **ReDoc** | http://localhost:8000/redoc |
+| 환경 | Swagger UI (요청 테스트) | ReDoc (읽기용) | OpenAPI JSON |
+|------|-------------------------|----------------|--------------|
+| **로컬** | http://localhost:8000/v1/docs | http://localhost:8000/v1/redoc | http://localhost:8000/v1/openapi.json |
+| **프로덕션 (AWS)** | https://api.puppytalk.shop/v1/docs | https://api.puppytalk.shop/v1/redoc | https://api.puppytalk.shop/v1/openapi.json |
+
+배포 서버 루트 예시: [https://api.puppytalk.shop/v1/](https://api.puppytalk.shop/v1/) — 응답 `data.docs`에도 `/v1/docs` 안내가 포함됩니다.
 
 ---
 
@@ -89,7 +90,7 @@
 | **이미지** | 미리 업로드 후 본문/가입 연결. 가입 전 임시 업로드는 Redis Upload Token(단회성·TTL)로 검증하고, 24시간 경과 고아 이미지는 sweeper로 정리합니다. |
 | **Cleanup(정리)** | 회원가입 임시 이미지 정리 + 24시간 경과 고아 이미지 정리 + 탈퇴 30일 경과 유저 하드 삭제(청크) 작업을 주기적으로 수행합니다. 멀티 인스턴스 시 미사용 이미지 sweep·가입 임시 이미지 정리는 **Redis 잡 단위 락**으로 중복 실행을 억제합니다. |
 | **DB 읽기/쓰기 분리** | get_master_db / get_slave_db, WRITER_DB_URL / READER_DB_URL 분리(확장성 고려). 트랜잭션은 서비스의 `async with db.begin():`으로만 관리. |
-| **요청 추적** | 순수 ASGI RequestIdMiddleware로 UUID4 발급·scope.state·X-Request-ID 응답 헤더(4xx/5xx 포함). contextvars·RequestIdFilter로 로그에 request_id 자동 포함. |
+| **요청 추적** | 순수 ASGI RequestIdMiddleware로 ULID 발급·scope.state·X-Request-ID 응답 헤더(4xx/5xx 포함). contextvars·RequestIdFilter로 로그에 request_id 자동 포함. |
 | **에러 응답** | 전역 예외 핸들러로 모든 에러를 { code, message, data } 형식 통일. 500 시 클라이언트에는 스택/쿼리 노출 없이 마스킹 메시지만 반환. |
 | **API 응답 code** | `ApiResponse.code`는 `ApiCode` enum 또는 str. 라우터에서는 `ApiCode.OK` 등 enum만 전달하며, `BaseSchema`의 `use_enum_values=True`로 직렬화 시 문자열로 내려감. |
 | **신고** | 신고는 항상 새 행(Insert) 누적. 동일 유저 재신고도 허용. 신고 무시 시에만 `reports` soft delete·글/댓글 `report_count` 초기화. `reports` 테이블에는 `status` 컬럼 없음, `target_type`은 TargetType(POST/COMMENT). |

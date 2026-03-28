@@ -1,7 +1,6 @@
 # 이미지 업로드 정책. purpose 검증, 매직바이트 포맷 판별, 청크 읽기, 저장(스레드).
 # 커스텀 예외 사용 → 전역 handler가 400 응답 처리.
 import asyncio
-import uuid
 from typing import Literal
 
 from fastapi import UploadFile
@@ -14,6 +13,7 @@ from app.common.exceptions import (
     MissingRequiredFieldException,
 )
 from app.core.config import settings
+from app.core.ids import new_ulid_str
 from app.infra.storage import storage_save
 
 ImagePurpose = Literal["signup", "profile", "post"]
@@ -58,7 +58,7 @@ async def read_limited(file: UploadFile, max_bytes: int) -> bytes:
 
 
 def _generate_key(purpose: ImagePurpose, ext: str) -> str:
-    filename = f"{uuid.uuid4().hex}.{ext}"
+    filename = f"{new_ulid_str()}.{ext}"
     return f"{purpose}/{filename}"
 
 

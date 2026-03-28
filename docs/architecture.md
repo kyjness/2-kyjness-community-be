@@ -199,7 +199,7 @@ flowchart TB
    → check_database() 호출. 성공 200 + { code, data: { status: "ok", database: "connected" } }, 실패 503 + { code: DB_ERROR, data: { status: "degraded", database: "disconnected" } }.
 
 ③ 미들웨어 (요청마다)
-   **순수 ASGI**(add_middleware): RequestIdMiddleware, ProxyHeadersMiddleware, RateLimitMiddleware, GZipMiddleware. LIFO이므로 **코드상 최하단에 등록한 RequestIdMiddleware**가 요청 진입 시 **가장 먼저** 실행되어 UUID4 발급·scope["state"]["request_id"] 주입. GZip은 안쪽에 두어 응답 body만 압축(1KB 미만은 미압축).
+   **순수 ASGI**(add_middleware): RequestIdMiddleware, ProxyHeadersMiddleware, RateLimitMiddleware, GZipMiddleware. LIFO이므로 **코드상 최하단에 등록한 RequestIdMiddleware**가 요청 진입 시 **가장 먼저** 실행되어 ULID 발급·scope["state"]["request_id"] 주입. GZip은 안쪽에 두어 응답 body만 압축(1KB 미만은 미압축).
    **함수형**(middleware("http")): security_headers, access_log.
    실행 순서: request_id → proxy_headers → rate_limit → gzip → access_log → security_headers (2.1 미들웨어 순서 참고).
 
@@ -231,7 +231,7 @@ HTTP 응답  { "code": "...", "message": "...", "data": ... }  (에러 시에도
 
 | 순서 | 단계 | 의도(Why) |
 |------|------|-----------|
-| 1 | **Request ID** | 순수 ASGI. 요청 진입 시 UUID4 발급 → `scope.setdefault("state", {})["request_id"]` 저장(FastAPI의 `request.state.request_id`와 동일). `send`를 래핑해 `http.response.start` 시 **응답 헤더에 X-Request-ID 주입**하므로 4xx/5xx 예외 응답에도 헤더가 포함되어 프론트에서 에러 리포트 시 ID를 첨부할 수 있다. contextvars에 설정되어 로그 포맷 `[%(request_id)s]`로 **요청 단위 추적** 가능. |
+| 1 | **Request ID** | 순수 ASGI. 요청 진입 시 ULID 발급 → `scope.setdefault("state", {})["request_id"]` 저장(FastAPI의 `request.state.request_id`와 동일). `send`를 래핑해 `http.response.start` 시 **응답 헤더에 X-Request-ID 주입**하므로 4xx/5xx 예외 응답에도 헤더가 포함되어 프론트에서 에러 리포트 시 ID를 첨부할 수 있다. contextvars에 설정되어 로그 포맷 `[%(request_id)s]`로 **요청 단위 추적** 가능. |
 | 2 | **Proxy Headers** | 순수 ASGI(scope/receive/send). Nginx/ALB 뒤에서 실제 클라이언트 IP를 쓰기 위해 `X-Forwarded-For`를 사용할 수 있으나, **직접 파싱하면 IP 스푸핑**에 취약하다. **신뢰할 수 있는 프록시 IP**(`TRUSTED_PROXY_IPS`)에서 온 요청일 때만 첫 번째 값을 `scope["client"]`에 반영한다. Rate Limit·접근 로그는 **이후 항상 `request.client.host`만** 사용해, 한 번 검증된 IP만 신뢰한다. |
 | 3 | **Rate Limit** | 순수 ASGI. Redis 기반 **Fixed Window**. 경로별 키: 전역·로그인·회원가입 업로드. Lua로 INCR+EXPIRE 원자 처리. **Fail-open**: Redis 장애 시 로그인·회원가입 업로드만 **인메모리 Fallback**(10,000키, eviction) 적용, 나머지 경로는 제한 없이 통과(가용성 우선). OPTIONS·`/health`는 제외. |
 | 4 | **GZip** | Starlette `GZipMiddleware`. 응답 body가 **1KB 이상**일 때만 gzip 압축하여 전송(작은 JSON·에러 응답은 CPU 낭비 방지). `Accept-Encoding: gzip` 클라이언트에만 적용. |

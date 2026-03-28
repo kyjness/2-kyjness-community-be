@@ -1,6 +1,5 @@
-import uuid
-
 import pytest
+from app.core.ids import new_ulid_str
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.asyncio
@@ -29,7 +28,7 @@ async def setup_auth_user(client: AsyncClient, email: str, nickname: str) -> dic
 async def test_create_and_get_post(client: AsyncClient):
     headers = await setup_auth_user(client, "post_user@example.com", "포스트퍼피")
     post_payload = {"title": "강아지 사료 추천", "content": "어떤 사료가 좋을까요?"}
-    idem = {"X-Idempotency-Key": str(uuid.uuid4())}
+    idem = {"X-Idempotency-Key": new_ulid_str()}
 
     create_res = await client.post("/v1/posts", json=post_payload, headers={**headers, **idem})
     assert create_res.status_code == 201, create_res.text
@@ -46,8 +45,8 @@ async def test_create_and_get_post(client: AsyncClient):
 
 async def test_search_posts_gin_index(client: AsyncClient):
     headers = await setup_auth_user(client, "search_user@example.com", "검색퍼피")
-    idem1 = {"X-Idempotency-Key": str(uuid.uuid4())}
-    idem2 = {"X-Idempotency-Key": str(uuid.uuid4())}
+    idem1 = {"X-Idempotency-Key": new_ulid_str()}
+    idem2 = {"X-Idempotency-Key": new_ulid_str()}
     await client.post(
         "/v1/posts",
         json={"title": "맛있는 카보불닭 레시피", "content": "내용"},
