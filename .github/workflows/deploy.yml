@@ -24,7 +24,7 @@ env:
 jobs:
   lint:
     name: Lint & quality (ruff, pyright, audit)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
   test:
     name: Run tests (unit + integration)
     needs: lint
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       # --- DB: services.postgres 와 동일 (통합 conftest + 앱 lifespan init_database 공통) ---
       TEST_DB_URL: postgresql+psycopg://postgres:testpassword@localhost:5432/puppytalk_test
@@ -157,8 +157,7 @@ jobs:
   deploy:
     name: Build and Deploy
     needs: test
-    runs-on: ubuntu-latest
-
+    runs-on: self-hosted
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
