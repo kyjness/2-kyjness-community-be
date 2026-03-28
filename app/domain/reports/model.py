@@ -8,7 +8,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import TargetType
-from app.db import utc_now
+from app.db.base_class import utc_now
 from app.users.model import Report
 
 # PostgreSQL IN (...)·파라미터·응답 메모리 폭주 완화 (관리자 신고 목록 등 대량 ID)

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.config import settings
 from app.core.ids import new_ulid_str
-from app.db import Base, utc_now
+from app.db.base_class import Base, utc_now
 
 
 class Image(Base):

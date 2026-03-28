@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship
 
 from app.core.ids import new_ulid_str
-from app.db import Base, utc_now
+from app.db.base_class import Base, utc_now
 from app.posts.model import Post
 from app.users.model import DogProfile, User, UserBlock
 

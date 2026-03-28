@@ -2,11 +2,13 @@
 # - DB 마이그레이션(Alembic)은 GitHub Actions에서 실행하지 않음(프라이빗 RDS + 러너 퍼블릭망·DB 시크릿 노출 방지).
 #   컨테이너 entrypoint 등에서 VPC 내부 DB로 alembic upgrade head 수행하도록 별도 구성 권장.
 # - 장기적으로 AWS 자격증명은 IAM User Access Key 대신 GitHub OIDC → IAM Role(aws-actions/configure-aws-credentials role-to-assume) 권장.
+# - CI test Job: 통합 테스트는 app.db.engine이 import 시점에 WRITER/READER URL을 고정하므로 TEST_DB_URL과 동일 DB URL을 반드시 주입할 것.
+# - 모노레포: 저장소 루트가 puppytalk 등 상위 폴더일 때 모든 run 스텝·docker build 컨텍스트(.)가 백엔드 디렉터리를 가리키도록 함.
 name: Deploy Backend to Amazon ECS (Blue/Green)
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 env:
   AWS_REGION: ap-northeast-2
@@ -20,8 +22,141 @@ env:
   CONTAINER_NAME: puppytalk-be-container
 
 jobs:
+  lint:
+    name: Lint & quality (ruff, pyright, audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Ruff lint
+        run: uv run poe lint-check
+
+      - name: Ruff format (check)
+        run: uv run poe format-check
+
+      - name: Pyright
+        run: uv run poe typecheck
+
+      - name: pip-audit
+        run: uv run poe audit
+
+  test:
+    name: Run tests (unit + integration)
+    needs: lint
+    runs-on: ubuntu-latest
+    env:
+      # --- DB: services.postgres 와 동일 (통합 conftest + 앱 lifespan init_database 공통) ---
+      TEST_DB_URL: postgresql+psycopg://postgres:testpassword@localhost:5432/puppytalk_test
+      WRITER_DB_URL: postgresql+psycopg://postgres:testpassword@localhost:5432/puppytalk_test
+      READER_DB_URL: postgresql+psycopg://postgres:testpassword@localhost:5432/puppytalk_test
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: testpassword
+      DB_NAME: puppytalk_test
+      # --- Redis: Rate limit·RL 테스트 일관성 (빈 값이면 미들웨어 in-memory 경로) ---
+      REDIS_URL: redis://localhost:6379/0
+      # --- JWT (unit test_core_security + 통합 인증) — Settings 키명은 JWT_ALGORITHM ---
+      JWT_SECRET_KEY: ci-dummy-jwt-secret-min-32-chars-for-hs256-tests
+      JWT_ALGORITHM: HS256
+      # --- 기타: import/기동 시 빈 값·로컬 기본값으로 인한 예외 방지 (Fail-fast 완화) ---
+      STORAGE_BACKEND: local
+      DEBUG: "false"
+      COOKIE_SECURE: "false"
+      TRUST_X_FORWARDED_FOR: "false"
+      AWS_ACCESS_KEY_ID: dummy
+      AWS_SECRET_ACCESS_KEY: dummy
+      S3_BUCKET_NAME: dummy-ci-bucket
+      S3_ENDPOINT_URL: ""
+      BE_API_URL: http://localhost:8000
+      # CI에서 DB 준비 지연 시 재시도(기본값 유지 가능)
+      DB_INIT_MAX_ATTEMPTS: "5"
+      DB_INIT_RETRY_DELAY_SECONDS: "2"
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: puppytalk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d puppytalk_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Verify PostgreSQL and pg_trgm
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          import os
+
+          from sqlalchemy import text
+          from sqlalchemy.ext.asyncio import create_async_engine
+
+          async def main() -> None:
+              url = os.environ["TEST_DB_URL"]
+              engine = create_async_engine(url)
+              async with engine.begin() as conn:
+                  await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+                  r = await conn.execute(
+                      text("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'")
+                  )
+                  assert r.scalar_one() == 1
+              await engine.dispose()
+
+          asyncio.run(main())
+          PY
+
+      - name: Run pytest
+        run: uv run pytest tests/ -v --tb=short
+
   deploy:
     name: Build and Deploy
+    needs: test
     runs-on: ubuntu-latest
 
     steps:
@@ -61,7 +196,8 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          # defaults.run.working-directory 가 2-kyjness-community-be 이므로 . = 해당 폴더(Dockerfile·컨텍스트)
+          docker build -f Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 

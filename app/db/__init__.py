@@ -1,4 +1,4 @@
-from .base import Base, utc_now
+from .base_class import Base, utc_now
 from .connection import check_database, close_database, init_database
 from .engine import (
     AsyncSessionLocal,

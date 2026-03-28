@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
 
 from app.core.ids import new_ulid_str
-from app.db import Base, utc_now
+from app.db.base_class import Base, utc_now
 from app.media.model import Image
 from app.users.model import DogProfile, User, UserBlock
 
@@ -278,7 +278,7 @@ class PostsModel:
     ) -> tuple[Post, bool] | None:
         """로그인 사용자 기준 게시글 상세 + 좋아요 여부를 단일 SELECT로 조회."""
         # 순환 참조 여지를 줄이기 위해 지연 임포트.
-        from app.domain.likes.model import PostLike
+        from app.likes.model import PostLike
 
         is_liked_expr = (
             exists(1).where(PostLike.post_id == Post.id, PostLike.user_id == user_id)
@@ -468,7 +468,7 @@ class PostsModel:
     @classmethod
     async def delete_post(cls, post_id: str, db: AsyncSession) -> tuple[bool, list[str]]:
         from app.comments.model import Comment
-        from app.domain.likes.model import PostLikesModel
+        from app.likes.model import PostLikesModel
 
         # 1) 게시글 soft-delete를 원자적으로 선점.
         # 이미 삭제된 게시글이면 추가 작업 없이 (False, []) 반환해 멱등성 보장.

@@ -5,7 +5,7 @@ from app.admin.router import router as admin_router
 from app.auth.router import router as auth_router
 from app.comments.router import router as comments_router
 from app.dogs.router import router as dogs_router
-from app.domain.likes.router import router as likes_router
+from app.likes.router import router as likes_router
 from app.media.router import router as media_router
 from app.posts.router import router as posts_router
 from app.reports.router import router as reports_router

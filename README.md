@@ -22,7 +22,8 @@
 | **마이그레이션** | Alembic |
 | **스토리지** | 로컬 파일 / AWS S3 (boto3) |
 | **검증** | Pydantic v2 |
-| **인증** | JWT (PyJWT), bcrypt (비밀번호), Redis (Refresh Token·Access Token 블랙리스트·Rate Limit) |
+| **식별자** | 엔티티 PK·대부분의 FK는 **ULID** 문자열(26자, DB `VARCHAR(26)`). `categories`·`hashtags` 등 시드 테이블은 **Integer** 유지. |
+| **인증** | JWT (PyJWT), bcrypt (비밀번호), Redis (Refresh Token·Access Token 블랙리스트·Rate Limit, 동시 refresh·백그라운드 잡 분산락) |
 
 ---
 
@@ -38,7 +39,7 @@
 │   │   ├── v1.py                           # /v1 prefix 라우터 묶음
 │   │   └── dependencies/                   # 인증, DB 세션(get_master_db/get_slave_db), 권한, 쿼리 파싱
 │   ├── common/                             # API 코드·Enum·ApiResponse·validators·exceptions·로깅
-│   ├── core/                               # config, security(JWT·비밀번호), exception_handlers, cleanup
+│   ├── core/                               # config, ids(ULID), security(JWT·비밀번호), exception_handlers, cleanup
 │   │   └── middleware/                     # RequestId, ProxyHeaders, RateLimit, GZip, AccessLog, SecurityHeaders
 │   ├── db/                                 # SQLAlchemy Base·엔진·세션·연결
 │   ├── domain/                             # 기능별 도메인 (router → service → model → schema)
@@ -82,11 +83,11 @@
 | 포인트 | 설명 |
 |--------|------|
 | **피드·댓글** | 게시글 무한 스크롤(has_more), 댓글 페이지네이션. |
-| **인증** | JWT Access/Refresh. Refresh는 Redis·HttpOnly 쿠키로 저장하고 Refresh Token Rotation(RTR)을 적용합니다. 로그아웃 시 Access Token은 Redis 블랙리스트로 즉시 무효화합니다. |
+| **인증** | JWT Access/Refresh. Access 만료는 `ACCESS_TOKEN_EXPIRE_SECONDS`(기본 **30분**), Refresh는 `REFRESH_TOKEN_EXPIRE_DAYS`(기본 **7일**). Refresh는 HttpOnly 쿠키 + Redis와 RTR. 동일 유저의 동시 `/auth/refresh`는 Redis 분산락으로 직렬화하며, 락 경합 시 **409**를 반환할 수 있음(클라이언트는 대기 후 재시도). 로그아웃 시 Access Token은 Redis 블랙리스트로 즉시 무효화. |
 | **좋아요** | POST/DELETE 명시적 API. ON CONFLICT DO NOTHING + RETURNING으로 멱등·like_count 동기화. |
 | **조회수** | 상세 조회(GET `/posts/{id}`)에서 조회수 증가를 처리하며, Redis `SET NX EX`로 중복을 방지합니다. (Writer DB에서 +1 반영 후 응답에도 낙관적 반영) |
 | **이미지** | 미리 업로드 후 본문/가입 연결. 가입 전 임시 업로드는 Redis Upload Token(단회성·TTL)로 검증하고, 24시간 경과 고아 이미지는 sweeper로 정리합니다. |
-| **Cleanup(정리)** | 회원가입 임시 이미지 정리 + 24시간 경과 고아 이미지 정리 + 탈퇴 30일 경과 유저 하드 삭제(청크) 작업을 주기적으로 수행합니다. |
+| **Cleanup(정리)** | 회원가입 임시 이미지 정리 + 24시간 경과 고아 이미지 정리 + 탈퇴 30일 경과 유저 하드 삭제(청크) 작업을 주기적으로 수행합니다. 멀티 인스턴스 시 미사용 이미지 sweep·가입 임시 이미지 정리는 **Redis 잡 단위 락**으로 중복 실행을 억제합니다. |
 | **DB 읽기/쓰기 분리** | get_master_db / get_slave_db, WRITER_DB_URL / READER_DB_URL 분리(확장성 고려). 트랜잭션은 서비스의 `async with db.begin():`으로만 관리. |
 | **요청 추적** | 순수 ASGI RequestIdMiddleware로 UUID4 발급·scope.state·X-Request-ID 응답 헤더(4xx/5xx 포함). contextvars·RequestIdFilter로 로그에 request_id 자동 포함. |
 | **에러 응답** | 전역 예외 핸들러로 모든 에러를 { code, message, data } 형식 통일. 500 시 클라이언트에는 스택/쿼리 노출 없이 마스킹 메시지만 반환. |
@@ -122,7 +123,7 @@ uv sync --extra dev        # 런타임 + dev(테스트·ruff·pyright·poe 등)
 
 ```bash
 cp .env.example .env
-# .env 편집: DB_PASSWORD, JWT_SECRET_KEY, REDIS_URL 등
+# .env 편집: DB_PASSWORD, JWT_SECRET_KEY, REDIS_URL, ACCESS_TOKEN_EXPIRE_SECONDS(기본 1800), REFRESH_TOKEN_EXPIRE_DAYS(기본 7) 등
 # - Docker(DB/Redis) 권장: DB_HOST=postgres(또는 compose 서비스명), REDIS_URL=redis://redis:6379/0
 # - 로컬(Postgres/Redis 직접 설치): DB_HOST=127.0.0.1(또는 localhost), REDIS_URL=redis://127.0.0.1:6379/0
 ```
@@ -180,7 +181,32 @@ uv run poe audit        # pip-audit (의존성 보안 취약점 스캔)
 
 **보안·의존성 스캔**: `poe audit`은 `pip freeze` 기반으로 `.audit-requirements.txt`를 생성한 뒤 `pip-audit`로 취약점을 검사합니다. 일부 환경(WSL 등)에서 `ensurepip`가 비활성화된 경우에도 동작하도록 `--no-deps --disable-pip` 모드로 실행합니다.
 
-### 6. 관리자 기능 (Admin)
+### 6. 테스트 실행 (Pytest)
+
+테스트 DB를 사용하므로, 먼저 PostgreSQL에 `puppytalk_test` DB를 준비하고 연결 문자열을 설정하세요.
+
+```bash
+# 예시 (로컬)
+export TEST_DB_URL="postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/puppytalk_test"
+```
+
+통합 테스트(`tests/integration/`)는 `tests/integration/conftest.py`에서 세션 시작 시 `pg_trgm` 확장 생성과 스키마 초기화를 수행합니다. 유닛 테스트(`tests/unit/`)는 DB 없이 동작합니다.
+
+```bash
+# 전체 테스트
+uv run pytest -v
+
+# 통합 테스트만
+uv run pytest tests/integration -v
+
+# 특정 테스트 파일만
+uv run pytest tests/integration/test_auth.py -v
+
+# 특정 테스트 함수만
+uv run pytest tests/integration/test_auth.py::test_login_and_refresh_token -v
+```
+
+### 7. 관리자 기능 (Admin)
 
 관리자 전용 API(`/v1/admin/*`)와 프론트 대시보드(`/admin/dashboard`)는 **role이 `ADMIN`인 유저만** 사용할 수 있습니다.
 
@@ -188,7 +214,8 @@ uv run poe audit        # pip-audit (의존성 보안 취약점 스캔)
    DB에서 해당 유저의 `role`을 `ADMIN`으로 변경합니다.
 
    ```sql
-   UPDATE users SET role = 'ADMIN' WHERE id = 1;  -- 원하는 user id
+   -- users.id는 ULID 문자열(26자)입니다. 이메일로 지정해도 됩니다.
+   UPDATE users SET role = 'ADMIN' WHERE email = 'your-admin@example.com';
    ```
 
 2. **프론트에서 사용**  
@@ -226,7 +253,7 @@ Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-ky
 - **분산 환경 최적화**: 멀티 인스턴스 환경에서 Redis 클러스터를 통한 인증 상태 일관성 유지 및 Stateless 아키텍처 준수.
 - **성능 가속**: 메시지 큐(SQS/Kafka)를 활용한 시스템 간 결합도 완화 검토.
 
-## 구독 및 비즈니스 운영영
+## 구독 및 비즈니스 운영
 
 - **AI 운영 비용 최적화**:
   - **Tiered Quota 관리**: Redis 기반의 실시간 사용량 제한(Rate Limiting) 로직을 구축하여, 사용자 등급별(Basic/Premium) AI 호출 횟수를 차등 제어하고 LLM 추론 비용(Token Cost) 리스크를 최소화.

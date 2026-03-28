@@ -4,7 +4,7 @@ from sqlalchemy import bindparam, case, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.db import utc_now
+from app.db.base_class import utc_now
 from app.users.model import DogProfile
 
 

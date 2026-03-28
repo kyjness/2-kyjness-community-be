@@ -14,7 +14,7 @@ from app.common.exceptions import (
     PostNotFoundException,
 )
 from app.db import get_connection
-from app.domain.likes.model import PostLikesModel
+from app.likes.model import PostLikesModel
 from app.posts.model import PostsModel
 
 

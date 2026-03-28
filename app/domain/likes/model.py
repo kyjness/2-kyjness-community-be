@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base, utc_now
+from app.db.base_class import Base, utc_now
 
 
 class PostLike(Base):

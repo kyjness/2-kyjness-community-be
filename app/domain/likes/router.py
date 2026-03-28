@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, get_current_user, get_master_db
 from app.common import ApiCode, ApiResponse, api_response
-from app.domain.likes.schema import LikeResponseData
-from app.domain.likes.service import LikeService
+from app.likes.schema import LikeResponseData
+from app.likes.service import LikeService
 
 router = APIRouter(prefix="/likes", tags=["likes"])
 
