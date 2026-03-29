@@ -4,6 +4,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,26 @@ from app.core.openapi_camel import openapi_schema_to_camel
 from app.db import check_database
 
 
+async def _view_buffer_flush_loop(stop_event: asyncio.Event, redis_client: Any) -> None:
+    """조회수 Redis 버퍼를 주기적으로 DB에 반영."""
+    flush_log = logging.getLogger("app.view_buffer_flush")
+    interval = settings.VIEW_BUFFER_FLUSH_INTERVAL_SECONDS
+    from app.posts.service import PostService
+
+    while True:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            break
+        except TimeoutError:
+            pass
+        if stop_event.is_set():
+            break
+        try:
+            await PostService.flush_view_counts_to_db(redis_client)
+        except Exception:
+            flush_log.exception("조회수 버퍼 flush 실패")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.db import close_database, init_database
@@ -52,8 +73,11 @@ async def lifespan(app: FastAPI):
     await cleanup_once(redis=redis_client)
     stop_event = asyncio.Event()
     cleanup_task = None
+    view_flush_task: asyncio.Task[None] | None = None
     if settings.SIGNUP_IMAGE_CLEANUP_INTERVAL > 0:
         cleanup_task = asyncio.create_task(run_loop_async(stop_event, redis=redis_client))
+    if redis_client is not None and settings.VIEW_BUFFER_FLUSH_INTERVAL_SECONDS > 0:
+        view_flush_task = asyncio.create_task(_view_buffer_flush_loop(stop_event, redis_client))
 
     yield
 
@@ -67,6 +91,15 @@ async def lifespan(app: FastAPI):
                 await cleanup_task
             except asyncio.CancelledError:
                 pass  # Intended: swallow cancel on lifespan shutdown
+    if view_flush_task is not None:
+        try:
+            await asyncio.wait_for(asyncio.shield(view_flush_task), timeout=30.0)
+        except TimeoutError:
+            view_flush_task.cancel()
+            try:
+                await view_flush_task
+            except asyncio.CancelledError:
+                pass
     await close_redis(app)
     await close_database()
 

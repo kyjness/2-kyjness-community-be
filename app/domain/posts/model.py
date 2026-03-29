@@ -511,6 +511,21 @@ class PostsModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
+    async def increment_view_count_delta(cls, post_id: str, delta: int, db: AsyncSession) -> bool:
+        if delta <= 0:
+            return True
+        result = await db.execute(
+            update(Post)
+            .where(
+                Post.id == post_id,
+                Post.deleted_at.is_(None),
+            )
+            .values(view_count=Post.view_count + delta, updated_at=utc_now())
+            .returning(Post.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    @classmethod
     async def increment_report_count(cls, post_id: str, db: AsyncSession) -> int | None:
         result = await db.execute(
             update(Post)

@@ -128,5 +128,11 @@ class Settings:
     # ----- 신고·블라인드 (Phase 2) -----
     REPORT_BLIND_THRESHOLD: int = int(os.getenv("REPORT_BLIND_THRESHOLD", "5"))
 
+    # ----- 조회수 Write-behind (Redis HINCRBY → 주기적 DB flush) -----
+    VIEW_BUFFER_FLUSH_INTERVAL_SECONDS: int = max(
+        60, int(os.getenv("VIEW_BUFFER_FLUSH_INTERVAL_SECONDS", "300"))
+    )
+    VIEW_FLUSH_LOCK_SECONDS: int = max(30, int(os.getenv("VIEW_FLUSH_LOCK_SECONDS", "120")))
+
 
 settings = Settings()

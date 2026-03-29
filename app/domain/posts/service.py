@@ -1,5 +1,6 @@
 # 게시글 비즈니스 로직. Full-Async.
 # 조회수 중복 방지: Redis SET NX EX (멀티 워커). Redis 장애 시 Fail-open(매 요청 카운트).
+# 조회수 증가 Write-behind: Redis Hash HINCRBY → 주기 flush 시 DB에 합산 반영(RENAME 원자성).
 from __future__ import annotations
 
 import logging
@@ -16,11 +17,24 @@ from app.common.exceptions import (
     InvalidRequestException,
     PostNotFoundException,
 )
+from app.core.config import settings
+from app.core.ids import new_ulid_str
 from app.media.model import MediaModel
 from app.posts.model import PostsModel
 from app.posts.schema import PostCreateRequest, PostResponse, PostUpdateRequest
 
 log = logging.getLogger(__name__)
+
+# Redis Cluster 호환: 동일 해시태그로 buffer·drain·lock 동일 슬롯.
+VIEW_BUFFER_KEY = "views:{v}:buffer"
+VIEW_FLUSH_LOCK_KEY = "views:{v}:flush:lock"
+_RENAME_BUFFER_TO_DRAIN_LUA = """
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return 0
+end
+redis.call('RENAME', KEYS[1], KEYS[2])
+return 1
+"""
 
 # viewer·post당 TTL 초 동안 1회만 조회수 증가(SET NX EX).
 # 개발/로컬에서 새로고침·중복 호출로 조회수가 튀는 문제가 잦아 기본값은 1시간으로 둔다.
@@ -86,6 +100,29 @@ async def _consume_view_if_new_redis(
     except Exception as e:
         log.warning("조회수 dedup Redis 오류(Fail-open, 증가 허용): %s", e)
         return True
+
+
+async def _get_buffer_pending(redis_client: Any | None, post_id: str) -> int:
+    if redis_client is None:
+        return 0
+    try:
+        raw = await redis_client.hget(VIEW_BUFFER_KEY, post_id)
+        return int(raw) if raw is not None else 0
+    except Exception as e:
+        log.warning("조회수 버퍼 HGET 실패(Fail-open 0): %s", e)
+        return 0
+
+
+async def _try_view_increment_in_buffer(post_id: str, redis_client: Any | None) -> bool:
+    """True면 Redis 버퍼에만 반영. False면 호출부에서 DB increment 필요."""
+    try:
+        if redis_client is None:
+            raise ConnectionError("redis unavailable")
+        await redis_client.hincrby(VIEW_BUFFER_KEY, post_id, 1)
+        return True
+    except Exception as e:
+        log.warning("조회수 버퍼 HINCRBY 실패 Fail-open DB: %s", e)
+        return False
 
 
 class PostService:
@@ -166,8 +203,11 @@ class PostService:
             post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id)
             if not post:
                 raise PostNotFoundException()
-            if not await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
-                return
+        if not await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
+            return
+        if await _try_view_increment_in_buffer(post_id, redis_client):
+            return
+        async with db.begin():
             try:
                 await PostsModel.increment_view_count(post_id, db=db)
             except StaleDataError as e:
@@ -199,17 +239,78 @@ class PostService:
                     raise PostNotFoundException()
                 data = PostResponse.model_validate(post)
 
+        extra_db = 0
         if writer_db is not None and await _consume_view_if_new_redis(
             post_id, viewer_key, redis_client
         ):
-            async with writer_db.begin():
-                try:
-                    await PostsModel.increment_view_count(post_id, db=writer_db)
-                except StaleDataError as e:
-                    raise ConcurrentUpdateException() from e
-            data = data.model_copy(update={"view_count": data.view_count + 1})
+            if not await _try_view_increment_in_buffer(post_id, redis_client):
+                async with writer_db.begin():
+                    try:
+                        await PostsModel.increment_view_count(post_id, db=writer_db)
+                    except StaleDataError as e:
+                        raise ConcurrentUpdateException() from e
+                extra_db = 1
 
-        return data
+        pending = await _get_buffer_pending(redis_client, post_id)
+        return data.model_copy(update={"view_count": data.view_count + pending + extra_db})
+
+    @classmethod
+    async def flush_view_counts_to_db(cls, redis_client: Any | None) -> None:
+        """Redis 조회수 버퍼를 DB에 반영. RENAME으로 스냅샷 분리 후 합산 UPDATE. 분산 락 SET NX EX."""
+        if redis_client is None:
+            return
+        lock_acquired = False
+        drain_key = f"views:{{v}}:drain:{new_ulid_str()}"
+        try:
+            lock_acquired = bool(
+                await redis_client.set(
+                    VIEW_FLUSH_LOCK_KEY,
+                    "1",
+                    nx=True,
+                    ex=settings.VIEW_FLUSH_LOCK_SECONDS,
+                )
+            )
+            if not lock_acquired:
+                return
+            renamed = await redis_client.eval(
+                _RENAME_BUFFER_TO_DRAIN_LUA, 2, VIEW_BUFFER_KEY, drain_key
+            )
+            if not int(renamed):
+                return
+            fields = await redis_client.hgetall(drain_key)
+            if not fields:
+                await redis_client.delete(drain_key)
+                return
+            from app.db.session import get_connection
+
+            try:
+                async with get_connection() as db:
+                    async with db.begin():
+                        for pid, cnt_raw in fields.items():
+                            delta = int(cnt_raw)
+                            if delta > 0:
+                                await PostsModel.increment_view_count_delta(pid, delta, db=db)
+                await redis_client.delete(drain_key)
+            except Exception:
+                await cls._merge_drain_into_buffer(redis_client, drain_key, VIEW_BUFFER_KEY)
+                raise
+        finally:
+            if lock_acquired:
+                try:
+                    await redis_client.delete(VIEW_FLUSH_LOCK_KEY)
+                except Exception as e:
+                    log.warning("조회수 flush 락 해제 실패: %s", e)
+
+    @staticmethod
+    async def _merge_drain_into_buffer(redis_client: Any, drain_key: str, buffer_key: str) -> None:
+        """DB flush 실패 시 drain 해시를 버퍼로 되돌려 유실 방지."""
+        fields = await redis_client.hgetall(drain_key)
+        if not fields:
+            await redis_client.delete(drain_key)
+            return
+        for pid, cnt_raw in fields.items():
+            await redis_client.hincrby(buffer_key, pid, int(cnt_raw))
+        await redis_client.delete(drain_key)
 
     @classmethod
     async def update_post(

@@ -25,6 +25,6 @@ class Base(DeclarativeBase):
 
 
 @event.listens_for(Base, "before_update")
-def _set_updated_at(mapper, connection, target) -> None:
+def _set_updated_at(_mapper, _connection, target) -> None:
     if hasattr(target, "updated_at"):
         target.updated_at = utc_now()

@@ -143,66 +143,14 @@ jobs:
       - name: Run pytest
         run: uv run pytest tests/ -v --tb=short
 
-  # 3. Deploy 단계: 오직 내 레포에 Push될 때만 내 전용 일꾼(Runner)으로 실행!
-  deploy:
-    name: Build and Deploy
-    needs: test
-    # [수정] 핵심 조건: PR일 때는 실행하지 않고, 메인 브랜치에 직접 Push될 때만 작동!
+# 3. CD Trigger 단계: 내 레포의 main에 Push될 때 젠킨스 호출
+  trigger-cd:
+    name: Trigger Jenkins CD
+    needs: test # test가 성공해야만 실행됨
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: self-hosted # 여기서만 사용자님의 Ubuntu EC2 사용
+    runs-on: ubuntu-latest # 가벼운 공용 서버 사용
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Fetch current ECS task definition from AWS
+      - name: Call Jenkins Webhook
         run: |
-          aws ecs describe-task-definition \
-            --task-definition "${ECS_TASK_DEFINITION_FAMILY}" \
-            --query taskDefinition \
-            --output json | jq 'del(
-              .taskDefinitionArn,
-              .revision,
-              .status,
-              .requiresAttributes,
-              .compatibilities,
-              .registeredAt,
-              .registeredBy
-            )' > "${ECS_TASK_DEF_FILE}"
-          test -s "${ECS_TASK_DEF_FILE}"
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -f Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-      - name: Fill in the new image ID in the Amazon ECS task definition
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: ${{ env.ECS_TASK_DEF_FILE }}
-          container-name: ${{ env.CONTAINER_NAME }}
-          image: ${{ steps.build-image.outputs.image }}
-
-      - name: Deploy Amazon ECS task definition
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          wait-for-service-stability: true
+          curl -X POST "http://${{ secrets.JENKINS_IP }}:8080/job/puppytalk-backend-pipeline/build?token=puppy-deploy-token" \
+          --user "${{ secrets.JENKINS_USER }}:${{ secrets.JENKINS_API_TOKEN }}"
