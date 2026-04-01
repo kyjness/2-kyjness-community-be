@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from math import ceil
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -13,11 +14,14 @@ from app.comments.schema import (
     CommentsPageData,
     CommentUpsertRequest,
 )
+from app.common.enums import NotificationKind
 from app.common.exceptions import (
     CommentNotFoundException,
     ConcurrentUpdateException,
     PostNotFoundException,
 )
+from app.notifications.model import NotificationsModel
+from app.notifications.service import NotificationService
 
 
 async def _increment_post_comment_count(post_id: str, db: AsyncSession) -> None:
@@ -110,7 +114,9 @@ class CommentService:
         user_id: str,
         data: CommentUpsertRequest,
         db: AsyncSession,
+        redis: Redis | None = None,
     ) -> CommentIdData:
+        notify: tuple[str, str, NotificationKind, str | None, str | None, str | None] | None = None
         async with db.begin():
             await _ensure_post_visible(post_id, db=db, current_user_id=user_id)
             parent_id = getattr(data, "parent_id", None)
@@ -128,6 +134,37 @@ class CommentService:
             except StaleDataError as e:
                 raise ConcurrentUpdateException() from e
             comment_id = comment.id
+            from app.posts.repository import PostsModel
+
+            post_author_id = await PostsModel.get_post_author_id(post_id, db=db)
+            if post_author_id and post_author_id != user_id:
+                nid = await NotificationsModel.insert(
+                    user_id=post_author_id,
+                    kind=NotificationKind.COMMENT_ON_POST,
+                    actor_id=user_id,
+                    post_id=post_id,
+                    comment_id=comment_id,
+                    db=db,
+                )
+                notify = (
+                    post_author_id,
+                    nid,
+                    NotificationKind.COMMENT_ON_POST,
+                    user_id,
+                    post_id,
+                    comment_id,
+                )
+        if notify is not None:
+            rec, nid, kind, act, pid, cid = notify
+            await NotificationService.publish_after_commit(
+                redis,
+                recipient_user_id=rec,
+                notification_id=nid,
+                kind=kind,
+                actor_id=act,
+                post_id=pid,
+                comment_id=cid,
+            )
         return CommentIdData(id=comment_id)
 
     @classmethod

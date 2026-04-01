@@ -54,10 +54,13 @@ class Settings:
 
     # ----- 회원가입 임시 이미지 TTL 정리 (주기 초. 0이면 백그라운드 루프 비활성, 시작 시 1회는 항상 실행) -----
     SIGNUP_IMAGE_CLEANUP_INTERVAL: int = int(os.getenv("SIGNUP_IMAGE_CLEANUP_INTERVAL", "3600"))
+    # 고아 이미지 스윕: 한 번에 조회·삭제하는 최대 건수(배치). 긴 단일 트랜잭션·락 점유 완화.
+    MEDIA_SWEEP_UNUSED_BATCH_SIZE: int = max(1, int(os.getenv("MEDIA_SWEEP_UNUSED_BATCH_SIZE", "200")))
 
     # ----- Redis (비우면 연결 시도 안 함, rate limit 등 Fail-open) -----
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()
-    REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "20"))
+    # SSE 알림 pubsub이 연결을 길게 점유하므로 기본 풀 크기를 넉넉히 둠(.env로 조정 가능).
+    REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "128"))
     # POST /posts 멱등성: 성공 응답 캐시 TTL, in-flight 잠금 TTL(초)
     IDEMPOTENCY_POST_CREATE_TTL_SECONDS: int = max(
         60, int(os.getenv("IDEMPOTENCY_POST_CREATE_TTL_SECONDS", "3600"))

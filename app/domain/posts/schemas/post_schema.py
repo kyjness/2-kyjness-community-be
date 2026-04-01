@@ -112,4 +112,3 @@ class PostResponse(BaseSchema):
                 return v
             return [getattr(x, "name", str(x)) for x in v]
         return v
-

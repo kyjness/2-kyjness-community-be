@@ -20,5 +20,4 @@ async def get_trending_hashtags(
 ):
     redis = getattr(request.app.state, "redis", None)
     result = await HashtagService.get_trending_hashtags(db=db, redis_client=redis, limit=10)
-    return api_response(request, code=ApiCode.TRENDING_HASHTAGS_RETRIEVED, data=result)
-
+    return api_response(request, code=ApiCode.OK, data=result)

@@ -19,4 +19,4 @@ async def set_representative_dog(
     db: AsyncSession = Depends(get_master_db),
 ):
     data = await DogService.set_representative_dog(user.id, body.dog_id, db=db)
-    return api_response(request, code=ApiCode.USER_UPDATED, data=data)
+    return api_response(request, code=ApiCode.DOG_UPDATED, data=data)

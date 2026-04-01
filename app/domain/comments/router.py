@@ -1,7 +1,7 @@
 # 댓글 라우터. Router → Service. 예외는 전역 handler 처리.
 
 from fastapi import APIRouter, Depends, Path, Query, Request
-from fastapi.responses import Response
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -10,6 +10,7 @@ from app.api.dependencies import (
     get_current_user,
     get_current_user_optional,
     get_master_db,
+    get_optional_redis,
     get_slave_db,
     require_comment_author,
     require_comment_author_for_delete,
@@ -28,9 +29,10 @@ async def create_comment(
     post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
+    redis: Redis | None = Depends(get_optional_redis),
 ):
-    data = await CommentService.create_comment(post_id, user.id, comment_data, db=db)
-    return api_response(request, code=ApiCode.COMMENT_UPLOADED, data=data)
+    data = await CommentService.create_comment(post_id, user.id, comment_data, db=db, redis=redis)
+    return api_response(request, code=ApiCode.OK, data=data)
 
 
 @router.get("", status_code=200, response_model=ApiResponse[CommentsPageData])
@@ -51,7 +53,7 @@ async def get_comments(
         sort=sort,
         current_user_id=current_user.id if current_user else None,
     )
-    return api_response(request, code=ApiCode.COMMENTS_RETRIEVED, data=data)
+    return api_response(request, code=ApiCode.OK, data=data)
 
 
 @router.patch("/{comment_id}", status_code=200, response_model=ApiResponse[None])
@@ -64,13 +66,14 @@ async def update_comment(
     await CommentService.update_comment(
         author_ctx.post_id, author_ctx.comment_id, comment_data, db=db
     )
-    return api_response(request, code=ApiCode.COMMENT_UPDATED, data=None)
+    return api_response(request, code=ApiCode.OK, data=None)
 
 
-@router.delete("/{comment_id}", status_code=204)
+@router.delete("/{comment_id}", status_code=200, response_model=ApiResponse[None])
 async def delete_comment(
+    request: Request,
     author_ctx: CommentAuthorContext = Depends(require_comment_author_for_delete),
     db: AsyncSession = Depends(get_master_db),
 ):
     await CommentService.delete_comment(author_ctx.post_id, author_ctx.comment_id, db=db)
-    return Response(status_code=204)
+    return api_response(request, code=ApiCode.OK, data=None)

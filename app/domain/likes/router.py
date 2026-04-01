@@ -1,8 +1,9 @@
 # Likes 라우터. Router → Service. 예외는 전역 handler 처리.
 from fastapi import APIRouter, Depends, Path, Request
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import CurrentUser, get_current_user, get_master_db
+from app.api.dependencies import CurrentUser, get_current_user, get_master_db, get_optional_redis
 from app.common import ApiCode, ApiResponse, api_response
 from app.likes.schema import LikeResponseData
 from app.likes.service import LikeService
@@ -16,9 +17,12 @@ async def like_post(
     post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
+    redis: Redis | None = Depends(get_optional_redis),
 ):
-    is_liked, like_count, inserted = await LikeService.like_post(post_id, user.id, db=db)
-    code = ApiCode.LIKE_SUCCESS if inserted else ApiCode.ALREADY_LIKED
+    is_liked, like_count, inserted = await LikeService.like_post(
+        post_id, user.id, db=db, redis=redis
+    )
+    code = ApiCode.OK if inserted else ApiCode.ALREADY_LIKED
     return api_response(
         request, code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count)
     )
@@ -34,7 +38,7 @@ async def unlike_post(
     is_liked, like_count = await LikeService.unlike_post(post_id, user.id, db=db)
     return api_response(
         request,
-        code=ApiCode.LIKE_DELETED,
+        code=ApiCode.OK,
         data=LikeResponseData(is_liked=is_liked, like_count=like_count),
     )
 
@@ -49,9 +53,12 @@ async def like_comment(
     comment_id: str = Path(..., min_length=26, max_length=26, description="댓글 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
+    redis: Redis | None = Depends(get_optional_redis),
 ):
-    is_liked, like_count, inserted = await LikeService.like_comment(comment_id, user.id, db=db)
-    code = ApiCode.LIKE_SUCCESS if inserted else ApiCode.ALREADY_LIKED
+    is_liked, like_count, inserted = await LikeService.like_comment(
+        comment_id, user.id, db=db, redis=redis
+    )
+    code = ApiCode.OK if inserted else ApiCode.ALREADY_LIKED
     return api_response(
         request, code=code, data=LikeResponseData(is_liked=is_liked, like_count=like_count)
     )
@@ -71,6 +78,6 @@ async def unlike_comment(
     is_liked, like_count = await LikeService.unlike_comment(comment_id, user.id, db=db)
     return api_response(
         request,
-        code=ApiCode.LIKE_DELETED,
+        code=ApiCode.OK,
         data=LikeResponseData(is_liked=is_liked, like_count=like_count),
     )

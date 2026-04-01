@@ -193,36 +193,52 @@ class MediaService:
             return 0
         r = cast(Any, redis) if redis is not None else None
         try:
-            # 1) 조회 트랜잭션: orphan 이미지를 스냅샷으로 확보(네트워크 I/O는 트랜잭션 밖에서 수행).
-            async with db.begin():
-                orphan_images = await MediaModel.get_orphan_images_older_than(
-                    older_than_hours=24, db=db
-                )
+            batch_size = settings.MEDIA_SWEEP_UNUSED_BATCH_SIZE
+            total_deleted = 0
 
-            if not orphan_images:
-                return 0
-
-            # 2) I/O 작업: DB 락/트랜잭션을 오래 물고 있지 않기 위해 storage_delete는 트랜잭션 밖에서 수행.
-            deletable_ids: list[str] = []
-            for img in orphan_images:
-                try:
-                    await asyncio.to_thread(storage_delete, img.file_key)
-                    deletable_ids.append(img.id)
-                except Exception as e:
-                    # 루프는 계속 진행: 단일 이미지 실패가 전체 스윕을 중단하지 않도록.
-                    logger.warning(
-                        "Sweep storage delete failed image_id=%s file_key=%s: %s",
-                        img.id,
-                        img.file_key,
-                        e,
+            while True:
+                # 1) 짧은 조회 트랜잭션: 배치 단위로 orphan 확보(대량 시 긴 락·단일 DELETE 완화).
+                async with db.begin():
+                    orphan_images = await MediaModel.get_orphan_images_older_than(
+                        older_than_hours=24,
+                        db=db,
+                        limit=batch_size,
                     )
 
-            if not deletable_ids:
-                return 0
+                if not orphan_images:
+                    break
 
-            # 3) 삭제 트랜잭션: DB에 레코드 일괄 삭제(네트워크 I/O 없음).
-            async with db.begin():
-                return await MediaModel.delete_images_by_ids(deletable_ids, db=db)
+                # 2) 스토리지 I/O는 DB 트랜잭션 밖에서 수행.
+                deletable_ids: list[str] = []
+                for img in orphan_images:
+                    try:
+                        await asyncio.to_thread(storage_delete, img.file_key)
+                        deletable_ids.append(img.id)
+                    except Exception as e:
+                        logger.warning(
+                            "Sweep storage delete failed image_id=%s file_key=%s: %s",
+                            img.id,
+                            img.file_key,
+                            e,
+                        )
+
+                if not deletable_ids:
+                    logger.warning(
+                        "sweep_unused_images: batch had %s row(s) but no storage delete succeeded; "
+                        "stopping this run to avoid a tight loop",
+                        len(orphan_images),
+                    )
+                    break
+
+                # 3) 짧은 삭제 트랜잭션: 성공한 id만 DB에서 제거.
+                async with db.begin():
+                    n = await MediaModel.delete_images_by_ids(deletable_ids, db=db)
+                    total_deleted += n
+
+                if len(orphan_images) < batch_size:
+                    break
+
+            return total_deleted
         finally:
             if lock_value and r is not None:
                 await _release_job_lock(

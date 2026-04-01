@@ -17,8 +17,9 @@ from app.common.exceptions import (
 from app.core.config import settings
 from app.core.ids import new_ulid_str
 from app.media.model import MediaModel
-from ..repository import PostsModel
 from app.posts.schemas import PostCreateRequest, PostResponse, PostUpdateRequest
+
+from ..repository import PostsModel
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class PostService:
         user_id: str,
         data: PostCreateRequest,
         db: AsyncSession,
-    ) -> int:
+    ) -> str:
         async with db.begin():
             if data.category_id is not None:
                 ok = await PostsModel.category_exists(data.category_id, db=db)
@@ -219,7 +220,9 @@ class PostService:
                 data = PostResponse.model_validate(post)
 
         extra_db = 0
-        if writer_db is not None and await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
+        if writer_db is not None and await _consume_view_if_new_redis(
+            post_id, viewer_key, redis_client
+        ):
             if not await _try_view_increment_in_buffer(post_id, redis_client):
                 async with writer_db.begin():
                     try:
@@ -248,7 +251,9 @@ class PostService:
             )
             if not lock_acquired:
                 return
-            renamed = await redis_client.eval(_RENAME_BUFFER_TO_DRAIN_LUA, 2, VIEW_BUFFER_KEY, drain_key)
+            renamed = await redis_client.eval(
+                _RENAME_BUFFER_TO_DRAIN_LUA, 2, VIEW_BUFFER_KEY, drain_key
+            )
             if not int(renamed):
                 return
             fields = await redis_client.hgetall(drain_key)
@@ -348,4 +353,3 @@ class PostService:
         q: str | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
         return await cls.get_posts(page=page, size=size, db=db, q=q)
-

@@ -22,7 +22,10 @@ async def init_redis(app) -> None:
         client: Redis = Redis(connection_pool=pool)
         app.state.redis = client
         await client.ping()
-        log.info("Redis connection pool initialized.")
+        log.info(
+            "Redis connection pool initialized (max_connections=%s).",
+            settings.REDIS_MAX_CONNECTIONS,
+        )
     except Exception as e:
         log.warning("Redis 연결 실패: %s. Rate limit 미들웨어는 Fail-open.", e)
         app.state.redis = None

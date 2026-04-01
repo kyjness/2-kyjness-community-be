@@ -27,6 +27,7 @@ from .permissions import (
     require_post_author,
 )
 from .query import parse_availability_query
+from .redis_client import get_optional_redis
 from .upload import check_upload_content_length
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "get_current_user_optional",
     "get_master_db",
     "get_slave_db",
+    "get_optional_redis",
     "parse_availability_query",
     "require_comment_author",
     "require_comment_author_for_delete",

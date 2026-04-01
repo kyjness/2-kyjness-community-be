@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.ids import new_ulid_str
 from app.db.base_class import Base
 from app.media.model import Image
-from app.users.model import DogProfile, User
+from app.users.model import User
 
 post_hashtags = Table(
     "post_hashtags",

@@ -1,11 +1,13 @@
 # 관리자 전용: 신고 게시글/댓글 목록·블라인드 해제·유저 정지·게시글 삭제. AsyncSession.
 
 import asyncio
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.admin.schema import ReportedPostAuthorInfo, ReportedPostItem
+from app.auth.service import AuthService
 from app.comments.model import CommentsModel
 from app.common import UserStatus
 from app.common.enums import TargetType
@@ -17,7 +19,6 @@ from app.common.exceptions import (
     UserWithdrawnException,
 )
 from app.posts.repository import PostsModel
-from app.posts.services import PostService
 from app.reports.model import ReportsModel
 from app.users.model import UsersModel
 
@@ -151,7 +152,7 @@ class AdminService:
             raise PostNotFoundException()
 
     @classmethod
-    async def suspend_user(cls, user_id: str, db: AsyncSession) -> None:
+    async def suspend_user(cls, user_id: str, db: AsyncSession, redis: Any | None = None) -> None:
         async with db.begin():
             user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
@@ -161,9 +162,10 @@ class AdminService:
             ):
                 raise UserWithdrawnException()
             await UsersModel.update_user(user_id, db=db, status=UserStatus.SUSPENDED.value)
+        await AuthService.invalidate_user_status_cache(redis, user_id)
 
     @classmethod
-    async def activate_user(cls, user_id: str, db: AsyncSession) -> None:
+    async def activate_user(cls, user_id: str, db: AsyncSession, redis: Any | None = None) -> None:
         async with db.begin():
             user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
@@ -173,6 +175,7 @@ class AdminService:
             ):
                 raise UserWithdrawnException()
             await UsersModel.update_user(user_id, db=db, status=UserStatus.ACTIVE.value)
+        await AuthService.invalidate_user_status_cache(redis, user_id)
 
     @classmethod
     async def blind_post(cls, post_id: str, db: AsyncSession) -> None:

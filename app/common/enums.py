@@ -2,6 +2,14 @@
 from enum import StrEnum
 
 
+class NotificationKind(StrEnum):
+    """인앱 알림 종류. SSE·목록 API에서 동일 문자열 사용."""
+
+    COMMENT_ON_POST = "COMMENT_ON_POST"
+    LIKE_POST = "LIKE_POST"
+    LIKE_COMMENT = "LIKE_COMMENT"
+
+
 class TargetType(StrEnum):
     POST = "POST"
     COMMENT = "COMMENT"

@@ -131,7 +131,11 @@ class MediaModel:
 
     @classmethod
     async def get_orphan_images_older_than(
-        cls, *, older_than_hours: int, db: AsyncSession
+        cls,
+        *,
+        older_than_hours: int,
+        db: AsyncSession,
+        limit: int | None = None,
     ) -> list[Image]:
         cutoff = utc_now() - timedelta(hours=older_than_hours)
         users_t = table("users", column("profile_image_id", String(26)))
@@ -153,6 +157,9 @@ class MediaModel:
                     select(1).select_from(post_images_t).where(post_images_t.c.image_id == Image.id)
                 )
             )
+            .order_by(Image.id.asc())
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
         result = await db.execute(stmt)
         return list(result.scalars().all())

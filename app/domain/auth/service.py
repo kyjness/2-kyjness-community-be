@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import secrets
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -18,7 +17,6 @@ from app.auth.schema import (
 )
 from app.common.enums import UserStatus
 from app.common.exceptions import (
-    ConcurrentUpdateException,
     EmailAlreadyExistsException,
     ForbiddenException,
     InvalidCredentialsException,
@@ -44,37 +42,194 @@ from app.users.model import UsersModel
 logger = logging.getLogger(__name__)
 
 _USER_REFRESH_KEY_PREFIX = "user_refresh:"
-_REFRESH_LOCK_KEY_PREFIX = "lock:refresh:"
-_REFRESH_LOCK_TTL_SECONDS = 5
+
+# RTR: 저장된 refresh 다이제스트와 제시된 다이제스트를 비교한 뒤, 일치 시에만 새 다이제스트+TTL을 SET.
+# 단일 키만 사용 → Redis Cluster에서도 동일 해시 슬롯으로 스크립트 실행 가능.
+# 반환: 1=성공, 0=키 없음·다이제스트 불일치·ttl<=0.
+_REFRESH_ROTATE_CAS_LUA = """
+local cur = redis.call('GET', KEYS[1])
+if not cur then
+  return 0
+end
+if cur ~= ARGV[1] then
+  return 0
+end
+local ttl = tonumber(ARGV[3])
+if (not ttl) or ttl <= 0 then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ttl)
+return 1
+"""
 
 
 def _user_refresh_key(user_id: str) -> str:
     return f"{_USER_REFRESH_KEY_PREFIX}{user_id}"
 
 
-def _refresh_lock_key(user_id: str) -> str:
-    return f"{_REFRESH_LOCK_KEY_PREFIX}{user_id}"
+_USER_STATUS_CACHE_PREFIX = "user:status:"
+# 짧은 TTL: 정지/탈퇴 반영 지연과 스테일 허용 폭의 트레이드오프(분산 무효화와 함께 사용).
+_USER_STATUS_CACHE_TTL_SECONDS = 240
 
 
-async def _release_refresh_lock(
-    redis: Any,
+def _user_status_cache_key(user_id: str) -> str:
+    return f"{_USER_STATUS_CACHE_PREFIX}{user_id}"
+
+
+def _redis_bulk_to_str(value: Any) -> str | None:
+    """Redis GET 결과(bytes/str)를 비교용 문자열로 통일한다."""
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8")
+    return str(value)
+
+
+async def _refresh_rotation_sequential(
+    redis_client: Any,
     *,
-    lock_key: str,
-    lock_value: str,
-) -> None:
-    """락 소유자만 해제(compare-and-delete)."""
+    user_key: str,
+    incoming_digest: str,
+    new_digest: str,
+    ttl_seconds: int,
+) -> bool:
+    """
+    Lua eval 실패 시 fail-open용 비원자적 경로(GET → 비교 → SET).
+
+    네트워크/일시 오류 시에만 사용하며, 정상 시에는 `_try_refresh_rotation_redis`의 Lua CAS를 쓴다.
+    """
     try:
-        # KEYS[1] == key, ARGV[1] == owner token
-        await redis.eval(
-            "if redis.call('GET', KEYS[1]) == ARGV[1] then "
-            "return redis.call('DEL', KEYS[1]) else return 0 end",
+        raw = await redis_client.get(user_key)
+        if _redis_bulk_to_str(raw) != incoming_digest:
+            return False
+        await redis_client.set(user_key, new_digest, ex=ttl_seconds)
+        return True
+    except Exception as e:
+        logger.warning("refresh sequential fallback failed user_key=%s err=%s", user_key, e)
+        return False
+
+
+async def _try_refresh_rotation_redis(
+    redis_client: Any,
+    *,
+    user_id: str,
+    user_key: str,
+    incoming_digest: str,
+    new_digest: str,
+    ttl_seconds: int,
+) -> bool:
+    """
+    Redis에 기록된 refresh 다이제스트를 RTR 규칙으로 교체한다.
+
+    - ``ttl_seconds > 0``: ``GET`` 비교와 ``SET``을 Lua 한 번에 수행해 경쟁 회전에도 정합성 유지.
+    - ``ttl_seconds <= 0``: 저장 갱신 없이(로그인과 동일한 생략 의미) 현재 다이제스트 일치만 검사.
+    - eval 예외: 기존 정책에 맞춰 순차 경로로 fail-open(가용성 우선, 완전 원자성은 약화).
+    """
+    if ttl_seconds <= 0:
+        try:
+            raw = await redis_client.get(user_key)
+        except Exception as e:
+            logger.warning("refresh get digest failed user_id=%s err=%s", user_id, e)
+            return False
+        return _redis_bulk_to_str(raw) == incoming_digest
+
+    try:
+        rc = await redis_client.eval(
+            _REFRESH_ROTATE_CAS_LUA,
             1,
-            lock_key,
-            lock_value,
+            user_key,
+            incoming_digest,
+            new_digest,
+            str(ttl_seconds),
         )
     except Exception as e:
-        # 락 TTL이 짧아 자동 만료되므로, 해제 실패는 경고만 남기고 흐름을 막지 않는다.
-        logger.warning("refresh lock release failed key=%s err=%s", lock_key, e)
+        logger.warning(
+            "refresh CAS eval failed; sequential fallback user_id=%s err=%s",
+            user_id,
+            e,
+        )
+        return await _refresh_rotation_sequential(
+            redis_client,
+            user_key=user_key,
+            incoming_digest=incoming_digest,
+            new_digest=new_digest,
+            ttl_seconds=ttl_seconds,
+        )
+
+    try:
+        return int(rc) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+async def invalidate_user_status_cache(redis_client: Redis | None, user_id: str) -> None:
+    """
+    ``users.status`` 변경(정지·해제·탈퇴 등) 후 refresh용 캐시를 제거한다.
+
+    Redis 장애 시 로그만 남기고 무시해 본편 트랜잭션을 막지 않는다.
+    """
+    if redis_client is None:
+        return
+    r = cast(Any, redis_client)
+    try:
+        await r.delete(_user_status_cache_key(user_id))
+    except Exception as e:
+        logger.warning("user status cache DEL failed user_id=%s err=%s", user_id, e)
+
+
+async def _set_user_status_cache_best_effort(
+    redis_client: Any,
+    user_id: str,
+    status_value: str,
+) -> None:
+    """로그인 등 확실히 ACTIVE인 시점에 캐시를 채워 첫 refresh DB 조회를 줄인다."""
+    try:
+        await redis_client.set(
+            _user_status_cache_key(user_id),
+            status_value,
+            ex=_USER_STATUS_CACHE_TTL_SECONDS,
+        )
+    except Exception as e:
+        logger.warning("user status cache SET failed user_id=%s err=%s", user_id, e)
+
+
+async def _ensure_user_may_refresh(
+    redis_client: Any,
+    user_id: str,
+    db: AsyncSession,
+) -> None:
+    """
+    Refresh 허용 여부: Cache-Aside. Redis 히트 시 DB 생략, 미스·오류 시 DB로 폴백 후 캐시 갱신.
+
+    캐시 값은 ``UserStatus`` 문자열(ACTIVE|SUSPENDED|WITHDRAWN). ACTIVE만 통과, 그 외·무효는 401.
+    """
+    key = _user_status_cache_key(user_id)
+    cached_raw: Any | None
+    try:
+        cached_raw = await redis_client.get(key)
+    except Exception as e:
+        logger.warning("user status cache GET fail-open user_id=%s err=%s", user_id, e)
+        cached_raw = None
+
+    if cached_raw is not None:
+        cached = _redis_bulk_to_str(cached_raw)
+        if cached == UserStatus.ACTIVE.value:
+            return
+        raise UnauthorizedException(message=UserStatus.inactive_message_ko(cached))
+
+    async with db.begin():
+        user = await UsersModel.get_user_by_id(user_id, db=db)
+        if not user:
+            raise UnauthorizedException()
+        status_val = str(user.status)
+
+    try:
+        await redis_client.set(key, status_val, ex=_USER_STATUS_CACHE_TTL_SECONDS)
+    except Exception as e:
+        logger.warning("user status cache SET after DB fail-open user_id=%s err=%s", user_id, e)
+
+    if not UserStatus.is_active_value(status_val):
+        raise UnauthorizedException(message=UserStatus.inactive_message_ko(status_val))
 
 
 def _remaining_ttl_seconds_from_access_payload(payload: dict) -> int:
@@ -167,6 +322,7 @@ class AuthService:
                 refresh_token_digest(refresh_token),
                 ex=refresh_ttl_seconds,
             )
+            await _set_user_status_cache_best_effort(r, payload.id, UserStatus.ACTIVE.value)
         return (payload, refresh_token)
 
     @classmethod
@@ -201,6 +357,11 @@ class AuthService:
             await cast(Any, redis).delete(_user_refresh_key(user_id))
 
     @classmethod
+    async def invalidate_user_status_cache(cls, redis: Redis | None, user_id: str) -> None:
+        """도메인·라우터에서 status 변경 직후 호출. 모듈 함수 ``invalidate_user_status_cache`` 위임."""
+        await invalidate_user_status_cache(redis, user_id)
+
+    @classmethod
     async def refresh_tokens(
         cls,
         refresh_token: str | None,
@@ -208,6 +369,13 @@ class AuthService:
         db: AsyncSession,
         refresh_ttl_seconds: int,
     ) -> tuple[AccessTokenData, str]:
+        """
+        Refresh 쿠키 기반 RTR. Redis에 저장된 다이제스트와 제시된 토큰 다이제스트가 일치할 때만 회전.
+
+        유저 활성 여부는 ``user:status:{user_id}`` 캐시(Cache-Aside, 짧은 TTL)로 우선 판단해 DB 조회를 줄인다.
+        동시 요청은 Lua CAS로 한 승자만 성공하고, 나머지는 다이제스트 불일치(0)로 처리되어
+        ``UnauthorizedException``(401)로 재로그인을 유도한다.
+        """
         if not refresh_token:
             raise UnauthorizedException()
         payload = verify_refresh_token(refresh_token)
@@ -215,54 +383,31 @@ class AuthService:
         if not isinstance(sub, str) or not sub:
             raise UnauthorizedException()
         user_id = sub
-        # RTR: Redis에 저장된 refresh_token과 정확히 일치해야 함. 검증 후 새 refresh로 교체.
         if redis is None:
             raise UnauthorizedException(
                 message="인증을 갱신할 수 없습니다. 잠시 후 다시 시도하세요."
             )
         r = cast(Any, redis)
-        lock_key = _refresh_lock_key(user_id)
-        lock_value = secrets.token_urlsafe(24)
-        lock_acquired = False
-        try:
-            try:
-                lock_acquired = bool(
-                    await r.set(lock_key, lock_value, nx=True, ex=_REFRESH_LOCK_TTL_SECONDS)
-                )
-            except Exception as e:
-                # Redis 일시 장애 시 전체 인증 갱신 마비를 피하기 위해 fail-open.
-                logger.warning(
-                    "refresh lock unavailable, fallback without lock user_id=%s err=%s", user_id, e
-                )
-                lock_acquired = True
+        incoming_digest = refresh_token_digest(refresh_token)
+        user_key = _user_refresh_key(user_id)
 
-            if not lock_acquired:
-                raise ConcurrentUpdateException(
-                    "동일 계정의 토큰 갱신 요청이 동시에 처리 중입니다. 잠시 후 다시 시도해주세요."
-                )
+        await _ensure_user_may_refresh(r, user_id, db)
 
-            stored_digest = await r.get(_user_refresh_key(user_id))
-            if stored_digest is None or stored_digest != refresh_token_digest(refresh_token):
-                raise UnauthorizedException()
-            async with db.begin():
-                user = await UsersModel.get_user_by_id(user_id, db=db)
-                if not user:
-                    raise UnauthorizedException()
-                if not UserStatus.is_active_value(user.status):
-                    raise UnauthorizedException()
-            new_access = create_access_token(sub=user_id)
-            new_refresh = create_refresh_token(sub=user_id)
-            if refresh_ttl_seconds > 0:
-                await r.set(
-                    _user_refresh_key(user_id),
-                    refresh_token_digest(new_refresh),
-                    ex=refresh_ttl_seconds,
-                )
-            return AccessTokenData(access_token=new_access), new_refresh
-        finally:
-            if lock_acquired:
-                await _release_refresh_lock(
-                    r,
-                    lock_key=lock_key,
-                    lock_value=lock_value,
-                )
+        new_refresh = create_refresh_token(sub=user_id)
+        new_digest = refresh_token_digest(new_refresh)
+
+        rotated = await _try_refresh_rotation_redis(
+            r,
+            user_id=user_id,
+            user_key=user_key,
+            incoming_digest=incoming_digest,
+            new_digest=new_digest,
+            ttl_seconds=refresh_ttl_seconds,
+        )
+        if not rotated:
+            raise UnauthorizedException(
+                message="인증을 갱신할 수 없습니다. 다시 로그인해 주세요.",
+            )
+
+        new_access = create_access_token(sub=user_id)
+        return AccessTokenData(access_token=new_access), new_refresh

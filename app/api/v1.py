@@ -7,6 +7,7 @@ from app.comments.router import router as comments_router
 from app.dogs.router import router as dogs_router
 from app.likes.router import router as likes_router
 from app.media.router import router as media_router
+from app.notifications.router import router as notifications_router
 from app.posts.router import router as posts_router
 from app.reports.router import router as reports_router
 from app.users.router import router as users_router
@@ -14,6 +15,7 @@ from app.users.router import router as users_router
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(auth_router)
 v1_router.include_router(users_router)
+v1_router.include_router(notifications_router)
 v1_router.include_router(dogs_router)
 v1_router.include_router(media_router)
 v1_router.include_router(posts_router)

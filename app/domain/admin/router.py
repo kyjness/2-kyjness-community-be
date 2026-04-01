@@ -1,4 +1,4 @@
-# 관리자 전용 API. 모든 엔드포인트 Depends(get_current_admin).
+# 관리자 전용 API. 관리자 검증은 APIRouter.dependencies 로 일괄 적용.
 import logging
 from typing import Any
 
@@ -15,12 +15,16 @@ from app.admin.schema import (
     UnblindedResponse,
 )
 from app.admin.service import AdminService
-from app.api.dependencies import CurrentUser, get_current_admin, get_master_db
+from app.api.dependencies import get_current_admin, get_master_db
 from app.common import ApiCode, ApiResponse, PaginatedResponse, api_response
 from app.db import AsyncSessionLocal
 from app.media.service import MediaService
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(get_current_admin)],
+)
 log = logging.getLogger(__name__)
 
 
@@ -32,7 +36,6 @@ log = logging.getLogger(__name__)
 async def sweep_unused_media(
     request: Request,
     background_tasks: BackgroundTasks,
-    _admin: CurrentUser = Depends(get_current_admin),
 ):
     async def _sweep_task(session_maker: Any) -> None:
         # BackgroundTasks는 응답 후 실행되므로, request-scoped db 세션이 아니라 독립 커넥션을 열어야 합니다.
@@ -65,7 +68,6 @@ async def get_reported_posts(
     request: Request,
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     items, total = await AdminService.get_reported_posts(page=page, size=size, db=db)
@@ -85,7 +87,6 @@ async def get_reported_posts(
 async def unblind_post(
     request: Request,
     post_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.unblind_post(post_id, db=db)
@@ -100,7 +101,6 @@ async def unblind_post(
 async def reset_post_reports(
     request: Request,
     post_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.reset_post_reports(post_id, db=db)
@@ -115,10 +115,10 @@ async def reset_post_reports(
 async def suspend_user(
     request: Request,
     user_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
-    await AdminService.suspend_user(user_id, db=db)
+    redis = getattr(request.app.state, "redis", None)
+    await AdminService.suspend_user(user_id, db=db, redis=redis)
     return api_response(request, code=ApiCode.OK, data=SuspendedResponse())
 
 
@@ -130,10 +130,10 @@ async def suspend_user(
 async def activate_user(
     request: Request,
     user_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
-    await AdminService.activate_user(user_id, db=db)
+    redis = getattr(request.app.state, "redis", None)
+    await AdminService.activate_user(user_id, db=db, redis=redis)
     return api_response(request, code=ApiCode.OK, data=ActivatedResponse())
 
 
@@ -145,7 +145,6 @@ async def activate_user(
 async def blind_post(
     request: Request,
     post_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.blind_post(post_id, db=db)
@@ -160,11 +159,10 @@ async def blind_post(
 async def delete_post_admin(
     request: Request,
     post_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.delete_post(post_id, db=db)
-    return api_response(request, code=ApiCode.POST_DELETED, data=None)
+    return api_response(request, code=ApiCode.OK, data=None)
 
 
 @router.patch(
@@ -175,7 +173,6 @@ async def delete_post_admin(
 async def unblind_comment(
     request: Request,
     comment_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.unblind_comment(comment_id, db=db)
@@ -190,7 +187,6 @@ async def unblind_comment(
 async def blind_comment(
     request: Request,
     comment_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.blind_comment(comment_id, db=db)
@@ -205,7 +201,6 @@ async def blind_comment(
 async def reset_comment_reports(
     request: Request,
     comment_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.reset_comment_reports(comment_id, db=db)
@@ -221,7 +216,6 @@ async def delete_comment_admin(
     request: Request,
     post_id: str = Path(..., min_length=26, max_length=26),
     comment_id: str = Path(..., min_length=26, max_length=26),
-    admin: CurrentUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.delete_comment(post_id, comment_id, db=db)

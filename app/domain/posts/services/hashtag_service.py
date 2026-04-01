@@ -36,9 +36,7 @@ class HashtagService:
         def _decode_cached(v: Any) -> list[TrendingHashtagResponse] | None:
             if not v:
                 return None
-            raw: str | bytes = (
-                v.decode("utf-8") if isinstance(v, (bytes, bytearray)) else str(v)
-            )
+            raw: str | bytes = v.decode("utf-8") if isinstance(v, (bytes, bytearray)) else str(v)
             try:
                 return _TRENDING_LIST_ADAPTER.validate_json(raw)
             except ValidationError as e:
@@ -114,4 +112,3 @@ class HashtagService:
                 )
             except Exception:
                 pass
-

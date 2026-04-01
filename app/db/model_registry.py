@@ -5,6 +5,7 @@ from app.comments.model import Comment, CommentLike  # noqa: F401
 from app.dogs.model import DogProfile  # noqa: F401
 from app.likes.model import PostLike  # noqa: F401
 from app.media.model import Image  # noqa: F401
+from app.notifications.model import Notification  # noqa: F401
 from app.posts.model import Category, Hashtag, Post, PostImage  # noqa: F401
 from app.reports.model import Report  # noqa: F401
 from app.users.model import User, UserBlock  # noqa: F401

@@ -2,7 +2,6 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Header, Path, Query, Request, UploadFile
-from fastapi.responses import Response
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,7 +48,7 @@ async def upload_image_signup(
         return hit
     try:
         data = await MediaService.upload_image_for_signup(image, db=db, redis=redis)
-        out = api_response(request, code=ApiCode.IMAGE_UPLOADED, data=data)
+        out = api_response(request, code=ApiCode.OK, data=data)
         await media_signup_upload_idempotency_after_success(request, x_idempotency_key, out)
         return out
     except Exception:
@@ -80,7 +79,7 @@ async def upload_image(
         return hit
     try:
         data = await MediaService.upload_image(image, user.id, purpose, db=db)
-        out = api_response(request, code=ApiCode.IMAGE_UPLOADED, data=data)
+        out = api_response(request, code=ApiCode.OK, data=data)
         await media_upload_idempotency_after_success(
             request, user.id, purpose, x_idempotency_key, out
         )
@@ -90,11 +89,12 @@ async def upload_image(
         raise
 
 
-@router.delete("/images/{image_id}", status_code=204)
+@router.delete("/images/{image_id}", status_code=200, response_model=ApiResponse[None])
 async def delete_image(
+    request: Request,
     image_id: str = Path(..., min_length=26, max_length=26, description="이미지 ULID"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
     await MediaService.delete_image(image_id, user.id, db=db)
-    return Response(status_code=204)
+    return api_response(request, code=ApiCode.OK, data=None)
