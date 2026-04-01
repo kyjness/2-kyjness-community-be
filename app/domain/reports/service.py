@@ -5,7 +5,7 @@ from app.comments.model import CommentsModel
 from app.common.enums import TargetType
 from app.common.exceptions import CommentNotFoundException, PostNotFoundException
 from app.core.config import settings
-from app.posts.model import PostsModel
+from app.posts.repository import PostsModel
 from app.reports.model import ReportsModel
 from app.reports.schema import ReportCreateRequest, ReportSubmitData
 

@@ -15,7 +15,7 @@ from app.common.exceptions import (
 )
 from app.db import get_connection
 from app.likes.model import PostLikesModel
-from app.posts.model import PostsModel
+from app.posts.repository import PostsModel
 
 
 def _is_unique_violation(exc: IntegrityError) -> bool:

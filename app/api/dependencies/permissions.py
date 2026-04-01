@@ -11,7 +11,7 @@ from app.common.exceptions import (
     InvalidPostIdFormatException,
     PostNotFoundException,
 )
-from app.posts.model import PostsModel
+from app.posts.repository import PostsModel
 
 from .auth import CurrentUser, get_current_user
 from .db import get_slave_db

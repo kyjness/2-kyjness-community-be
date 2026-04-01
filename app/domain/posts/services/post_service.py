@@ -1,6 +1,3 @@
-# 게시글 비즈니스 로직. Full-Async.
-# 조회수 중복 방지: Redis SET NX EX (멀티 워커). Redis 장애 시 Fail-open(매 요청 카운트).
-# 조회수 증가 Write-behind: Redis Hash HINCRBY → 주기 flush 시 DB에 합산 반영(RENAME 원자성).
 from __future__ import annotations
 
 import logging
@@ -20,12 +17,11 @@ from app.common.exceptions import (
 from app.core.config import settings
 from app.core.ids import new_ulid_str
 from app.media.model import MediaModel
-from app.posts.model import PostsModel
-from app.posts.schema import PostCreateRequest, PostResponse, PostUpdateRequest
+from ..repository import PostsModel
+from app.posts.schemas import PostCreateRequest, PostResponse, PostUpdateRequest
 
 log = logging.getLogger(__name__)
 
-# Redis Cluster 호환: 동일 해시태그로 buffer·drain·lock 동일 슬롯.
 VIEW_BUFFER_KEY = "views:{v}:buffer"
 VIEW_FLUSH_LOCK_KEY = "views:{v}:flush:lock"
 _RENAME_BUFFER_TO_DRAIN_LUA = """
@@ -36,11 +32,6 @@ redis.call('RENAME', KEYS[1], KEYS[2])
 return 1
 """
 
-# viewer·post당 TTL 초 동안 1회만 조회수 증가(SET NX EX).
-# 개발/로컬에서 새로고침·중복 호출로 조회수가 튀는 문제가 잦아 기본값은 1시간으로 둔다.
-#
-# NOTE: 과거 설정에서 VIEW_CACHE_TTL_SECONDS=0(비활성)로 남아 있는 경우가 있어,
-#       0 이하 값은 안전하게 기본값(3600)으로 보정한다.
 _raw_view_ttl = os.getenv("VIEW_CACHE_TTL_SECONDS")
 try:
     _parsed_view_ttl = int(_raw_view_ttl) if _raw_view_ttl is not None else 3600
@@ -52,14 +43,6 @@ _HASHTAG_ALLOWED_RE = re.compile(r"[^0-9a-z가-힣_]")
 
 
 def _normalize_hashtags(raw: list[str]) -> list[str]:
-    """해시태그 정규화.
-
-    - 앞/뒤 공백 제거
-    - 선행 '#' 제거
-    - 소문자 변환
-    - 공백/특수문자 제거(허용: 한글/영문/숫자/언더스코어)
-    - 중복 제거(입력 순서 유지)
-    """
     seen: set[str] = set()
     out: list[str] = []
     for v in raw:
@@ -114,7 +97,6 @@ async def _get_buffer_pending(redis_client: Any | None, post_id: str) -> int:
 
 
 async def _try_view_increment_in_buffer(post_id: str, redis_client: Any | None) -> bool:
-    """True면 Redis 버퍼에만 반영. False면 호출부에서 DB increment 필요."""
     try:
         if redis_client is None:
             raise ConnectionError("redis unavailable")
@@ -161,7 +143,6 @@ class PostService:
         size: int,
         db: AsyncSession,
         q: str | None = None,
-        sort: str | None = None,
         category_id: int | None = None,
         current_user_id: str | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
@@ -176,7 +157,6 @@ class PostService:
                 size,
                 db=db,
                 search_q=search_q,
-                sort=sort,
                 category_id=category_id,
                 current_user_id=current_user_id,
             )
@@ -186,7 +166,6 @@ class PostService:
                 category_id=category_id,
                 current_user_id=current_user_id,
             )
-            # 유저가 하드 삭제되면 posts.user_id가 NULL이 될 수 있으므로, 게시글은 보존하고 author만 None 처리.
             result = [PostResponse.model_validate(p) for p in posts]
         return result, has_more, total
 
@@ -240,9 +219,7 @@ class PostService:
                 data = PostResponse.model_validate(post)
 
         extra_db = 0
-        if writer_db is not None and await _consume_view_if_new_redis(
-            post_id, viewer_key, redis_client
-        ):
+        if writer_db is not None and await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
             if not await _try_view_increment_in_buffer(post_id, redis_client):
                 async with writer_db.begin():
                     try:
@@ -256,7 +233,6 @@ class PostService:
 
     @classmethod
     async def flush_view_counts_to_db(cls, redis_client: Any | None) -> None:
-        """Redis 조회수 버퍼를 DB에 반영. RENAME으로 스냅샷 분리 후 합산 UPDATE. 분산 락 SET NX EX."""
         if redis_client is None:
             return
         lock_acquired = False
@@ -272,9 +248,7 @@ class PostService:
             )
             if not lock_acquired:
                 return
-            renamed = await redis_client.eval(
-                _RENAME_BUFFER_TO_DRAIN_LUA, 2, VIEW_BUFFER_KEY, drain_key
-            )
+            renamed = await redis_client.eval(_RENAME_BUFFER_TO_DRAIN_LUA, 2, VIEW_BUFFER_KEY, drain_key)
             if not int(renamed):
                 return
             fields = await redis_client.hgetall(drain_key)
@@ -303,7 +277,6 @@ class PostService:
 
     @staticmethod
     async def _merge_drain_into_buffer(redis_client: Any, drain_key: str, buffer_key: str) -> None:
-        """DB flush 실패 시 drain 해시를 버퍼로 되돌려 유실 방지."""
         fields = await redis_client.hgetall(drain_key)
         if not fields:
             await redis_client.delete(drain_key)
@@ -373,6 +346,6 @@ class PostService:
         size: int,
         db: AsyncSession,
         q: str | None = None,
-        sort: str | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
-        return await cls.get_posts(page=page, size=size, db=db, q=q, sort=sort)
+        return await cls.get_posts(page=page, size=size, db=db, q=q)
+

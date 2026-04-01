@@ -36,7 +36,7 @@ async def _view_buffer_flush_loop(stop_event: asyncio.Event, redis_client: Any) 
     """조회수 Redis 버퍼를 주기적으로 DB에 반영."""
     flush_log = logging.getLogger("app.view_buffer_flush")
     interval = settings.VIEW_BUFFER_FLUSH_INTERVAL_SECONDS
-    from app.posts.service import PostService
+    from app.posts.services import PostService
 
     while True:
         try:

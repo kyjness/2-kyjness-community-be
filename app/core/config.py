@@ -49,6 +49,8 @@ class Settings:
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     REFRESH_TOKEN_COOKIE_NAME: str = os.getenv("REFRESH_TOKEN_COOKIE_NAME", "refresh_token")
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+    # bcrypt 입력에만 덧붙임(평문+pepper). 기존 DB 해시는 pepper 없이 검증하는 폴백 유지.
+    PASSWORD_PEPPER: str = os.getenv("PASSWORD_PEPPER", "")
 
     # ----- 회원가입 임시 이미지 TTL 정리 (주기 초. 0이면 백그라운드 루프 비활성, 시작 시 1회는 항상 실행) -----
     SIGNUP_IMAGE_CLEANUP_INTERVAL: int = int(os.getenv("SIGNUP_IMAGE_CLEANUP_INTERVAL", "3600"))

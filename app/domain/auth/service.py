@@ -2,7 +2,6 @@
 # Redis 기반 Refresh Token 저장 + Access Token 블랙리스트(로그아웃). Full-Async.
 from __future__ import annotations
 
-import hashlib
 import logging
 import secrets
 from datetime import UTC, datetime
@@ -29,10 +28,13 @@ from app.common.exceptions import (
     UnauthorizedException,
 )
 from app.core.security import (
+    access_jti_blacklist_redis_key,
     create_access_token,
     create_refresh_token,
     hash_password,
-    verify_password,
+    password_with_pepper,
+    refresh_token_digest,
+    verify_password_with_legacy_fallback,
     verify_refresh_token,
 )
 from app.media.model import MediaModel
@@ -42,26 +44,12 @@ from app.users.model import UsersModel
 logger = logging.getLogger(__name__)
 
 _USER_REFRESH_KEY_PREFIX = "user_refresh:"
-_BLACKLIST_KEY_PREFIX = "blacklist:"
 _REFRESH_LOCK_KEY_PREFIX = "lock:refresh:"
 _REFRESH_LOCK_TTL_SECONDS = 5
 
 
-def _sha256_hex(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
-
-
 def _user_refresh_key(user_id: str) -> str:
     return f"{_USER_REFRESH_KEY_PREFIX}{user_id}"
-
-
-def _blacklist_key(access_token: str) -> str:
-    # 토큰 원문을 키로 쓰지 않음(메모리/로그/관측 표면 최소화)
-    return f"{_BLACKLIST_KEY_PREFIX}{_sha256_hex(access_token)}"
-
-
-def _refresh_token_digest(refresh_token: str) -> str:
-    return _sha256_hex(refresh_token)
 
 
 def _refresh_lock_key(user_id: str) -> str:
@@ -110,7 +98,7 @@ class AuthService:
         if data.profile_image_id is not None and not has_token:
             # validator: profile_image_id만 단독 전달은 허용하지 않음.
             raise MissingRequiredFieldException()
-        hashed = hash_password(data.password)
+        hashed = await hash_password(password_with_pepper(data.password))
         async with db.begin():
             if await UsersModel.email_exists(data.email, db=db):
                 raise EmailAlreadyExistsException()
@@ -158,7 +146,7 @@ class AuthService:
                 raise InvalidCredentialsException()
             if not UserStatus.is_active_value(user.status):
                 raise ForbiddenException()
-            if not verify_password(data.password, user.password):
+            if not await verify_password_with_legacy_fallback(data.password, user.password):
                 raise InvalidCredentialsException()
             access_token = create_access_token(sub=user.id)
             refresh_token = create_refresh_token(sub=user.id)
@@ -176,7 +164,7 @@ class AuthService:
             r = cast(Any, redis)
             await r.set(
                 _user_refresh_key(payload.id),
-                _refresh_token_digest(refresh_token),
+                refresh_token_digest(refresh_token),
                 ex=refresh_ttl_seconds,
             )
         return (payload, refresh_token)
@@ -187,7 +175,6 @@ class AuthService:
         *,
         user_id: str,
         refresh_token: str | None,
-        access_token: str,
         access_payload: dict,
         redis: Redis | None = None,
     ) -> None:
@@ -197,10 +184,13 @@ class AuthService:
                 message="로그아웃을 처리할 수 없습니다. 잠시 후 다시 시도하세요."
             )
 
-        # 1) access token 블랙리스트 등록(남은 TTL만큼).
+        # 1) access jti 블랙리스트 등록(남은 TTL만큼).
         ttl = _remaining_ttl_seconds_from_access_payload(access_payload)
-        if ttl > 0:
-            await cast(Any, redis).set(_blacklist_key(access_token), "logout", ex=ttl)
+        jti = access_payload.get("jti")
+        if ttl > 0 and isinstance(jti, str) and jti.strip():
+            await cast(Any, redis).set(
+                access_jti_blacklist_redis_key(jti.strip()), "logout", ex=ttl
+            )
 
         # 2) refresh token 폐기(회전 전제이므로 user_id 키 삭제).
         await cast(Any, redis).delete(_user_refresh_key(user_id))
@@ -252,7 +242,7 @@ class AuthService:
                 )
 
             stored_digest = await r.get(_user_refresh_key(user_id))
-            if stored_digest is None or stored_digest != _refresh_token_digest(refresh_token):
+            if stored_digest is None or stored_digest != refresh_token_digest(refresh_token):
                 raise UnauthorizedException()
             async with db.begin():
                 user = await UsersModel.get_user_by_id(user_id, db=db)
@@ -265,7 +255,7 @@ class AuthService:
             if refresh_ttl_seconds > 0:
                 await r.set(
                     _user_refresh_key(user_id),
-                    _refresh_token_digest(new_refresh),
+                    refresh_token_digest(new_refresh),
                     ex=refresh_ttl_seconds,
                 )
             return AccessTokenData(access_token=new_access), new_refresh

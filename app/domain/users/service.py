@@ -9,7 +9,11 @@ from app.common.exceptions import (
     NicknameAlreadyExistsException,
     UnauthorizedException,
 )
-from app.core.security import hash_password, verify_password
+from app.core.security import (
+    hash_password,
+    password_with_pepper,
+    verify_password_with_legacy_fallback,
+)
 from app.dogs.service import DogService
 from app.media.model import MediaModel
 from app.users.model import UsersModel
@@ -108,13 +112,15 @@ class UserService:
     ) -> None:
         async with db.begin():
             hashed = await UsersModel.get_password_hash(user_id, db=db)
-            if not hashed or not verify_password(data.current_password, hashed):
+            if not hashed or not await verify_password_with_legacy_fallback(
+                data.current_password, hashed
+            ):
                 raise UnauthorizedException()
-            if verify_password(data.new_password, hashed):
+            if await verify_password_with_legacy_fallback(data.new_password, hashed):
                 raise InvalidUserInfoException(
                     "기존 비밀번호와 동일한 비밀번호는 사용할 수 없습니다."
                 )
-            new_hashed = hash_password(data.new_password)
+            new_hashed = await hash_password(password_with_pepper(data.new_password))
             if not await UsersModel.update_password(user_id, new_hashed, db=db):
                 raise InternalServerErrorException()
 

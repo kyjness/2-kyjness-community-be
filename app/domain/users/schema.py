@@ -21,11 +21,7 @@ _NICKNAME_PATTERN = re.compile(r"^[가-힣a-zA-Z0-9]{1,10}$")
 # --- 2. 내부 헬퍼 (스키마 전용) ---
 
 
-def _validate_password_format(password: str) -> bool:
-    if not password or not isinstance(password, str):
-        return False
-    if len(password) < 8 or len(password) > 20:
-        return False
+def _password_complexity_ok(password: str) -> bool:
     return (
         bool(re.search(r"[a-z]", password))
         and bool(re.search(r"[0-9]", password))
@@ -33,12 +29,34 @@ def _validate_password_format(password: str) -> bool:
     )
 
 
+def _validate_password_format_auth(password: str) -> bool:
+    if not password or not isinstance(password, str):
+        return False
+    if len(password) < 8 or len(password) > 20:
+        return False
+    return _password_complexity_ok(password)
+
+
+def _validate_password_format_update(password: str) -> bool:
+    if not password or not isinstance(password, str):
+        return False
+    if len(password) < 8 or len(password) > 128:
+        return False
+    return _password_complexity_ok(password)
+
+
 def _validate_nickname_format(nickname: str) -> bool:
     return bool(nickname and isinstance(nickname, str) and _NICKNAME_PATTERN.match(nickname))
 
 
-def _ensure_password_format(v: str) -> str:
-    if not _validate_password_format(v):
+def _ensure_password_format_auth(v: str) -> str:
+    if not _validate_password_format_auth(v):
+        raise ValueError(ApiCode.INVALID_PASSWORD_FORMAT.name)
+    return v
+
+
+def _ensure_password_format_update(v: str) -> str:
+    if not _validate_password_format_update(v):
         raise ValueError(ApiCode.INVALID_PASSWORD_FORMAT.name)
     return v
 
@@ -61,7 +79,8 @@ def _optional_nickname(v: str | None) -> str | None:
 
 
 # --- 3. Annotated 재사용 타입 ---
-PasswordStr = Annotated[str, AfterValidator(_ensure_password_format)]
+PasswordStr = Annotated[str, AfterValidator(_ensure_password_format_auth)]
+PasswordUpdateStr = Annotated[str, AfterValidator(_ensure_password_format_update)]
 NicknameStr = Annotated[str, AfterValidator(_ensure_nickname_format)]
 OptionalNicknameStr = Annotated[str | None, AfterValidator(_optional_nickname)]
 
@@ -133,7 +152,7 @@ class UpdatePasswordRequest(BaseSchema):
         max_length=128,
         description="현재 비밀번호 (DoS 방지 128자 제한)",
     )
-    new_password: PasswordStr = Field(
+    new_password: PasswordUpdateStr = Field(
         ...,
         min_length=8,
         max_length=128,

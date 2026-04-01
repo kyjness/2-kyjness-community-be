@@ -74,7 +74,6 @@ async def logout(
     await AuthService.logout(
         user_id=current_user.id,
         refresh_token=refresh_token,
-        access_token=access_token,
         access_payload=access_payload,
         redis=redis,
     )

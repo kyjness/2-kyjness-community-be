@@ -8,14 +8,22 @@ from typing import Any, Literal
 
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import TypeAdapter, ValidationError
 from redis.asyncio import Redis
 
 from app.api.dependencies.auth import CurrentUser, get_current_user
 from app.common.codes import ApiCode
 from app.common.responses import get_request_id
+from app.common.schemas import ApiResponse
 from app.core.config import settings
+from app.media.schema import ImageUploadResponse, SignupImageUploadData
+from app.posts.schemas import PostIdData
 
 log = logging.getLogger(__name__)
+
+_IDEMP_POST_CREATE_ADAPTER = TypeAdapter(ApiResponse[PostIdData])
+_IDEMP_MEDIA_UPLOAD_ADAPTER = TypeAdapter(ApiResponse[ImageUploadResponse])
+_IDEMP_MEDIA_SIGNUP_ADAPTER = TypeAdapter(ApiResponse[SignupImageUploadData])
 
 _IDEMP_KEY_MIN = 8
 _IDEMP_KEY_MAX = 128
@@ -94,6 +102,7 @@ async def idempotency_before(
     lock_ttl_sec: int,
     conflict_message: str,
     success_status: int = 201,
+    cache_adapter: TypeAdapter[Any],
 ) -> JSONResponse | None:
     try:
         norm = _normalize_idempotency_key(raw_key)
@@ -113,16 +122,26 @@ async def idempotency_before(
     try:
         cached = await rcli.get(res_key)
         if cached:
-            try:
-                data = json.loads(cached)
-            except json.JSONDecodeError:
-                log.warning("멱등성 캐시 JSON 파싱 실패 ns=%s fp_prefix=%s", namespace, fp[:16])
+            payload: bytes | str
+            if isinstance(cached, (bytes, bytearray)):
+                payload = bytes(cached)
             else:
-                if isinstance(data, dict):
-                    return JSONResponse(
-                        status_code=success_status,
-                        content=_merge_request_id_into_cached_body(data, request),
-                    )
+                payload = str(cached)
+            try:
+                validated = cache_adapter.validate_json(payload)
+            except ValidationError as e:
+                log.warning(
+                    "멱등성 캐시 검증 실패(캐시 미스 처리) ns=%s fp_prefix=%s: %s",
+                    namespace,
+                    fp[:16],
+                    e,
+                )
+            else:
+                body = validated.model_dump(mode="json", by_alias=True)
+                return JSONResponse(
+                    status_code=success_status,
+                    content=_merge_request_id_into_cached_body(body, request),
+                )
 
         got_lock = await rcli.set(lock_key, "1", nx=True, ex=lock_ttl_sec)
         if not got_lock:
@@ -214,6 +233,7 @@ async def post_create_idempotency_before(
         namespace="post:create",
         lock_ttl_sec=settings.IDEMPOTENCY_POST_CREATE_LOCK_TTL_SECONDS,
         conflict_message="동일 멱등성 키로 게시글 생성이 진행 중입니다.",
+        cache_adapter=_IDEMP_POST_CREATE_ADAPTER,
     )
 
 
@@ -262,6 +282,7 @@ async def media_image_upload_idempotency_prepare(
         namespace="media:upload",
         lock_ttl_sec=settings.IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS,
         conflict_message="동일 멱등성 키로 이미지 업로드가 진행 중입니다.",
+        cache_adapter=_IDEMP_MEDIA_UPLOAD_ADAPTER,
     )
     if r is not None:
         setattr(request.state, MEDIA_UPLOAD_IDEMPOTENT_RESPONSE_ATTR, r)
@@ -313,6 +334,7 @@ async def media_signup_upload_idempotency_prepare(
         namespace="media:signup",
         lock_ttl_sec=settings.IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS,
         conflict_message="동일 멱등성 키로 회원가입 이미지 업로드가 진행 중입니다.",
+        cache_adapter=_IDEMP_MEDIA_SIGNUP_ADAPTER,
     )
     if r is not None:
         setattr(request.state, MEDIA_SIGNUP_IDEMPOTENT_RESPONSE_ATTR, r)

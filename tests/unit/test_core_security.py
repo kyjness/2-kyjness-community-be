@@ -3,16 +3,18 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 from app.core.config import settings
+from app.core.ids import is_valid_ulid_str
 from app.core.security import create_access_token, hash_password, verify_password
 
 
-def test_password_hashing():
+@pytest.mark.anyio
+async def test_password_hashing():
     plain_password = "SecurePassword123!"
-    hashed_password = hash_password(plain_password)
+    hashed_password = await hash_password(plain_password)
 
     assert plain_password != hashed_password
-    assert verify_password(plain_password, hashed_password) is True
-    assert verify_password("WrongPassword123!", hashed_password) is False
+    assert (await verify_password(plain_password, hashed_password)) is True
+    assert (await verify_password("WrongPassword123!", hashed_password)) is False
 
 
 def test_create_access_token():
@@ -26,6 +28,8 @@ def test_create_access_token():
     assert decoded.get("sub") == sub
     assert decoded.get("type") == "access"
     assert "exp" in decoded
+    jti = decoded.get("jti")
+    assert isinstance(jti, str) and is_valid_ulid_str(jti)
 
 
 def test_expired_jwt_token():

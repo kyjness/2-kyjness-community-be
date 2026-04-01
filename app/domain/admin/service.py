@@ -16,8 +16,8 @@ from app.common.exceptions import (
     UserNotFoundException,
     UserWithdrawnException,
 )
-from app.posts.model import PostsModel
-from app.posts.service import PostService
+from app.posts.repository import PostsModel
+from app.posts.services import PostService
 from app.reports.model import ReportsModel
 from app.users.model import UsersModel
 
@@ -186,9 +186,12 @@ class AdminService:
 
     @classmethod
     async def delete_post(cls, post_id: str, db: AsyncSession) -> None:
-        if await PostsModel.get_post_author_id(post_id, db=db) is None:
-            raise PostNotFoundException()
-        await PostService.delete_post(post_id, db=db)
+        # NOTE: AsyncSessionLocal(autobegin=False)이므로, 모든 DB I/O는 명시적 트랜잭션 내부에서 수행.
+        #       또한 삭제는 단일 트랜잭션에서 원자적으로 처리(연관 댓글/좋아요/이미지 정리 포함).
+        async with db.begin():
+            success, _image_ids = await PostsModel.delete_post(post_id, db=db)
+            if not success:
+                raise PostNotFoundException()
 
     @classmethod
     async def unblind_comment(cls, comment_id: str, db: AsyncSession) -> None:
@@ -215,9 +218,10 @@ class AdminService:
 
     @classmethod
     async def delete_comment(cls, post_id: str, comment_id: str, db: AsyncSession) -> None:
-        if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:
-            raise CommentNotFoundException()
         async with db.begin():
+            # 삭제는 멱등이 아니므로, 먼저 대상 존재 확인 후 삭제/카운트 감소를 같은 트랜잭션에서 처리.
+            if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:
+                raise CommentNotFoundException()
             deleted = await CommentsModel.delete_comment(post_id, comment_id, db=db)
             if not deleted:
                 raise CommentNotFoundException()

@@ -1,6 +1,8 @@
 # 댓글 비즈니스 로직. Full-Async. 생성/삭제 시 게시글 comment_count 조정은 서비스에서 조율.
 from __future__ import annotations
 
+from math import ceil
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -19,13 +21,13 @@ from app.common.exceptions import (
 
 
 async def _increment_post_comment_count(post_id: str, db: AsyncSession) -> None:
-    from app.posts.model import PostsModel
+    from app.posts.repository import PostsModel
 
     await PostsModel.increment_comment_count(post_id, db=db)
 
 
 async def _decrement_post_comment_count(post_id: str, db: AsyncSession) -> None:
-    from app.posts.model import PostsModel
+    from app.posts.repository import PostsModel
 
     await PostsModel.decrement_comment_count(post_id, db=db)
 
@@ -35,7 +37,7 @@ async def _ensure_post_visible(
     db: AsyncSession,
     current_user_id: str | None = None,
 ) -> None:
-    from app.posts.model import PostsModel
+    from app.posts.repository import PostsModel
 
     if await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id) is None:
         raise PostNotFoundException()
@@ -139,7 +141,7 @@ class CommentService:
         current_user_id: str | None = None,
     ) -> CommentsPageData:
         async with db.begin():
-            from app.posts.model import PostsModel
+            from app.posts.repository import PostsModel
 
             post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id)
             if not post:
@@ -152,7 +154,6 @@ class CommentService:
                 fetch_all_for_tree=True,
                 current_user_id=current_user_id,
             )
-            total_count = post.comment_count
             comment_ids = [c.id for c in comments]
             liked_ids = (
                 await CommentLikesModel.get_liked_comment_ids_for_user(
@@ -161,12 +162,17 @@ class CommentService:
                 if current_user_id is not None
                 else set()
             )
-            result = _build_comment_tree(comments, liked_ids, sort=sort or "latest")
+            roots = _build_comment_tree(comments, liked_ids, sort=sort or "latest")
+            total_count = len(roots)
+            total_pages = max(1, ceil(total_count / size)) if size > 0 else 1
+            start = (page - 1) * size
+            end = start + size
+            result = roots[start:end]
         return CommentsPageData(
             items=result,
             total_count=total_count,
-            total_pages=1,
-            current_page=1,
+            total_pages=total_pages,
+            current_page=page,
         )
 
     @classmethod

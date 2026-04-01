@@ -1,4 +1,5 @@
 # 비밀번호 해시·검증(bcrypt), JWT Access/Refresh 토큰 생성·검증.
+import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -7,19 +8,28 @@ import bcrypt
 import jwt
 
 from app.core.config import settings
+from app.core.ids import new_ulid_str
 
 
-def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+def password_with_pepper(plain: str) -> str:
+    return f"{plain}{settings.PASSWORD_PEPPER}"
 
 
-def hash_password(password: str) -> str:
+def access_jti_blacklist_redis_key(jti: str) -> str:
+    return f"blacklist:jti:{jti}"
+
+
+def refresh_token_digest(refresh_token: str) -> str:
+    return hashlib.sha256(refresh_token.encode("utf-8")).hexdigest()
+
+
+def _hash_password_sync(password: str) -> str:
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
     return hashed.decode("utf-8")
 
 
-def verify_password(password: str, hashed_password: str) -> bool:
+def _verify_password_sync(password: str, hashed_password: str) -> bool:
     try:
         return bcrypt.checkpw(
             password.encode("utf-8"),
@@ -29,6 +39,21 @@ def verify_password(password: str, hashed_password: str) -> bool:
         return False
 
 
+async def hash_password(password: str) -> str:
+    return await asyncio.to_thread(_hash_password_sync, password)
+
+
+async def verify_password(password: str, hashed_password: str) -> bool:
+    return await asyncio.to_thread(_verify_password_sync, password, hashed_password)
+
+
+async def verify_password_with_legacy_fallback(plain: str, hashed_password: str) -> bool:
+    """Pepper 적용 검증 후, 기존 사용자용으로 미적용 평문 검증."""
+    if await verify_password(password_with_pepper(plain), hashed_password):
+        return True
+    return await verify_password(plain, hashed_password)
+
+
 def _now_utc() -> datetime:
     return datetime.now(UTC)
 
@@ -36,15 +61,26 @@ def _now_utc() -> datetime:
 def create_access_token(sub: str) -> str:
     """sub=user_id(ULID 문자열). ACCESS_TOKEN_EXPIRE_SECONDS 후 만료."""
     expire = _now_utc() + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
-    # JWT 표준·PyJWT 호환: sub는 문자열 claim이 가장 안전(숫자는 구형 라이브러리에서 타입 혼동 가능).
-    payload = {"sub": str(sub), "exp": expire, "iat": _now_utc(), "type": "access"}
+    payload = {
+        "sub": str(sub),
+        "exp": expire,
+        "iat": _now_utc(),
+        "type": "access",
+        "jti": new_ulid_str(),
+    }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 def create_refresh_token(sub: str) -> str:
-    """sub=user_id(ULID). REFRESH_TOKEN_EXPIRE_DAYS 후 만료. sub는 항상 str(...)로 직렬화."""
+    """sub=user_id(ULID). REFRESH_TOKEN_EXPIRE_DAYS 후 만료."""
     expire = _now_utc() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    payload = {"sub": str(sub), "exp": expire, "iat": _now_utc(), "type": "refresh"}
+    payload = {
+        "sub": str(sub),
+        "exp": expire,
+        "iat": _now_utc(),
+        "type": "refresh",
+        "jti": new_ulid_str(),
+    }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
