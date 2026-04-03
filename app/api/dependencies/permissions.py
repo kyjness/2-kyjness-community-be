@@ -1,10 +1,12 @@
 # 권한 의존성. 게시글/댓글 작성자 검증. Full-Async.
-from typing import NamedTuple
+from typing import Annotated, NamedTuple
+from uuid import UUID
 
 from fastapi import Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.comments.model import CommentsModel
+from app.common import PublicId
 from app.common.exceptions import (
     CommentNotFoundException,
     ForbiddenException,
@@ -18,10 +20,10 @@ from .db import get_slave_db
 
 
 async def require_post_author(
-    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
-) -> str:
+) -> UUID:
     async with db.begin():
         author_id = await PostsModel.get_post_author_id(post_id, db=db)
     if author_id is None:
@@ -32,14 +34,14 @@ async def require_post_author(
 
 
 class CommentAuthorContext(NamedTuple):
-    post_id: str
-    user_id: str
-    comment_id: str
+    post_id: UUID
+    user_id: UUID
+    comment_id: UUID
 
 
 async def require_comment_author(
-    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
-    comment_id: str = Path(..., min_length=26, max_length=26, description="댓글 ULID"),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
+    comment_id: Annotated[PublicId, Path(..., description="댓글 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
 ) -> CommentAuthorContext:
@@ -62,8 +64,8 @@ async def require_comment_author(
 
 
 async def require_comment_author_for_delete(
-    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
-    comment_id: str = Path(..., min_length=26, max_length=26, description="댓글 ULID"),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
+    comment_id: Annotated[PublicId, Path(..., description="댓글 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
 ) -> CommentAuthorContext:

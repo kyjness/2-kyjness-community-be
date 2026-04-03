@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Header, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +15,7 @@ from app.api.dependencies import (
     post_create_idempotency_before,
     require_post_author,
 )
-from app.common import ApiCode, ApiResponse, PaginatedResponse, api_response
+from app.common import ApiCode, ApiResponse, PaginatedResponse, PublicId, api_response
 from app.posts.schemas import PostCreateRequest, PostIdData, PostResponse, PostUpdateRequest
 from app.posts.services import PostService
 
@@ -69,7 +71,7 @@ async def get_posts(
 @router.post("/{post_id}/view", status_code=200, response_model=ApiResponse[None])
 async def record_view(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     client_id: str = Depends(get_client_identifier),
     db: AsyncSession = Depends(get_master_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
@@ -89,7 +91,7 @@ async def record_view(
 @router.get("/{post_id}", status_code=200, response_model=ApiResponse[PostResponse])
 async def get_post(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     client_id: str = Depends(get_client_identifier),
     db: AsyncSession = Depends(get_slave_db),
     writer_db: AsyncSession = Depends(get_master_db),
@@ -117,7 +119,7 @@ async def get_post(
 async def update_post(
     request: Request,
     post_data: PostUpdateRequest,
-    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.update_post(post_id, post_data, db=db)
@@ -132,7 +134,7 @@ async def update_post(
 )
 async def delete_post(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26, description="게시글 ULID"),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await PostService.delete_post(post_id, db=db)

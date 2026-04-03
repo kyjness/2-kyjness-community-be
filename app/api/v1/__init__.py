@@ -2,6 +2,8 @@
 from fastapi import APIRouter
 
 from app.admin.router import router as admin_router
+from app.api.v1.chat.rest import router as chat_rest_router
+from app.api.v1.chat.ws import router as chat_ws_router
 from app.auth.router import router as auth_router
 from app.comments.router import router as comments_router
 from app.dogs.router import router as dogs_router
@@ -13,6 +15,7 @@ from app.reports.router import router as reports_router
 from app.users.router import router as users_router
 
 v1_router = APIRouter(prefix="/v1")
+v1_router.include_router(chat_ws_router)
 v1_router.include_router(auth_router)
 v1_router.include_router(users_router)
 v1_router.include_router(notifications_router)
@@ -23,3 +26,4 @@ v1_router.include_router(comments_router)
 v1_router.include_router(likes_router)
 v1_router.include_router(reports_router)
 v1_router.include_router(admin_router)
+v1_router.include_router(chat_rest_router)

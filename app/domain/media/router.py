@@ -1,5 +1,5 @@
 # 미디어 라우터. Router → Service. 예외는 전역 handler 처리.
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Header, Path, Query, Request, UploadFile
 from redis.asyncio import Redis
@@ -19,7 +19,7 @@ from app.api.dependencies import (
     media_upload_idempotency_after_failure,
     media_upload_idempotency_after_success,
 )
-from app.common import ApiCode, ApiResponse, api_response
+from app.common import ApiCode, ApiResponse, PublicId, api_response
 from app.media.schema import ImageUploadResponse, SignupImageUploadData
 from app.media.service import MediaService
 
@@ -92,7 +92,7 @@ async def upload_image(
 @router.delete("/images/{image_id}", status_code=200, response_model=ApiResponse[None])
 async def delete_image(
     request: Request,
-    image_id: str = Path(..., min_length=26, max_length=26, description="이미지 ULID"),
+    image_id: Annotated[PublicId, Path(..., description="이미지 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):

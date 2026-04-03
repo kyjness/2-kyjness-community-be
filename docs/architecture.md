@@ -1,399 +1,410 @@
 # 아키텍처 (Architecture)
 
-이 문서는 PuppyTalk 백엔드의 **내부 동작 원리**를 깊이 이해할 수 있도록, 설계 의도(Why)와 실제 코드 흐름(How)을 단계별로 정리한 딥다이브 가이드입니다.  
-기능 나열이 아니라 **요청이 어떻게 검증·제한·라우팅되는지**, **DB·인증·정합성·성능이 어떤 이유로 설계되었는지**를 중심으로 서술합니다.
-
-### FastAPI + REST API를 선택한 이유
-
-#### FastAPI: AI/ML 파이프라인 통합 및 고성능 비동기 아키텍처
-
-- **Unified ML Ecosystem**: 백엔드와 AI/ML 모델링 언어를 Python으로 통일하여, 별도의 인터페이스 계층 없이 **TensorFlow, PyTorch 등의 모델을 즉시 서빙(Inference)**할 수 있는 최적의 환경을 구축함.
-- **Asynchronous Concurrency**: uvloop 기반의 비동기 I/O 처리를 통해 대규모 동시 접속 상황에서도 낮은 지연 시간(Latency)과 높은 처리량(Throughput)을 보장함.
-- **Data Integrity via Pydantic V2**: Pydantic을 활용한 엄격한 타입 힌트와 자동 검증으로 데이터 엔지니어링 단계에서의 무결성을 확보하며, 이는 추천 알고리즘 및 데이터 분석 시 신뢰성 있는 입출력을 보장함. [cite: 2026-03-04]
-
-#### REST API: 리소스 지향 설계 및 유연한 확장성
-
-- **Resource-Centric Design**: 유저, 게시글, 댓글 등 서비스 도메인을 독립적인 리소스로 관리하여 API 가독성과 유지보수 편의성을 극대화함.
-- **Stateless Architecture**: 서버의 상태를 공유하지 않는 설계를 통해 트래픽 급증 시 컨테이너 기반의 **수평 확장(Scale-out)**에 최적화된 구조를 유지함.
+PuppyTalk 백엔드의 **실제 구현**을 기준으로, 설계 의도(Why)와 코드 위치(How)를 연결한 기술 문서입니다.  
+**고성능 비동기 I/O**(SQLAlchemy Async · Redis)와 **실시간 DM(WebSocket)**, **분산 환경에서의 Redis Pub/Sub**, **식별자(UUID v7 + Base62 투트랙)**을 중심으로 보안·에러·동시성을 **코드 매핑**과 함께 정리합니다.
 
 ---
 
 ## 목차
 
-1. [폴더 구조 및 의존성](#1-폴더-구조-및-의존성)
-2. [요청 흐름 (Request Lifecycle)](#2-요청-흐름-request-lifecycle)
-3. [데이터베이스 아키텍처](#3-데이터베이스-아키텍처)
-4. [인증·보안](#4-인증보안)
-5. [데이터 정합성](#5-데이터-정합성)
-6. [성능 최적화](#6-성능-최적화)
-7. [이미지: signupToken·ref_count](#7-이미지-signuptokenref_count)
-8. [게시글 피드: 검색·차단·신고](#8-게시글-피드-검색차단신고)
+1. [설계 개요](#1-설계-개요)
+2. [폴더·모듈 경계](#2-폴더모듈-경계)
+3. [요청 생명주기](#3-요청-생명주기)
+4. [보안 강화 (Security Hardening)](#4-보안-강화-security-hardening)
+5. [전역 에러 흐름](#5-전역-에러-흐름)
+6. [동시성·락](#6-동시성락)
+7. [백그라운드 작업·스케줄링](#7-백그라운드-작업스케줄링)
+8. [다목적 Redis 레이어](#8-다목적-redis-레이어)
+9. [데이터베이스](#9-데이터베이스)
+10. [식별자: UUID v7 · Base62 (투트랙 직렬화)](#10-식별자-uuid-v7--base62-투트랙-직렬화)
+11. [인증·토큰·세션성 상태](#11-인증토큰세션성-상태)
+12. [데이터 정합성·도메인 협업](#12-데이터-정합성도메인-협업)
+13. [성능: N+1·스토리지·조회수](#13-성능-n1스토리지조회수)
+14. [DM 채팅: WebSocket · Redis Pub/Sub · 다중 워커](#14-dm-채팅-websocket--redis-pubsub--다중-워커)
+15. [이미지·피드·신고 (요약)](#15-이미지피드신고-요약)
 
 ---
 
-## 1. 폴더 구조 및 의존성
+## 1. 설계 개요
 
-### 1.1 의존성 단일화
+### 1.1 왜 FastAPI·비동기인가
 
-요청 스코프에서 쓰는 **인증·DB 세션·권한·쿼리 파싱·클라이언트 식별자**는 dependencies 한 곳에서 제공한다. 라우터·핸들러는 여기서만 주입받아, "DB·유저가 어디서 오는지"를 한눈에 파악할 수 있다.  
-비요청 스코프(cleanup, 예외 핸들러 등)용 DB 연결은 별도 컨텍스트 매니저로만 사용한다.
+- **I/O 바운드 병렬성**: DB·Redis·스토리지·외부 네트워크 대기 시간이 대부분이므로 `async`/`await`와 `AsyncSession`으로 이벤트 루프 효율을 취한다. 장시간 블로킹 연산(예: bcrypt)은 `asyncio.to_thread`로 오프로딩한다.
+- **WebSocket과 동일 프로세스**: DM은 Starlette WebSocket 핸들러로 처리하며, 업스트림에서 **동일 앱 인스턴스**의 Redis 클라이언트·DB 세션 패턴을 공유한다. 실시간 경로도 비동기 컨텍스트에서 동작하도록 유지한다.
+- **계약**: Pydantic v2로 HTTP·WebSocket 페이로드와 Redis 캐시 JSON에 동일한 타입 규율을 적용한다(`TypeAdapter`·`PublicId` 등).
 
-### 1.2 폴더 구조 요약
+### 1.2 Stateless HTTP + Redis에 두는 상태
 
-| 파일 | 역할 |
-|------|------|
-| **router** | HTTP 엔드포인트 정의. `Depends(...)`로 DB·유저·클라이언트 식별자 주입. **Service** 호출 후 `api_response(request, ...)`로 `ApiResponse` 포장(`requestId` 자동 주입, `X-Request-ID`와 동일). |
-| **service** | 비즈니스 로직·도메인 간 조율(Orchestration). 순수 데이터 반환 또는 ValueError. Redis·토큰·카운트 동기화·이미지 ref_count 등 처리. ApiResponse·ApiCode·raise_http_error 미사용. |
-| **model** | DB 접근(CRUD·쿼리). AsyncSession만 사용. **commit/rollback은 하지 않으며**, 트랜잭션 경계는 서비스의 `async with db.begin():` 블록에서만 둠. |
-| **schema** | 요청/응답 DTO. Pydantic v2 검증·alias. |
+HTTP API는 **무상태**를 지향한다. Access JWT는 서버에 세션을 두지 않고, 무효화가 필요한 경우(로그아웃)만 Redis에 **`jti` 블랙리스트**를 둔다. Refresh는 HttpOnly 쿠키 + Redis Set/Lua로 **회전·검증**한다.  
+수평 확장 시에도 동일 규칙이면 인스턴스 간 일관성이 유지된다.
 
-도메인 레이어는 **router → service → model → schema** 4계층 패턴을 따른다. 복합 연산·도메인 간 협업은 Service에서 수행한다.
+---
 
-**common**에는 `ApiCode`(응답 code), `TargetType`(신고 대상: POST/COMMENT), `ReportReason`(신고 사유: 프론트와 동일한 네 가지 한글 값), `UserStatus` 등 StrEnum이 정의되어 있다. `ApiResponse`는 `code`·`data`·`message`·`requestId` 필드를 갖는다(`requestId`는 `RequestIdMiddleware`가 넣은 값). `ApiResponse.code`는 `ApiCode | str`을 받으며, `BaseSchema`의 `use_enum_values=True`로 직렬화 시 문자열로 내려간다. 전역 예외 응답 JSON도 동일 키(`requestId` 포함)를 사용한다. 서버 측 상세 로그는 주로 5xx·DB 예외 등에 한해 JSON 한 줄(`event`, `request_id`, `path` 등)로 남기고, 클라이언트 검증 실패(4xx)는 로그를 남기지 않는다.
+## 2. 폴더·모듈 경계
 
-### 1.3 도메인 의존성 (Domain Dependency)
+### 2.1 레이어
 
-요청 흐름(섹션 2.2)과 별도로, **도메인 간 참조 관계**만 아래 다이어그램으로 정리한다. 화살표 A → B는 "A 도메인의 Router/Service가 B 도메인의 Model·Service를 참조한다"는 의미다. 단방향으로 유지하며, 순환 참조 방지를 위해 필요한 경우 함수 내부 임포트를 사용한다.
+| 계층 | 책임 | 코드 위치 |
+|------|------|-----------|
+| **Router** | 라우트·의존성 주입·`api_response`로 포장 | `app/domain/*/router.py`, `app/api/v1/chat/*.py` |
+| **Service** | 유스케이스·트랜잭션 경계 `async with db.begin():` | `app/domain/*/service.py` |
+| **Model** | 쿼리·CRUD, **커밋 없음** | `app/domain/*/model.py` 등 |
+| **Schema** | Pydantic DTO | `app/domain/*/schema.py` |
+| **공통** | `ApiCode`, `ApiResponse`, 예외 기저 | `app/common/` |
+| **전역** | 미들웨어, 보안, 예외 핸들러, ID 유틸 | `app/core/` |
 
-**요약 (도메인 → 참조 대상)**
+### 2.2 `app` 패키지 별칭
 
-```mermaid
-flowchart LR
-    subgraph 도메인["도메인"]
-        auth[auth]
-        users[users]
-        posts[posts]
-        comments[comments]
-        likes[likes]
-        media[media]
-        reports[reports]
-        admin[admin]
-        dogs[dogs]
-    end
+`app/__init__.py`에서 `app.domain.auth` 등을 `sys.modules["app.auth"]`로 주입한다. 따라서 런타임 import는 `from app.auth.router import ...` 형태가 유지되고, **`app.chat`** 역시 `domain.chat`을 가리킨다.
 
-    auth --> users
-    auth --> media
-    users --> media
-    users -.->|revoke_refresh| auth
-    posts --> media
-    posts --> likes
-    comments --> posts
-    likes --> posts
-    likes --> comments
-    reports --> posts
-    reports --> comments
-    admin --> posts
-    admin --> comments
-    admin --> users
-    admin --> reports
-    dogs --> users
-```
+### 2.3 `/v1` 라우터 등록 순서
 
-**상세 (계층별·참조 대상 명시)**
+`app/api/v1/__init__.py`에서 `v1_router`에 다음 순으로 `include`한다(경로 충돌 시 선등록 우선):
+
+`chat_ws` → `auth` → `users` → `notifications` → `dogs` → `media` → `posts` → `comments` → `likes` → `reports` → `admin` → `chat_rest`
+
+WebSocket은 **`/v1/ws/chat`**, REST 채팅은 **`/v1/chat/*`**.
+
+---
+
+## 3. 요청 생명주기
+
+### 3.1 미들웨어 (LIFO)
+
+Starlette는 **나중에 `add_middleware`로 등록한 것이 요청 시 가장 먼저** 실행된다. `app/main.py`에서 **맨 아래**에 `RequestIdMiddleware`를 두어, 진입 직후 ULID `request_id`를 `scope["state"]`와 로깅 context에 심는다.
+
+실행 순서(요청 방향): **RequestId** → **ProxyHeaders** → **RateLimit** → **GZip** → (HTTP 함수형) **access_log** → **security_headers** → 라우터.
+
+### 3.2 단순 흐름도
 
 ```mermaid
 flowchart TB
-    subgraph auth["auth"]
-        direction TB
-        A_R[router]
-        A_S[AuthService]
-        A_M["(인증 전용 DB 테이블 없음)"]
-        A_R --> A_S
-    end
-
-    subgraph users["users"]
-        direction TB
-        U_R[router]
-        U_S[UserService]
-        U_M["UsersModel, DogProfilesModel"]
-        U_R --> U_S
-        U_S --> U_M
-    end
-
-    subgraph media["media"]
-        direction TB
-        M_R[router]
-        M_S[MediaService]
-        M_M["MediaModel (Image)"]
-        M_R --> M_S
-        M_S --> M_M
-    end
-
-    subgraph posts["posts"]
-        direction TB
-        P_R[router]
-        P_S[PostService]
-        P_M["PostsModel (Post, PostImage)"]
-        P_R --> P_S
-        P_S --> P_M
-    end
-
-    subgraph comments["comments"]
-        direction TB
-        C_R[router]
-        C_S[CommentService]
-        C_M["CommentsModel, CommentLikesModel"]
-        C_R --> C_S
-        C_S --> C_M
-    end
-
-    subgraph likes["likes"]
-        direction TB
-        L_R[router]
-        L_S[LikeService]
-        L_M[PostLikesModel]
-        L_R --> L_S
-        L_S --> L_M
-    end
-
-    A_S -->|"UsersModel · 가입·이메일/닉네임·create_user"| U_M
-    A_S -->|"MediaModel · signupToken 검증·첨부"| M_M
-
-    U_R -->|"AuthService.revoke_refresh_for_user"| A_S
-    U_S -->|"MediaModel · ref_count·삭제"| M_M
-    U_S --> U_M
-
-    P_S -->|"MediaModel · 이미지 ref_count"| M_M
-    P_S -->|"LikeService.is_post_liked"| L_S
-    P_S --> P_M
-
-    C_S -->|"PostsModel · 댓글수 증감·get_post_by_id"| P_M
-    C_S --> C_M
-
-    L_R -->|"게시글 존재 확인"| P_M
-    L_R -->|"댓글 존재 확인"| C_M
-    L_S -->|"PostsModel · like_count 증감·조회"| P_M
-    L_S -->|"CommentsModel·CommentLikesModel · like_count"| C_M
-    L_S --> L_M
+    C[Client] --> RQ[ASGI Request]
+    RQ --> M1[RequestIdMiddleware]
+    M1 --> M2[ProxyHeadersMiddleware]
+    M2 --> M3[RateLimitMiddleware]
+    M3 --> M4[GZipMiddleware]
+    M4 --> AL[access_log]
+    AL --> SH[security_headers]
+    SH --> RT[Route + Depends]
+    RT --> PY[Pydantic Body/Query]
+    RT --> SVC[Service + db.begin]
+    SVC --> DB[(PostgreSQL)]
+    RT --> RESP[JSON / ApiResponse]
 ```
 
-- **auth**: 회원가입·로그인 시 `UsersModel`, `MediaModel`(signupToken 검증·첨부) 사용. Redis는 서비스 내부에서만 사용.
-- **users**: 라우터가 비밀번호 변경·탈퇴 시 `AuthService.revoke_refresh_for_user` 호출. `UserService`는 프로필/강아지·이미지 ref_count에 `MediaModel` 사용.
-- **posts**: `PostService`는 이미지 ref_count·상세 조회 시 `is_liked`를 위해 `MediaModel`, `LikeService` 참조.
-- **comments**: `CommentService`는 댓글 수 동기화를 위해 `PostsModel`만 참조(함수 내부 임포트).
-- **likes**: 라우터가 게시글/댓글 존재 여부 확인에 `PostsModel`, `CommentsModel` 사용. `LikeService`는 `PostLikesModel`, `CommentsModel`(get_like_count), `CommentLikesModel`(create/delete·like_count 갱신), `PostsModel`(like_count 갱신) 사용.
-- **media**: 다른 도메인을 참조하지 않음.
-- **reports**: `ReportService`가 게시글·댓글 신고 시 `ReportsModel.create_report`(Insert만, 누적)·`PostsModel`/`CommentsModel`의 `report_count` 증가·임계값 도달 시 `blinded` 설정. `reports` 테이블은 `target_type`(TargetType: POST/COMMENT), `reason`(`ReportReason`과 동일한 문자열로 저장), `deleted_at`(신고 무시 시 soft delete)만 사용하며, `status` 컬럼은 제거됨.
-- **admin**: 관리자 전용. 신고된 게시글·댓글 통합 목록(`GET /admin/reported-posts`, `target_type`·`content_preview` 포함), 게시글/댓글 각각 블라인드 해제·블라인드 처리·신고 무시·삭제, 유저 정지/해제 API 제공. 내부적으로 `PostsModel`·`CommentsModel`·`ReportsModel`·`UsersModel` 사용.
-- **dogs**: `UserService`·`UsersModel`에서 `DogProfile` 관리. users 도메인에 포함.
+### 3.3 의존성
+
+- **`get_master_db` / `get_slave_db`**: 쓰기 vs 읽기 세션. 트랜잭션은 서비스의 `async with db.begin():`에서만 연다(`autobegin=False`).
+- **`get_current_user`**: `app/api/dependencies/auth.py` — JWT 검증 후 `jti` 블랙리스트 조회.
 
 ---
 
-## 2. 요청 흐름 (Request Lifecycle)
+## 4. 보안 강화 (Security Hardening)
 
-모든 HTTP 요청은 **미들웨어 파이프라인**을 거친 뒤 라우터·컨트롤러·모델로 전달됩니다. Starlette는 **나중에 등록한 미들웨어가 요청 시 먼저** 실행되므로, 아래 순서는 “요청이 들어올 때” 통과하는 순서입니다.
+### 4.1 Rate Limiting (고정 윈도우 + Redis Lua)
 
-**요청 흐름**
+**구현**: `app/core/middleware/rate_limit.py`
 
+- Redis 키당 **Fixed Window**: Lua 스크립트로 `INCR` → 최초 1회만 `EXPIRE`, TTL과 카운트를 원자적으로 반환한다. **슬라이딩 윈도우는 현재 미구현**이다.
+- **Fail-open**: Redis 예외 시 대부분 경로는 **제한 없이 통과**해 가용성을 우선한다. 다만 로그인·회원가입 이미지 업로드 등 **치명 경로**는 인메모리 고정 윈도우(최대 1만 키, eviction)로 보조한다.
+- 클라이언트 IP는 **`get_client_ip_from_scope`**로만 취하며, `ProxyHeadersMiddleware`가 이미 검증한 `scope["client"]`를 신뢰한다(직접 `X-Forwarded-For` 파싱 금지로 스푸핑 완화).
+
+**Why**: 분산 환경에서 카운트를 인메모리만 쓰면 인스턴스마다 한도가 갈라진다. Redis 단일 저장소 + Lua로 경쟁 조건 없이 카운트한다.
+
+### 4.2 데이터 무결성 — `TypeAdapter` · `validate_json`
+
+| 용도 | 파일 | 내용 |
+|------|------|------|
+| 멱등성 캐시 복원 | `app/api/dependencies/client.py` | `TypeAdapter(ApiResponse[PostIdData])` 등으로 Redis에 저장된 JSON이 **현재 스키마와 맞는지** 검증. 불일치 시 캐시 미스 후 정상 플로우. |
+| 트렌딩 해시태그 | `app/domain/posts/services/hashtag_service.py` | `TypeAdapter(list[TrendingHashtagResponse]).validate_json` |
+| WebSocket 페이로드 | `app/domain/chat/payload.py` | `TypeAdapter(ChatMessageSend).validate_json(raw_json)` |
+
+**Why**: 외부 저장소(Redis)나 클라이언트 문자열은 항상 **스키마 드리프트** 위험이 있다. 런타임에 Pydantic으로 한 번 더 접어 넣으면 잘못된 페이로드가 도메인으로 내려가지 않는다.
+
+### 4.3 인증·비밀번호·주입 방어
+
+| 주제 | 구현 | 비고 |
+|------|------|------|
+| **Access 무효화(로그아웃)** | Redis 키 `blacklist:jti:{jti}` (`app/core/security.py`의 `access_jti_blacklist_redis_key`) | TTL은 Access 잔여 수명에 맞춤. `app/api/dependencies/auth.py`, `app/domain/chat/ws_auth.py`에서 조회. Redis 실패 시 **Fail-open**(가용성 우선). |
+| **Refresh 회전(RTR)** | `app/domain/auth/service.py` — Lua 기반 원자 회전 + 실패 시 폴백 경로 | 동시 `/auth/refresh` 경쟁 시 한 건만 성공하도록 설계. |
+| **비밀번호** | **bcrypt** (`app/core/security.py`), `asyncio.to_thread`로 이벤트 루프 블로킹 방지. `PASSWORD_PEPPER` 적용·레거시 무페퍼 폴백 (`verify_password_with_legacy_fallback`) | **현재 코드는 bcrypt**이다. |
+| **SQL Injection** | SQLAlchemy 2.0 Core/ORM **바인딩 파라미터** 사용 | Raw 문자열 연결로 쿼리를 만들지 않는 것이 1차 방어선이다. |
+| **XSS(저장형)** | 응답은 Pydantic 스키마 통과. 프론트 이스케이프와 함께 **CSP 등**은 `app/core/middleware/security_headers.py`에서 설정 가능. |
+
+---
+
+## 5. 전역 에러 흐름
+
+### 5.1 예외 계층
+
+- **`BaseProjectException`** (`app/common/exceptions.py`): `status_code`, `code`(주로 `ApiCode`), `message`, `data`를 들고 서비스에서 `raise`.
+- **FastAPI `HTTPException`**: `detail`이 dict이고 `code` 키가 있으면 그대로 API 규격으로 직렬화.
+- **`RequestValidationError`**: 본문/쿼리 스키마 불일치 → 400, 세부 `ApiCode`는 메시지 휴리스틱으로 선택 (`app/core/exception_handlers.py`의 `_pick_validation_code`).
+- **SQLAlchemy `IntegrityError` / `OperationalError` / `DatabaseError`**: 중복 키·FK 등은 매핑된 `ApiCode`와 HTTP 상태로 변환. 500 계열은 **마스킹 메시지**만 클라이언트에 노출.
+
+### 5.2 변환 파이프라인
+
+```mermaid
+sequenceDiagram
+    participant S as Service
+    participant R as Route
+    participant H as exception_handlers
+    participant C as Client
+    S->>R: raise BaseProjectException
+    R->>H: FastAPI dispatch
+    H->>H: project_exception_handler
+    H->>C: JSON { code, message, data, requestId }
+    Note over H,C: requestId는 RequestIdMiddleware가 넣은 값과 동일 키
 ```
-[클라이언트]  HTTP 요청 (JSON body, Cookie)
-    │
-    ▼
-① Lifespan (앱 시작 1회)
-   → DB 연결 확인. 실패 시 log 후 요청 시점에 재시도.
-   → REDIS_URL 있으면 Redis 연결 풀 생성·저장. 실패 시 Fail-open.
-   → cleanup_once 1회 실행 후, SIGNUP_IMAGE_CLEANUP_INTERVAL > 0 이면 주기적 정리 태스크 시작.
-   → yield 이후(종료 시): 정리 태스크 종료 대기 → Redis 연결 종료 → DB 연결 종료.
 
-② GET /health
-   → check_database() 호출. 성공 200 + { code, data: { status: "ok", database: "connected" } }, 실패 503 + { code: DB_ERROR, data: { status: "degraded", database: "disconnected" } }.
+**핵심 파일**: `app/core/exception_handlers.py` — `register_exception_handlers(app)`는 `app/main.py`에서 앱 생성 직후 호출된다.
 
-③ 미들웨어 (요청마다)
-   **순수 ASGI**(add_middleware): RequestIdMiddleware, ProxyHeadersMiddleware, RateLimitMiddleware, GZipMiddleware. LIFO이므로 **코드상 최하단에 등록한 RequestIdMiddleware**가 요청 진입 시 **가장 먼저** 실행되어 ULID 발급·scope["state"]["request_id"] 주입. GZip은 안쪽에 두어 응답 body만 압축(1KB 미만은 미압축).
-   **함수형**(middleware("http")): security_headers, access_log.
-   실행 순서: request_id → proxy_headers → rate_limit → gzip → access_log → security_headers (2.1 미들웨어 순서 참고).
+**Why**: 비즈니스 코드는 HTTP 세부를 몰라도 되고, 클라이언트는 항상 동일한 JSON 뼈대로 디버깅(`requestId`)할 수 있다.
 
-④ 라우터 매칭
-   v1_router = APIRouter(prefix="/v1"). include 순서: auth → users → dogs → media → posts → comments → likes → reports → admin.
-   예: /v1/auth/login, /v1/users/me, /v1/posts, /v1/posts/{id}/comments, /v1/reports, /v1/admin/reported-posts.
+---
 
-⑤ 의존성 (Depends)
-   → get_master_db / get_slave_db: 요청마다 AsyncSession 주입. 트랜잭션은 서비스에서 `async with db.begin():`으로만 시작·커밋(autobegin=False). finally에서 세션 close.
-   → get_current_user: Authorization Bearer 검증 → CurrentUser. 만료 시 401 + TOKEN_EXPIRED.
-   → require_post_author / require_comment_author: 게시글·댓글 수정/삭제 시 작성자 본인 여부.
+## 6. 동시성·락
 
-⑥ Pydantic (Schema)
-   요청 body·쿼리 검증. 실패 시 400 + code (exception_handlers에서 RequestValidationError 처리).
+### 6.1 DB
 
-⑦ Route 핸들러 → Service → Model
-   라우터가 Service를 호출하고 반환값을 ApiResponse로 포장. 비즈니스 로직·도메인 간 조율은 Service에서 수행. Model은 AsyncSession만 사용하며, 트랜잭션은 Service의 `async with db.begin():` 블록에서만 시작·커밋됨.
+- **트랜잭션 격리**: PostgreSQL 기본(READ COMMITTED) 하에서 서비스 단위로 `async with db.begin():`로 경계를 명확히 한다.
+- **`SELECT FOR UPDATE`**: 현재 코드베이스에서 **명시적 행 잠금 쿼리는 사용하지 않는다** (검색 결과 없음).
+- **Race 완화**:
+  - **유니크 제약** + `IntegrityError` 핸들러(이메일·닉네임 등).
+  - 좋아요 등: **`ON CONFLICT DO NOTHING` + RETURNING** 패턴(README·도메인 로직).
+  - DM 방: `chat_rooms`에 **유저 쌍 순서 고정 + UNIQUE**(마이그레이션 `006_chat_dm_tables`).
 
-⑧ 예외 핸들러
-   RequestValidationError → 400. HTTPException → status_code. DB 예외·Exception(catch-all) → 500/503. 모든 에러 응답은 { code, message, data } 형식 통일. 500 시 클라이언트에는 스택/쿼리 노출 없이 "Internal Server Error" 등 마스킹 메시지만 반환, 서버 로그에 request_id와 함께 기록.
-    │
-    ▼
-HTTP 응답  { "code": "...", "message": "...", "data": ... }  (에러 시에도 X-Request-ID 헤더 포함)
+### 6.2 애플리케이션 — `ConnectionManager`와 `asyncio.Lock`
+
+**파일**: `app/domain/chat/manager.py`
+
+- 워커(프로세스) 로컬에서 `user_id → Set[WebSocket]`을 유지한다.
+- **`asyncio.Lock`**으로 `_by_user` 맵 갱신(connect/disconnect)과 스냅샷 읽기를 직렬화해, 동시 연결·해제 시 set이 깨지지 않게 한다.
+- **인스턴스 간** 일관성은 이 락이 아니라 **Redis Pub/Sub**(`app/domain/chat/pubsub.py`)으로 보완한다. 상세는 [§14](#14-dm-채팅-websocket--redis-pubsub--다중-워커).
+
+### 6.3 낙관적 충돌
+
+`ConcurrentUpdateException` (`app/common/exceptions.py`)은 Stale 데이터 등 **409 CONFLICT** 응답용으로 정의되어 있다. 실제 매핑은 도메인별 서비스 로직을 따른다.
+
+---
+
+## 7. 백그라운드 작업·스케줄링
+
+### 7.1 FastAPI `BackgroundTasks`
+
+**예시**: `app/domain/admin/router.py`의 `POST /v1/admin/media/sweep`
+
+- 응답 **202**를 먼저 보낸 뒤, **요청 스코프 DB 세션이 아닌** `AsyncSessionLocal()`로 새 세션을 열어 고아 이미지 스윕을 수행한다.
+- **Why**: 요청이 끝난 뒤 실행되므로, 요청에 묶인 세션을 쓰면 안 된다는 주석과 동일한 이유다.
+
+### 7.2 앱 수명주기 `asyncio` 태스크
+
+**파일**: `app/main.py` — `lifespan` 컨텍스트
+
+| 태스크 | 조건 | 역할 |
+|--------|------|------|
+| `cleanup` 루프 | `SIGNUP_IMAGE_CLEANUP_INTERVAL > 0` | `app/core/cleanup.py` — 가입 임시 이미지·고아 이미지·탈퇴 유저 파기·오래된 알림 삭제 등 |
+| 조회수 flush | Redis + 설정 간격 | `PostService.flush_view_counts_to_db` |
+| 채팅 Pub/Sub 리스너 | `REDIS_URL` | `app/domain/chat/pubsub.py` — `run_chat_subscribe_listener` |
+
+종료 시 `stop_event`로 태스크를 정리하고 타임아웃을 둔다.
+
+### 7.3 `BackgroundTasks` vs lifespan
+
+- **BackgroundTasks**: 단발·요청 연관 작업(관리자 트리거 스윕).
+- **lifespan**: 프로세스 전역 **장기 루프**(정리 주기, 조회수 버퍼, Redis 구독).
+
+Celery 등 외부 큐는 **미도입**이며, 주기 작업은 위 루프에 의존한다.
+
+---
+
+## 8. 다목적 Redis 레이어
+
+| 역할 | 키/채널 패턴 | 파일·코드 |
+|------|----------------|-----------|
+| Refresh 토큰 다이제스트·RTR | `rt:*` 등 (auth 서비스) | `app/domain/auth/service.py` |
+| Access `jti` 블랙리스트 | `blacklist:jti:{jti}` | `app/core/security.py`, `app/api/dependencies/auth.py` |
+| Rate limit 카운트 | `rl:*` | `app/core/middleware/rate_limit.py` |
+| 알림 SSE 팬아웃 | `notif:user:{userId}` (개념) | 알림 도메인 + `app/infra/redis.py` |
+| DM **Pub/Sub** | `puppytalk:channel:chat:dm` | `app/domain/chat/pubsub.py` |
+| 트렌딩 해시태그 캐시 | (서비스 설정 TTL) | `hashtag_service.py` |
+| 멱등성·업로드 토큰 등 | 클라이언트 식별자·엔드포인트별 | `app/api/dependencies/client.py`, media |
+
+**Stateless API**: 세션을 Redis에 두지 않고, **토큰 무효화·속도 제한·캐시·Pub/Sub**에 Redis를 쓴다.
+
+### 8.1 WebSocket 분산 Fan-out
+
+```mermaid
+sequenceDiagram
+    participant A as Worker A
+    participant R as Redis
+    participant B as Worker B
+    participant U as User WS on B
+    A->>R: PUBLISH puppytalk:channel:chat:dm
+    R->>B: message
+    B->>B: chat_connection_manager.send_personal_message
+    B->>U: WebSocket JSON
 ```
 
-### 2.1 미들웨어 순서
+발행 측은 `publish_chat_dm` (`pubsub.py`). 구독은 연결 풀과 분리된 **전용 Redis 연결**로 블로킹 루프를 돌린다(SSE 알림과 유사 패턴).
 
-**등록 방식**: RequestId·ProxyHeaders·RateLimit·GZip은 **순수 ASGI**로 `add_middleware()` 등록. Starlette LIFO이므로 **코드상 가장 마지막에 등록한 미들웨어**가 요청 진입 시 **가장 먼저** 실행된다. RequestIdMiddleware를 **최하단**에 두어 맨 먼저 ID를 발급하고, 이어서 ProxyHeaders(IP) → RateLimit → GZip 순으로 실행된다. 나머지(security_headers, access_log)는 `app.middleware("http")(...)`로 함수형 등록.
+---
 
-| 순서 | 단계 | 의도(Why) |
-|------|------|-----------|
-| 1 | **Request ID** | 순수 ASGI. 요청 진입 시 ULID 발급 → `scope.setdefault("state", {})["request_id"]` 저장(FastAPI의 `request.state.request_id`와 동일). `send`를 래핑해 `http.response.start` 시 **응답 헤더에 X-Request-ID 주입**하므로 4xx/5xx 예외 응답에도 헤더가 포함되어 프론트에서 에러 리포트 시 ID를 첨부할 수 있다. contextvars에 설정되어 로그 포맷 `[%(request_id)s]`로 **요청 단위 추적** 가능. |
-| 2 | **Proxy Headers** | 순수 ASGI(scope/receive/send). Nginx/ALB 뒤에서 실제 클라이언트 IP를 쓰기 위해 `X-Forwarded-For`를 사용할 수 있으나, **직접 파싱하면 IP 스푸핑**에 취약하다. **신뢰할 수 있는 프록시 IP**(`TRUSTED_PROXY_IPS`)에서 온 요청일 때만 첫 번째 값을 `scope["client"]`에 반영한다. Rate Limit·접근 로그는 **이후 항상 `request.client.host`만** 사용해, 한 번 검증된 IP만 신뢰한다. |
-| 3 | **Rate Limit** | 순수 ASGI. Redis 기반 **Fixed Window**. 경로별 키: 전역·로그인·회원가입 업로드. Lua로 INCR+EXPIRE 원자 처리. **Fail-open**: Redis 장애 시 로그인·회원가입 업로드만 **인메모리 Fallback**(10,000키, eviction) 적용, 나머지 경로는 제한 없이 통과(가용성 우선). OPTIONS·`/health`는 제외. |
-| 4 | **GZip** | Starlette `GZipMiddleware`. 응답 body가 **1KB 이상**일 때만 gzip 압축하여 전송(작은 JSON·에러 응답은 CPU 낭비 방지). `Accept-Encoding: gzip` 클라이언트에만 적용. |
-| 5 | **Access Log** | 요청 전 구간 시간 측정 → `call_next` 실행. 4xx는 WARNING, 5xx·미처리 예외는 ERROR·traceback 기록. DEBUG 시 응답에 `X-Process-Time` 헤더 추가. |
-| 6 | **Security Headers** | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, CSP(설정 시) 등으로 클릭재킹·MIME 스니핑 등을 완화한다. |
+## 9. 데이터베이스
 
-이후 **라우터 매칭** → **의존성 주입**(get_master_db / get_slave_db, get_current_user, get_client_identifier, 권한 체크) → **Route 핸들러** → **Service** → **Model** 순으로 진행한다.
+- **Master / Slave**: `get_master_db` · `get_slave_db` — URL은 `app/core/config.py`·`app/db/session.py`에서 구성. 단일 URL이면 동일 풀을 가리킬 수 있으나 **의존성 분리**는 유지한다.
+- **엔진**: `postgresql+psycopg` + `create_async_engine`, `async_sessionmaker`(`autobegin=False`).
+- **모델 커밋 금지**: CUD는 서비스의 `db.begin()` 안에서만 커밋한다.
 
-### 2.2 요청 흐름 다이어그램
+---
+
+## 10. 식별자: UUID v7 · Base62 (투트랙 직렬화)
+
+### 10.1 저장 계층: 16바이트 UUID (시간 국소성)
+
+**파일**: `app/core/ids.py`
+
+- 엔티티 PK는 PostgreSQL **`uuid`** 타입으로 저장한다. 신규 행은 앱에서 **`new_uuid7()`** (`app/core/ids.py`, `uuid_extensions.uuid7` 기반)을 발급해 B-Tree 인덱스의 **시간 국소성(Locality)** 과 삽입 패턴을 완화한다.
+- ORM·서비스·쿼리 경로에서는 **`UUID` 객체**로 다루어 비교·FK 조인 비용을 일정하게 유지한다.
+
+### 10.2 API 계층: Base62 문자열 (가독성·노출면)
+
+클라이언트-facing JSON에서는 PK를 **가변 길이 Base62 문자열**로 내려보낸다. 프론트는 고정 길이 ULID만 가정하면 안 된다.
+
+### 10.3 투트랙 브리지: `BeforeValidator` + `PlainSerializer`
+
+**파일**: `app/common/schemas.py`
+
+```python
+PublicId = Annotated[
+    UUID,
+    BeforeValidator(parse_public_id_value),
+    PlainSerializer(lambda u: uuid_to_base62(u), return_type=str),
+    WithJsonSchema({"type": "string", "description": "엔티티 공개 ID (Base62)"}),
+]
+```
+
+| 방향 | 동작 | 이점 |
+|------|------|------|
+| **입력 (역직렬화)** | `BeforeValidator(parse_public_id_value)` | 경로 파라미터·JSON 문자열이 Base62·UUID 문자열·레거시 ULID 등으로 와도 **단일 `UUID`로 정규화**된다. 서비스/DB는 항상 네이티브 UUID로 동작한다. |
+| **출력 (직렬화)** | `PlainSerializer` → `uuid_to_base62` | 응답 JSON에는 **짧은 Base62**만 노출되어 URL·로그에 적합하고, 내부 표현은 여전히 `UUID`이다. |
+| **스키마(OpenAPI)** | `WithJsonSchema` | 문서상 타입은 `string`으로 고정되어 클라이언트 생성 코드와 일치한다. |
+
+`parse_public_id_value`는 `app/core/ids.py`에 정의되어 있으며, ORM에서 온 `UUID`는 그대로 통과시키고 문자열만 파싱한다.
+
+### 10.4 JWT `sub`와 비엔티티 ID
+
+- JWT `sub`는 Base62·UUID 문자열·레거시 ULID를 `jwt_sub_to_uuid`로 수용한다(`app/core/ids.py`).
+- Access/Refresh의 **`jti`**, 요청 추적용 **`request_id`** 등 비엔티티 식별자는 **ULID 문자열**을 유지해 로그·블랙리스트 키와의 호환을 취한다.
+
+---
+
+## 11. 인증·토큰·세션성 상태
+
+- **Access**: Bearer, 짧은 TTL, `jti`로 로그아웃 시 블랙리스트.
+- **Refresh**: HttpOnly 쿠키, Redis에 SHA256 다이제스트, Lua **원자 회전**으로 동시 리프레시 레이스 완화.
+- **비밀번호**: bcrypt + pepper(위 §4.3).
+
+상세 흐름은 README 「기능 정리」와 동일하며, 여기서는 **아키텍처 관점에서 Redis가 토큰 상태의 단일 진실 공급원(SoT)** 역할을 한다는 점만 강조한다.
+
+---
+
+## 12. 데이터 정합성·도메인 협업
+
+- **게시글·댓글·좋아요·신고**: 소프트 삭제, `ON CONFLICT` 멱등, 신고 누적·블라인드 등은 README 「기능 정리」 및 각 `service.py`가 단일 진실 공급원이다.
+- **알림**: 트랜잭션 커밋 **후** Redis로 팬아웃해 DB 커밋과 이벤트 순서를 맞춘다.
+
+### 12.1 도메인 참조(요약)
 
 ```mermaid
 flowchart LR
-    subgraph 미들웨어
-        A[request_id<br/>순수 ASGI] --> B[proxy_headers<br/>순수 ASGI]
-        B --> C[rate_limit<br/>순수 ASGI]
-        C --> D[gzip]
-        D --> E[access_log]
-        E --> F[security_headers]
-    end
-    F --> G[라우터]
-    G --> H[의존성: DB·CurrentUser·권한]
-    H --> I[Service]
-    I --> J[Model]
-    J --> K[응답]
+    auth[auth] --> users[users]
+    auth --> media[media]
+    users --> media
+    chat[chat] --> users
+    posts[posts] --> media
+    posts --> likes[likes]
+    comments[comments] --> posts
+    likes --> posts
+    likes --> comments
+    reports[reports] --> posts
+    reports --> comments
+    admin[admin] --> posts
+    admin --> comments
+    admin --> users
+    admin --> reports
+    dogs[dogs] --> users
 ```
 
-- **IP 일관성**: Rate Limit·Access Log 모두 **ProxyHeadersMiddleware에서 검증된 `request.client.host`**만 사용하므로, 헤더를 직접 파싱하는 코드는 두지 않는다(스푸핑 방어).
+**chat**: 방·메시지 영속은 DB, 실시간 전달은 WebSocket + Redis Pub/Sub. 인증은 `users`와 동일 JWT 규칙을 공유한다.
 
 ---
 
-## 3. 데이터베이스 아키텍처
+## 13. 성능: N+1·스토리지·조회수
 
-### 3.1 Master / Slave 분리 원리
-
-| 구분 | 의존성 | URL | 용도 |
-|------|--------|-----|------|
-| **쓰기(CUD)** | `get_master_db()` | `WRITER_DB_URL` (미설정 시 `DB_*` 단일 URL) | 회원가입·로그인 제외한 모든 생성·수정·삭제 |
-| **읽기(Read)** | `get_slave_db()` | `READER_DB_URL` (미설정 시 Writer와 동일) | 목록·상세·가용성 조회 등 읽기 전용 |
-
-- **의도**: 조회 부하를 Reader 풀으로 분산하고, Writer 풀은 쓰기 전용으로 유지한다. 단일 URL 구성 시에도 **의존성만 나누어** 추후 Read Replica 도입 시 URL만 바꾸면 된다.
-
-### 3.2 READ ONLY 세션 적용 메커니즘
-
-Reader 엔진은 Writer와 **별도 풀**로 분리되어 있으며, 동일 URL(또는 `READER_DB_URL`)로 읽기 전용 복제본에 연결할 수 있다. PostgreSQL에서는 필요 시 트랜잭션 시작 시 `SET TRANSACTION READ ONLY`를 적용해 쓰기 방지할 수 있다. 애플리케이션에서는 `get_slave_db()`로 Reader 세션만 사용하므로, 쓰기 로직이 Reader에 주입되지 않도록 의존성 구분을 유지한다.
-
-### 3.3 풀 및 세션 (Full-Async)
-
-- 엔진은 **psycopg3** (`postgresql+psycopg://`) + **create_async_engine**으로 생성하며, `async_sessionmaker`로 AsyncSession 팩토리(autobegin=False, expire_on_commit=False)를 둔다.
-- 풀 설정은 환경 변수로 조정한다.
-- 요청 스코프: **get_master_db**·**get_slave_db**에서 AsyncSession을 yield한 뒤 finally에서 close. **트랜잭션은 서비스에서만** `async with db.begin():`으로 시작·커밋한다(모델에서 commit/rollback 금지).
-- 비요청 스코프(cleanup, 예외 핸들러 등): 별도 연결 컨텍스트 매니저를 사용하고, 호출부에서 `async with db.begin():`으로 트랜잭션을 관리한다.
+- **N+1**: 게시글 목록에서 `selectinload` + FK 인덱스.
+- **S3**: 클라이언트 싱글톤(`app/infra/storage.py` 패턴).
+- **조회수**: Redis 버퍼 + 주기 flush 루프(`main.py` lifespan). 클라이언트 식별자·중복 억제 정책은 README와 동일.
 
 ---
 
-## 4. 인증·보안
+## 14. DM 채팅: WebSocket · Redis Pub/Sub · 다중 워커
 
-### 4.1 JWT + Redis를 조합한 토큰 무효화(Revocation) 전략
+### 14.1 다중 워커에서의 한계
 
-- **Access Token**: Stateless. `Authorization: Bearer <token>`으로 전달. 서버에 저장하지 않아 **수평 확장·멀티 인스턴스**에 유리하다. 만료 시 401 + `TOKEN_EXPIRED`로 프론트에서 Refresh 호출을 유도한다.
-- **Refresh Token**: HttpOnly 쿠키 + **Redis Set** `rt:{user_id}` 저장. 토큰은 **SHA256 해시**로 저장·검증하여 원문 노출을 방지한다. **멀티 디바이스 지원**: `SADD`(로그인), `SISMEMBER`(리프레시), `SREM`(단일 기기 로그아웃), `DEL`(전체 무효화—탈퇴·비밀번호 변경). XSS로부터 토큰 값을 읽기 어렵게 하고, 즉시 무효화 가능하다.
-- 로그인 시 Access는 JSON body, Refresh는 쿠키(HttpOnly, Secure, SameSite=Lax)로 내려준다. Refresh 요청 시 쿠키의 토큰 해시가 Redis Set에 있는지 확인한 뒤, 통과 시 새 Access Token만 JSON으로 반환한다.
+**Gunicorn + Uvicorn worker** 또는 **여러 Uvicorn 프로세스**로 수평 확장하면, 각 프로세스는 **자기 메모리 안의** `ConnectionManager`만 본다.  
+따라서 “유저 A의 WebSocket이 워커 1에 붙어 있는데, 동일 유저에게 메시지를 보내는 HTTP 요청이 워커 2에서 처리된 경우”처럼 **송신 처리와 수신 소켓이 다른 OS 프로세스**에 있으면, 로컬 딕셔너리만으로는 상대방 소켓을 찾을 수 없다.
 
-### 4.2 Magic Byte 기반 이미지 업로드 검증
+이 제약을 풀기 위해 **프로세스 간 브로드캐스트**로 Redis **Pub/Sub**를 사용한다.
 
-**Content-Type 헤더만 믿으면** 악의적으로 조작된 파일이 이미지로 저장될 수 있다.  
-업로드 시 **파일 시그니처(매직 바이트)**로 실제 포맷을 검증한다. 허용 타입(JPEG, PNG, WebP)이어도 **바이트 스트림 앞부분**이 해당 포맷 시그니처와 일치하지 않으면 거부한다. 용량은 청크 단위로 읽으며 `MAX_FILE_SIZE` 초과 시 중단한다.
+### 14.2 Fan-out 아키텍처 (핵심)
 
-### 4.3 Pydantic을 활용한 XSS 방어
+1. 메시지가 커밋되면(또는 송신 경로에서) `publish_chat_dm` (`app/domain/chat/pubsub.py`)이 채널 **`puppytalk:channel:chat:dm`** 으로 **envelope**를 `PUBLISH`한다. envelope에는 수신자 `target_user_id`(UUID 문자열)와 클라이언트에 그대로 전달할 `payload`가 들어간다.
+2. **각 워커 프로세스**는 앱 기동 시 `run_chat_subscribe_listener`로 **동일 채널을 구독**한다(풀과 분리된 전용 연결).
+3. 메시지를 받은 워커만 로컬 `chat_connection_manager` (`app/domain/chat/manager.py`의 싱글톤)로 **해당 `user_id`에 연결된 WebSocket**에 `send_json`한다. 다른 워커에 붙은 소켓은 그 워커의 구독 루프가 처리한다.
 
-요청·응답 DTO는 **Pydantic v2** 스키마로 검증·직렬화된다. 문자열 필드는 이스케이프 등으로 안전하게 다루며, 응답은 항상 스키마를 거쳐 내려가므로 **임의 HTML/스크립트 주입**을 줄이는 데 기여한다. (추가로 CSP 등 보안 헤더는 security_headers 미들웨어에서 설정한다.)
+이로써 **워커는 무상태에 가깝게** 유지되고, “누가 어느 TCP에 붙었는지”는 각 프로세스의 로컬 맵 + Redis가 분담한다.
 
----
+```mermaid
+flowchart TB
+    subgraph W1[Worker 1]
+        CM1[ConnectionManager]
+        WS1[WebSocket tabs User U]
+    end
+    subgraph W2[Worker 2]
+        SVC[Chat send / HTTP]
+        PUB[publish_chat_dm]
+    end
+    R[(Redis)]
+    SVC --> PUB
+    PUB --> R
+    R --> CM1
+    CM1 --> WS1
+```
 
-## 5. 데이터 정합성
+### 14.3 `ConnectionManager`: 1 User → N Sockets + `asyncio.Lock`
 
-- **게시글(Post)**: `deleted_at`으로 **Soft Delete**. `blinded_at`은 신고 누적으로 자동 블라인드 시 설정. 목록·상세 조회 시 `deleted_at IS NULL`만 노출하며, 삭제 시 댓글(Comment)·좋아요(Like)·post_images·이미지 ref_count를 함께 정리한다.
-- **좋아요(Like)**: 좋아요 버튼을 **두 번 눌러도** 에러가 나지 않도록, INSERT 시 `ON CONFLICT DO NOTHING`을 사용한다. RETURNING으로 실제 삽입 여부를 확인해 **새로 추가된 경우에만** like_count를 증가시킨다. 취소 시에는 DELETE 후 like_count 감소. 한 요청당 단일 트랜잭션으로 묶어 정합성을 유지한다. 게시글 삭제 시 좋아요 행은 함께 Hard Delete한다.
-- **댓글(Comment)**: 루트·대댓글 모두 **Soft Delete**. **루트 댓글**을 삭제하면 목록에는 남겨 두되 "삭제된 댓글입니다"로 표시한다. **대댓글**을 삭제하면 목록에서 아예 제외한다. 자식이 하나도 없는 삭제된 루트는 트리 빌드 시 제외해 빈 껍데기가 안 보이게 한다.
+**파일**: `app/domain/chat/manager.py`
 
-### 5.2 회원가입–이미지 참조 무결성(ref_count)
+- 구조: `_by_user: dict[UUID, set[WebSocket]]` — 한 사용자가 **여러 탭·기기**로 동시에 연결하면 **여러 소켓**이 한 버킷에 들어간다.
+- **`asyncio.Lock`**: `connect` / `disconnect` / `send_personal_message`에서 맵을 갱신하거나 스냅샷을 뜰 때 **동시 코루틴이 set을 망가뜨리지 않도록** 직렬화한다. 전송 루프는 스냅샷 `list(sockets)`에 대해 순회하며, 전송 실패 시 해당 소켓에 대해 `disconnect`를 호출한다.
+- WebSocket 엔드포인트: `app/api/v1/chat/ws.py` — **`/v1/ws/chat`**, 쿼리 `token=` Access JWT.
+- 인증: `app/domain/chat/ws_auth.py` — HTTP `get_current_user`와 동일하게 JWT·**`jti` 블랙리스트**를 적용한다.
 
-회원가입 시 **유저 생성**과 **프로필 이미지 소유권 이전**을 한 트랜잭션에서 처리한다.
+### 14.4 메시지 검증
 
-1. 유저 생성.
-2. 프로필 이미지가 있으면: signupToken 검증 → 이미지 `uploader_id` 설정, `ref_count` +1, 토큰 필드 NULL 처리.
-
-이미지가 없으면 2단계를 건너뛰고 정상 가입된다. 트랜잭션은 서비스의 `async with db.begin():` 블록 종료 시 자동 커밋된다.
-
-### 5.3 복수 테이블 조율
-
-**여러 테이블을 함께 갱신해야 하는 로직**은 Service에서 한 트랜잭션으로 처리한다.
-
-- **댓글 생성/삭제** → 게시글의 `comment_count` 증감
-- **게시글 삭제** → 댓글·좋아요·이미지 링크·이미지 ref_count 정리 후 soft delete
-- **프로필 수정(강아지·이미지)** → 강아지 테이블 동기화 + 기존/신규 이미지 ref_count 증감
-- **신고 무시(관리자)** → `reports` 해당 target 행들 soft delete(`deleted_at`) 후, 글/댓글의 `report_count`·`is_blinded` 초기화
-
----
-
-## 6. 성능 최적화
-
-### 6.1 selectinload를 활용한 N+1 쿼리 방어
-
-게시글 목록처럼 **1:N 컬렉션**(예: `post_images`)을 함께 불러올 때, **joinedload**만 쓰면 LIMIT이 “행 기준”으로 적용되어, 조인 결과 행이 폭증한 뒤 애플리케이션에서 unique로 줄이는 형태가 된다.  
-**`selectinload(Post.post_images)`**를 사용하면:
-
-- 메인 쿼리: Post에 **LIMIT/OFFSET**이 정확히 적용되고, N:1인 `Post.user`는 **joinedload**로 유지해도 행 수를 부풀리지 않는다.
-- 보조 쿼리 1회: `post_id IN (...)`으로 해당 포스트들의 `post_images`(및 필요 시 `PostImage.image`)만 추가 로드한다.
-
-따라서 **N+1**을 막으면서도 **페이지네이션**이 DB 레벨에서 올바르게 동작한다. **FK 인덱스**: `selectinload`가 발생시키는 `WHERE foreign_key_id IN (...)` 쿼리 성능을 위해, PostImage.post_id·Comment.post_id·DogProfile.owner_id 등 1:N 자식 측 FK 컬럼에는 `index=True`를 두어 인덱스가 생성되도록 했다.
-
-### 6.2 S3 클라이언트 싱글톤
-
-S3 사용 시 **매 요청마다 클라이언트를 새로 만들지 않는다**.  
-첫 호출 시에만 생성해 전역에 캐시하고, 이후 업로드·삭제는 모두 해당 클라이언트를 재사용한다. 연결·인증 오버헤드를 줄인다.  
-로컬 저장소(`STORAGE_BACKEND=local`) 환경에서는 S3 코드를 아예 타지 않으므로 boto3 의존성이 로드되지 않는다.
-
-### 6.3 조회수 중복 방지
-
-GET이 멱등해야 하므로 조회수는 **전용 POST 엔드포인트**로만 증가시킨다.
-
-**동작**: 같은 (게시글ID, 클라이언트 식별자) 조합으로 TTL(24시간) 내 재요청이 오면 조회수를 올리지 않는다. 인메모리 dict로 `(post_id, client_identifier)` → 만료 시각을 저장하고, 50,000키 초과 시 오래된 항목을 evict한다.
-
-**클라이언트 식별자**: Rate Limit·Access Log는 ProxyHeaders가 검증한 `request.client`만 쓰지만, 조회수는 X-Forwarded-For를 직접 참조한다. 조회수 조작 영향이 제한적이어서 가용성을 우선한다. 추후 Redis로 분산 전환 가능하다.
+- 수신 텍스트 JSON은 `app/domain/chat/payload.py`에서 `TypeAdapter(ChatMessageSend).validate_json`으로 검증한다.
 
 ---
 
-## 7. 이미지: signupToken·ref_count
+## 15. 이미지·피드·신고 (요약)
 
-이미지는 **미리 업로드한 뒤** 본문·가입과 연결하는 방식이다. 가입 전 이미지는 **signupToken**으로 소유를 증명하고, **ref_count**로 참조 수를 관리해 0이 되면 파일·DB 레코드를 정리한다.
-
-- **signupToken**: 업로드 시 토큰 발급, DB에는 해시만 저장. 회원가입 요청 시 `profileImageId`·`signupToken`을 보내 서버가 검증한 뒤 `attach_signup_image`로 `uploader_id`·ref_count 갱신 및 토큰 필드 NULL 처리.
-- **ref_count**: 게시글 첨부·프로필·가입 시 +1, 제거·삭제 시 -1. **0 이하가 되면** `storage_delete` 후 Image 레코드 삭제. 사용 중인 이미지(`ref_count > 0`)는 `delete_image_by_owner`에서 삭제를 거부(409 CONFLICT)하여 **엑스박스·정합성 깨짐**을 방지한다.
-
-저장소는 `STORAGE_BACKEND=local`이면 프로젝트 `upload/`, `s3`이면 S3이며 `build_url`로 URL을 만든다.
+- **이미지**: 매직 바이트 검증, `signupToken`·`ref_count`, 스토리지 백엔드 추상화 — 세부는 README 및 도메인 `media`.
+- **피드**: `pg_trgm`·GIN·부분 인덱스·차단 필터·신고 누적 블라인드 — DB·쿼리 전략은 README와 동일.
 
 ---
 
-## 8. 게시글 피드: 검색·차단·신고
+## 문서 이력
 
-### 8.1 검색
-
-게시글 목록 API의 `q` 쿼리 파라미터로 **제목·본문 검색**을 한다.
-
-**동작**: `q`가 있으면 `title ILIKE %pattern%` OR `content ILIKE %pattern%` 조건을 추가한다. 한글·부분 일치가 가능하다. PostgreSQL `pg_trgm` 확장과 GIN 인덱스로 `ILIKE` 패턴 검색 성능을 보완한다.
-
-### 8.2 차단(Block) 필터
-
-유저가 다른 유저를 차단하면, **피드·댓글**에서 차단한 유저의 게시글·댓글이 보이지 않는다.
-
-**동작**: 로그인한 유저가 목록/상세를 조회할 때, 쿼리에 "현재 유저가 차단한 유저의 콘텐츠 제외" 조건을 넣는다. 비로그인 사용자에게는 적용하지 않는다.
-
-### 8.3 신고·블라인드
-
-게시글·댓글을 신고할 수 있다. 신고는 **항상 새 행(Insert)**으로 누적되며, 동일 유저가 같은 대상을 다시 신고해도 별도 레코드가 추가된다.
-
-**동작**:
-- 신고 시 `reports` 테이블에 `target_type`(POST/COMMENT), `target_id`, `reason`(`ReportReason`: 스팸·욕설·부적절한 콘텐츠·기타)으로 행을 삽입하고, 해당 글/댓글의 `report_count`를 1 증가시킨다.
-- `report_count`가 임계값(기본 5) 이상이면 **자동 블라인드**된다.
-- **신고 무시**(관리자 초기화) 시에만 해당 target의 `reports` 행을 **soft delete**(`deleted_at` 설정)하고, 글/댓글의 `report_count`·`is_blinded`를 초기화한다. 이후 같은 유저가 다시 신고하면 새 행이 생성되어 목록에 다시 노출된다.
-- `reports` 테이블에는 `status` 컬럼을 두지 않으며, 애플리케이션에서는 `TargetType` enum(POST, COMMENT)으로 `target_type`을, `ReportReason`으로 API 입력 `reason`을 다룬다.
-
-블라인드된 콘텐츠는 관리자 화면에서 검토·블라인드 해제·신고 무시·삭제(글/댓글)할 수 있다.
-
----
+- 최신: AI/ML 로드맵 섹션 제거. **투트랙 식별자(Pydantic `PublicId`)**·**다중 워커 + Redis Pub/Sub DM** 서술 보강. 이미지·피드·신고 세부는 README 및 `app/domain/*`와 병행.

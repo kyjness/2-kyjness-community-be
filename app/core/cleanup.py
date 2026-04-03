@@ -64,6 +64,21 @@ async def run_once(redis: Redis | None = None) -> None:
     except Exception as e:
         log.warning("withdrawn_user_purge_failed task_id=%s error=%s", task_id, e)
 
+    # 4) 알림 자동 삭제(30일 경과)
+    try:
+        from app.notifications.service import NotificationService
+
+        async with get_connection() as db:
+            deleted = await NotificationService.purge_old_notifications(
+                older_than_days=30,
+                chunk_size=2_000,
+                db=db,
+            )
+        if deleted:
+            log.info("notification_purge_done task_id=%s deleted_count=%s", task_id, deleted)
+    except Exception as e:
+        log.warning("notification_purge_failed task_id=%s error=%s", task_id, e)
+
 
 async def run_loop_async(stop_event: asyncio.Event, redis: Redis | None = None) -> None:
     interval = max(60, settings.SIGNUP_IMAGE_CLEANUP_INTERVAL)

@@ -5,6 +5,7 @@ import asyncio
 import logging
 import secrets
 from typing import Any, cast
+from uuid import UUID
 
 from fastapi import UploadFile
 from redis.asyncio import Redis
@@ -67,7 +68,7 @@ async def _try_acquire_job_lock(
 
 class MediaService:
     @classmethod
-    async def issue_upload_token(cls, image_id: str, redis: Redis | None) -> str:
+    async def issue_upload_token(cls, image_id: UUID, redis: Redis | None) -> str:
         if redis is None:
             raise InternalServerErrorException("Redis unavailable for upload token issuance.")
         token = secrets.token_urlsafe(32)
@@ -78,7 +79,7 @@ class MediaService:
         return token
 
     @classmethod
-    async def verify_upload_token(cls, token: str, redis: Redis | None) -> str | None:
+    async def verify_upload_token(cls, token: str, redis: Redis | None) -> UUID | None:
         if not token or redis is None:
             return None
         key = f"{_UPLOAD_TOKEN_KEY_PREFIX}{token}"
@@ -95,7 +96,14 @@ class MediaService:
                 image_id = image_id_raw
             else:
                 return None
-            return image_id or None
+            if not image_id:
+                return None
+            from app.core.ids import parse_public_id_value
+
+            try:
+                return parse_public_id_value(image_id)
+            except ValueError:
+                return None
         except Exception as e:
             logger.warning("verify_upload_token redis error: %s", e)
             return None
@@ -139,7 +147,7 @@ class MediaService:
     async def upload_image(
         cls,
         file: UploadFile,
-        user_id: str,
+        user_id: UUID,
         purpose: str,
         db: AsyncSession,
     ) -> ImageUploadResponse:
@@ -169,7 +177,7 @@ class MediaService:
             raise
 
     @classmethod
-    async def delete_image(cls, image_id: str, user_id: str, db: AsyncSession) -> None:
+    async def delete_image(cls, image_id: UUID, user_id: UUID, db: AsyncSession) -> None:
         file_key = None
         async with db.begin():
             image = await MediaModel.get_image_by_id(image_id, db=db)

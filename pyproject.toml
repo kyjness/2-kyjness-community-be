@@ -27,6 +27,7 @@ dependencies = [
     "alembic>=1.13.0",
     "mangum>=0.21.0",
     "python-ulid>=2.7.0",
+    "uuid7>=0.1.0",
 ]
 
 [project.optional-dependencies]

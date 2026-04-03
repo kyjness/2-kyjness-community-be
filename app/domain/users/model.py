@@ -3,6 +3,7 @@ from datetime import date as DateType
 from datetime import datetime as DateTimeType
 from datetime import timedelta
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
@@ -17,29 +18,32 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
 
 from app.common.enums import UserStatus
-from app.core.ids import new_ulid_str
+from app.core.ids import new_uuid7
 from app.db.base_class import Base, utc_now
 from app.infra.storage import build_url
 from app.media.model import Image
+
+_PG_UUID = PG_UUID(as_uuid=True)
 
 
 class DogProfile(Base):
     __tablename__ = "dog_profiles"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
-    owner_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    owner_id: Mapped[UUID] = mapped_column(
+        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     breed: Mapped[str] = mapped_column(String(100), nullable=False)
     gender: Mapped[str] = mapped_column(String(20), nullable=False)
     birth_date: Mapped[DateType] = mapped_column(Date, nullable=False)
-    profile_image_id: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
+    profile_image_id: Mapped[UUID | None] = mapped_column(
+        _PG_UUID, ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
     )
     is_representative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -62,14 +66,14 @@ class DogProfile(Base):
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
+    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     __mapper_args__ = {"version_id_col": version}
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(String(255), nullable=False)
     nickname: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    profile_image_id: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    profile_image_id: Mapped[UUID | None] = mapped_column(
+        _PG_UUID, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="USER")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=UserStatus.ACTIVE.value)
@@ -113,11 +117,11 @@ class UserBlock(Base):
         UniqueConstraint("blocker_id", "blocked_id", name="uq_user_blocks_blocker_blocked"),
     )
 
-    blocker_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    blocker_id: Mapped[UUID] = mapped_column(
+        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    blocked_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    blocked_id: Mapped[UUID] = mapped_column(
+        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -128,12 +132,12 @@ class UserBlock(Base):
 class Report(Base):
     __tablename__ = "reports"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
-    reporter_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    reporter_id: Mapped[UUID] = mapped_column(
+        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     target_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    target_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    target_id: Mapped[UUID] = mapped_column(_PG_UUID, nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
     deleted_at: Mapped[DateTimeType | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -148,7 +152,7 @@ class UsersModel:
         email: str,
         hashed_password: str,
         nickname: str,
-        profile_image_id: str | None = None,
+        profile_image_id: UUID | None = None,
         *,
         db: AsyncSession,
     ) -> User:
@@ -168,7 +172,7 @@ class UsersModel:
         return user
 
     @classmethod
-    async def get_user_by_id(cls, user_id: str, db: AsyncSession) -> User | None:
+    async def get_user_by_id(cls, user_id: UUID, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -178,13 +182,13 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_user_by_id_including_deleted(cls, user_id: str, db: AsyncSession) -> User | None:
+    async def get_user_by_id_including_deleted(cls, user_id: UUID, db: AsyncSession) -> User | None:
         stmt = select(User).where(User.id == user_id).options(joinedload(User.profile_image))
         result = await db.execute(stmt)
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_user_by_id_with_dogs(cls, user_id: str, db: AsyncSession) -> User | None:
+    async def get_user_by_id_with_dogs(cls, user_id: UUID, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -197,7 +201,7 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_users_by_ids(cls, user_ids: list[str], db: AsyncSession) -> dict[str, User]:
+    async def get_users_by_ids(cls, user_ids: list[UUID], db: AsyncSession) -> dict[UUID, User]:
         if not user_ids:
             return {}
         stmt = (
@@ -220,7 +224,7 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_password_hash(cls, user_id: str, db: AsyncSession) -> str | None:
+    async def get_password_hash(cls, user_id: UUID, db: AsyncSession) -> str | None:
         result = await db.execute(
             select(User.password).where(User.id == user_id, User.deleted_at.is_(None))
         )
@@ -245,7 +249,7 @@ class UsersModel:
     @classmethod
     async def update_user(
         cls,
-        user_id: str,
+        user_id: UUID,
         *,
         db: AsyncSession,
         **fields: Any,
@@ -263,7 +267,7 @@ class UsersModel:
         return r.scalar_one_or_none() is not None
 
     @classmethod
-    async def update_password(cls, user_id: str, hashed_password: str, db: AsyncSession) -> bool:
+    async def update_password(cls, user_id: UUID, hashed_password: str, db: AsyncSession) -> bool:
         r = await db.execute(
             update(User)
             .where(User.id == user_id, User.deleted_at.is_(None))
@@ -273,7 +277,7 @@ class UsersModel:
         return r.scalar_one_or_none() is not None
 
     @classmethod
-    async def get_blocked_users(cls, blocker_id: str, db: AsyncSession) -> list[User]:
+    async def get_blocked_users(cls, blocker_id: UUID, db: AsyncSession) -> list[User]:
         """내가 차단한 유저 목록 (삭제되지 않은 유저만, 차단 시점 최신순)."""
         stmt = (
             select(User)
@@ -289,7 +293,7 @@ class UsersModel:
         return list(result.unique().scalars().all())
 
     @classmethod
-    async def block_exists(cls, blocker_id: str, blocked_id: str, db: AsyncSession) -> bool:
+    async def block_exists(cls, blocker_id: UUID, blocked_id: UUID, db: AsyncSession) -> bool:
         result = await db.execute(
             select(UserBlock.blocker_id)
             .where(
@@ -301,7 +305,7 @@ class UsersModel:
         return result.first() is not None
 
     @classmethod
-    async def block_user(cls, blocker_id: str, blocked_id: str, db: AsyncSession) -> None:
+    async def block_user(cls, blocker_id: UUID, blocked_id: UUID, db: AsyncSession) -> None:
         db.add(
             UserBlock(
                 blocker_id=blocker_id,
@@ -312,7 +316,7 @@ class UsersModel:
         await db.flush()
 
     @classmethod
-    async def unblock_user(cls, blocker_id: str, blocked_id: str, db: AsyncSession) -> int:
+    async def unblock_user(cls, blocker_id: UUID, blocked_id: UUID, db: AsyncSession) -> int:
         r = await db.execute(
             delete(UserBlock)
             .where(
@@ -326,7 +330,7 @@ class UsersModel:
     _DELETED_AT_MAX_LEN = 255
 
     @classmethod
-    def _deleted_at_suffix(cls, user_id: str) -> str:
+    def _deleted_at_suffix(cls, user_id: UUID) -> str:
         ts = int(utc_now().timestamp())
         return f"_deleted_{user_id}_{ts}"
 
@@ -338,7 +342,7 @@ class UsersModel:
         return (base + suffix)[:max_len]
 
     @classmethod
-    async def delete_user(cls, user_id: str, db: AsyncSession) -> bool:
+    async def delete_user(cls, user_id: UUID, db: AsyncSession) -> bool:
         stmt = select(User.id, User.email, User.nickname).where(
             User.id == user_id, User.deleted_at.is_(None)
         )
@@ -372,7 +376,7 @@ class UsersModel:
         older_than_days: int,
         limit: int,
         db: AsyncSession,
-    ) -> list[str]:
+    ) -> list[UUID]:
         """탈퇴(WITHDRAWN) + deleted_at 기준 N일 경과 유저를 하드 삭제.
 
         - 대량 삭제로 인한 락을 줄이기 위해 limit 단위로 청크 처리한다.

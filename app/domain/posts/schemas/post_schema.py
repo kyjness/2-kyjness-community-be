@@ -2,7 +2,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, Field, computed_field, field_validator, model_validator
 
-from app.common import BaseSchema, UserStatus, UtcDatetime
+from app.common import BaseSchema, OptionalPublicId, PublicId, UserStatus, UtcDatetime
 from app.common.codes import ApiCode
 from app.users.schema import RepresentativeDogInfo
 
@@ -21,12 +21,12 @@ def _hashtags_max_six(v: list[str] | None) -> list[str] | None:
     return v
 
 
-ImageIdsMaxFive = Annotated[list[str] | None, AfterValidator(_image_ids_max_five)]
+ImageIdsMaxFive = Annotated[list[PublicId] | None, AfterValidator(_image_ids_max_five)]
 HashtagsMaxSix = Annotated[list[str] | None, AfterValidator(_hashtags_max_six)]
 
 
 class PostIdData(BaseSchema):
-    id: str
+    id: PublicId
 
 
 class PostCreateRequest(BaseSchema):
@@ -50,9 +50,9 @@ class PostUpdateRequest(BaseSchema):
 
 
 class AuthorInfo(BaseSchema):
-    id: str
+    id: PublicId
     nickname: str
-    profile_image_id: str | None = None
+    profile_image_id: OptionalPublicId = None
     profile_image_url: str | None = None
     representative_dog: RepresentativeDogInfo | None = None
 
@@ -75,13 +75,13 @@ class AuthorInfo(BaseSchema):
 
 
 class FileInfo(BaseSchema):
-    id: str
+    id: PublicId
     file_url: str | None = None
-    image_id: str | None = None
+    image_id: OptionalPublicId = None
 
 
 class PostResponse(BaseSchema):
-    id: str
+    id: PublicId
     title: str
     content: str
     view_count: int = 0

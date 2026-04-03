@@ -8,9 +8,9 @@ from pydantic import Field
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common import BaseSchema, UserStatus, UtcDatetime
+from app.common import BaseSchema, OptionalPublicId, PublicId, UserStatus, UtcDatetime
 from app.common.exceptions import ForbiddenException, UnauthorizedException
-from app.core.ids import is_valid_ulid_str
+from app.core.ids import jwt_sub_to_uuid
 from app.core.security import access_jti_blacklist_redis_key, verify_access_token
 from app.db import utc_now
 from app.users.model import UsersModel
@@ -19,11 +19,11 @@ from .db import get_slave_db
 
 
 class CurrentUser(BaseSchema):
-    id: str = Field(..., description="사용자 ID (ULID)")
+    id: PublicId = Field(..., description="사용자 공개 ID (Base62)")
     email: str = ""
     nickname: str = ""
     role: str | None = Field(default="USER", description="USER|ADMIN")
-    profile_image_id: str | None = None
+    profile_image_id: OptionalPublicId = None
     profile_image_url: str | None = None
     created_at: UtcDatetime = Field(default_factory=utc_now)
 
@@ -71,9 +71,12 @@ async def get_current_user_optional(
     sub = payload.get("sub")
     if sub is None:
         return None
-    if not isinstance(sub, str) or not is_valid_ulid_str(sub):
+    if not isinstance(sub, str):
         return None
-    user_id = sub
+    try:
+        user_id = jwt_sub_to_uuid(sub)
+    except ValueError:
+        return None
     async with db.begin():
         user = await UsersModel.get_user_by_id(user_id, db=db)
         if not user or not UserStatus.is_active_value(user.status):
@@ -100,9 +103,12 @@ async def get_current_user(
     sub = payload.get("sub")
     if sub is None:
         raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.")
-    if not isinstance(sub, str) or not is_valid_ulid_str(sub):
+    if not isinstance(sub, str):
         raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.")
-    user_id = sub
+    try:
+        user_id = jwt_sub_to_uuid(sub)
+    except ValueError:
+        raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.") from None
     async with db.begin():
         user = await UsersModel.get_user_by_id(user_id, db=db)
         if not user:

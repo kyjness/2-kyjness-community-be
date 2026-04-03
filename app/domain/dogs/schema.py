@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, Field
 
-from app.common import BaseSchema, DogGender
+from app.common import BaseSchema, DogGender, OptionalPublicId, PublicId
 
 # --- 1. 상수 (없음) ---
 # --- 2. 내부 헬퍼 ---
@@ -30,12 +30,12 @@ class DogProfileCreate(BaseSchema):
 
 
 class DogProfileResponse(BaseSchema):
-    id: str
+    id: PublicId
     name: str
     breed: str
     gender: DogGender
     birth_date: date
-    profile_image_id: str | None = None
+    profile_image_id: OptionalPublicId = None
     profile_image_url: str | None = None
     is_representative: bool = False
 
@@ -48,16 +48,14 @@ class RepresentativeDogInfo(BaseSchema):
 
 
 class DogProfileUpsertItem(BaseSchema):
-    id: str | None = Field(default=None, description="있으면 수정, 없으면 생성")
+    id: OptionalPublicId = Field(default=None, description="있으면 수정, 없으면 생성")
     name: str = Field(..., min_length=1, max_length=100)
     breed: str = Field(..., min_length=1, max_length=100)
     gender: DogGender = Field(...)
     birth_date: BirthDateNotFuture = Field(...)
-    profile_image_id: str | None = None
+    profile_image_id: OptionalPublicId = None
     is_representative: bool = False
 
 
 class SetRepresentativeDogRequest(BaseSchema):
-    dog_id: str = Field(
-        ..., min_length=26, max_length=26, description="대표로 지정할 강아지 ID (ULID)"
-    )
+    dog_id: PublicId = Field(..., description="대표로 지정할 강아지 ID (Base62)")

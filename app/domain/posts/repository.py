@@ -1,6 +1,8 @@
 # 게시글·post_images 데이터 접근. ORM은 .model 참조.
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy import delete, exists, false, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +47,7 @@ class PostsModel:
     @classmethod
     async def sync_post_hashtags(
         cls,
-        post_id: str,
+        post_id: UUID,
         hashtag_names: list[str],
         *,
         db: AsyncSession,
@@ -84,15 +86,15 @@ class PostsModel:
     @classmethod
     async def create_post(
         cls,
-        user_id: str,
+        user_id: UUID,
         title: str,
         content: str,
-        image_ids: list[str] | None = None,
+        image_ids: list[UUID] | None = None,
         category_id: int | None = None,
         hashtag_names: list[str] | None = None,
         *,
         db: AsyncSession,
-    ) -> str:
+    ) -> UUID:
         image_ids = image_ids or []
         now = utc_now()
         post = Post(
@@ -116,9 +118,9 @@ class PostsModel:
     @classmethod
     async def get_post_by_id(
         cls,
-        post_id: str,
+        post_id: UUID,
         db: AsyncSession,
-        current_user_id: str | None = None,
+        current_user_id: UUID | None = None,
     ) -> Post | None:
         stmt = (
             select(Post)
@@ -149,8 +151,8 @@ class PostsModel:
     @classmethod
     async def get_post_by_id_with_like_flag(
         cls,
-        post_id: str,
-        user_id: str,
+        post_id: UUID,
+        user_id: UUID,
         db: AsyncSession,
     ) -> tuple[Post, bool] | None:
         from app.likes.model import PostLike
@@ -187,14 +189,14 @@ class PostsModel:
         return row[0], bool(row[1])
 
     @classmethod
-    async def get_post_author_id(cls, post_id: str, db: AsyncSession) -> str | None:
+    async def get_post_author_id(cls, post_id: UUID, db: AsyncSession) -> UUID | None:
         result = await db.execute(
             select(Post.user_id).where(Post.id == post_id, Post.deleted_at.is_(None))
         )
         return result.scalar_one_or_none()
 
     @classmethod
-    async def get_titles_by_ids(cls, post_ids: list[str], db: AsyncSession) -> dict[str, str]:
+    async def get_titles_by_ids(cls, post_ids: list[UUID], db: AsyncSession) -> dict[UUID, str]:
         if not post_ids:
             return {}
         result = await db.execute(
@@ -211,7 +213,7 @@ class PostsModel:
         db: AsyncSession,
         search_q: str | None = None,
         category_id: int | None = None,
-        current_user_id: str | None = None,
+        current_user_id: UUID | None = None,
     ) -> tuple[list[Post], bool]:
         offset = (page - 1) * size
         fetch_limit = size + 1
@@ -249,7 +251,7 @@ class PostsModel:
         db: AsyncSession,
         search_q: str | None = None,
         category_id: int | None = None,
-        current_user_id: str | None = None,
+        current_user_id: UUID | None = None,
     ) -> int:
         stmt = select(func.count(Post.id)).where(
             Post.deleted_at.is_(None), Post.is_blinded.is_(False)
@@ -290,15 +292,15 @@ class PostsModel:
     @classmethod
     async def update_post(
         cls,
-        post_id: str,
+        post_id: UUID,
         title: str | None = None,
         content: str | None = None,
-        image_ids: list[str] | None = None,
+        image_ids: list[UUID] | None = None,
         category_id: int | None = None,
         hashtag_names: list[str] | None = None,
         *,
         db: AsyncSession,
-    ) -> tuple[list[str], list[str]] | None:
+    ) -> tuple[list[UUID], list[UUID]] | None:
         now = utc_now()
         post_obj = (
             await db.execute(
@@ -322,8 +324,8 @@ class PostsModel:
         if hashtag_names is not None:
             await cls.sync_post_hashtags(post_id, hashtag_names, db=db)
 
-        released_ids: list[str] = []
-        added_ids: list[str] = []
+        released_ids: list[UUID] = []
+        added_ids: list[UUID] = []
         if image_ids is not None:
             old_result = await db.execute(
                 select(PostImage.image_id).where(PostImage.post_id == post_id)
@@ -348,7 +350,7 @@ class PostsModel:
         return released_ids, added_ids
 
     @classmethod
-    async def delete_post(cls, post_id: str, db: AsyncSession) -> tuple[bool, list[str]]:
+    async def delete_post(cls, post_id: UUID, db: AsyncSession) -> tuple[bool, list[UUID]]:
         from app.comments.model import Comment
         from app.likes.model import PostLikesModel
 
@@ -377,7 +379,7 @@ class PostsModel:
         return (True, image_ids)
 
     @classmethod
-    async def increment_view_count(cls, post_id: str, db: AsyncSession) -> bool:
+    async def increment_view_count(cls, post_id: UUID, db: AsyncSession) -> bool:
         result = await db.execute(
             update(Post)
             .where(
@@ -390,7 +392,7 @@ class PostsModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
-    async def increment_view_count_delta(cls, post_id: str, delta: int, db: AsyncSession) -> bool:
+    async def increment_view_count_delta(cls, post_id: UUID, delta: int, db: AsyncSession) -> bool:
         if delta <= 0:
             return True
         result = await db.execute(
@@ -405,7 +407,7 @@ class PostsModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
-    async def increment_report_count(cls, post_id: str, db: AsyncSession) -> int | None:
+    async def increment_report_count(cls, post_id: UUID, db: AsyncSession) -> int | None:
         result = await db.execute(
             update(Post)
             .where(
@@ -419,7 +421,7 @@ class PostsModel:
         return row[0] if row is not None else None
 
     @classmethod
-    async def set_blinded(cls, post_id: str, db: AsyncSession) -> bool:
+    async def set_blinded(cls, post_id: UUID, db: AsyncSession) -> bool:
         result = await db.execute(
             update(Post)
             .where(
@@ -432,7 +434,7 @@ class PostsModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
-    async def unblind_post(cls, post_id: str, db: AsyncSession) -> bool:
+    async def unblind_post(cls, post_id: UUID, db: AsyncSession) -> bool:
         result = await db.execute(
             update(Post)
             .where(
@@ -445,7 +447,7 @@ class PostsModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
-    async def reset_reports(cls, post_id: str, db: AsyncSession) -> bool:
+    async def reset_reports(cls, post_id: UUID, db: AsyncSession) -> bool:
         result = await db.execute(
             update(Post)
             .where(
@@ -491,13 +493,13 @@ class PostsModel:
         return posts, total
 
     @classmethod
-    async def get_like_count(cls, post_id: str, db: AsyncSession) -> int:
+    async def get_like_count(cls, post_id: UUID, db: AsyncSession) -> int:
         result = await db.execute(select(Post.like_count).where(Post.id == post_id))
         row = result.scalar_one_or_none()
         return row or 0
 
     @classmethod
-    async def increment_like_count(cls, post_id: str, db: AsyncSession) -> int:
+    async def increment_like_count(cls, post_id: UUID, db: AsyncSession) -> int:
         result = await db.execute(
             update(Post)
             .where(Post.id == post_id)
@@ -508,7 +510,7 @@ class PostsModel:
         return row[0] if row is not None else 0
 
     @classmethod
-    async def decrement_like_count(cls, post_id: str, db: AsyncSession) -> int:
+    async def decrement_like_count(cls, post_id: UUID, db: AsyncSession) -> int:
         result = await db.execute(
             update(Post)
             .where(Post.id == post_id)
@@ -519,7 +521,7 @@ class PostsModel:
         return row[0] if row is not None else 0
 
     @classmethod
-    async def increment_comment_count(cls, post_id: str, db: AsyncSession) -> bool:
+    async def increment_comment_count(cls, post_id: UUID, db: AsyncSession) -> bool:
         result = await db.execute(
             update(Post)
             .where(Post.id == post_id)
@@ -529,7 +531,7 @@ class PostsModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
-    async def decrement_comment_count(cls, post_id: str, db: AsyncSession) -> bool:
+    async def decrement_comment_count(cls, post_id: UUID, db: AsyncSession) -> bool:
         result = await db.execute(
             update(Post)
             .where(Post.id == post_id)

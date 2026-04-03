@@ -6,12 +6,14 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any, cast
+from uuid import UUID
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import NotificationKind
 from app.common.schemas import PaginatedResponse
+from app.core.ids import uuid_to_base62
 from app.notifications.model import Notification, NotificationsModel
 from app.notifications.schema import NotificationItem
 
@@ -20,8 +22,8 @@ log = logging.getLogger(__name__)
 _NOTIF_USER_CHANNEL_PREFIX = "notif:user:"
 
 
-def notification_channel_for_user(user_id: str) -> str:
-    """Redis Pub/Sub 채널명. 인스턴스 간 동일 규칙으로 라우팅."""
+def notification_channel_for_user(user_id: UUID) -> str:
+    """Redis Pub/Sub 채널명. UUID 문자열로 정규화."""
 
     return f"{_NOTIF_USER_CHANNEL_PREFIX}{user_id}"
 
@@ -31,21 +33,21 @@ class NotificationService:
 
     @staticmethod
     def build_realtime_payload(
-        notification_id: str,
+        notification_id: UUID,
         kind: NotificationKind,
         *,
-        actor_id: str | None,
-        post_id: str | None,
-        comment_id: str | None,
+        actor_id: UUID | None,
+        post_id: UUID | None,
+        comment_id: UUID | None,
     ) -> dict[str, Any]:
         """SSE `data:` JSON. 필드명은 프론트 camelCase 관례에 맞춤."""
 
         return {
-            "notificationId": notification_id,
+            "notificationId": uuid_to_base62(notification_id),
             "kind": kind.value,
-            "actorId": actor_id,
-            "postId": post_id,
-            "commentId": comment_id,
+            "actorId": None if actor_id is None else uuid_to_base62(actor_id),
+            "postId": None if post_id is None else uuid_to_base62(post_id),
+            "commentId": None if comment_id is None else uuid_to_base62(comment_id),
         }
 
     @classmethod
@@ -53,12 +55,12 @@ class NotificationService:
         cls,
         redis: Redis | None,
         *,
-        recipient_user_id: str,
-        notification_id: str,
+        recipient_user_id: UUID,
+        notification_id: UUID,
         kind: NotificationKind,
-        actor_id: str | None,
-        post_id: str | None,
-        comment_id: str | None,
+        actor_id: UUID | None,
+        post_id: UUID | None,
+        comment_id: UUID | None,
     ) -> None:
         """트랜잭션이 성공적으로 커밋된 뒤에만 호출. Redis 장애 시 DB 데이터는 유지(fail-open)."""
 
@@ -98,7 +100,7 @@ class NotificationService:
     @classmethod
     async def list_notifications(
         cls,
-        user_id: str,
+        user_id: UUID,
         *,
         page: int,
         size: int,
@@ -120,18 +122,33 @@ class NotificationService:
     @classmethod
     async def mark_read(
         cls,
-        user_id: str,
+        user_id: UUID,
         *,
-        ids: list[str] | None,
+        ids: list[UUID] | None,
         db: AsyncSession,
     ) -> int:
         async with db.begin():
             return await NotificationsModel.mark_read(user_id, notification_ids=ids, db=db)
 
+    @classmethod
+    async def purge_old_notifications(
+        cls,
+        *,
+        older_than_days: int = 30,
+        chunk_size: int = 2_000,
+        db: AsyncSession,
+    ) -> int:
+        async with db.begin():
+            return await NotificationsModel.purge_older_than_days(
+                older_than_days=older_than_days,
+                chunk_size=chunk_size,
+                db=db,
+            )
+
     @staticmethod
     async def sse_subscribe(
         redis: Redis,
-        user_id: str,
+        user_id: UUID,
         *,
         heartbeat_interval_sec: float = 25.0,
     ) -> AsyncIterator[str]:

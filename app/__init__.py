@@ -3,7 +3,19 @@
 
 import sys
 
-from .domain import admin, auth, comments, dogs, likes, media, notifications, posts, reports, users
+from .domain import (
+    admin,
+    auth,
+    chat,
+    comments,
+    dogs,
+    likes,
+    media,
+    notifications,
+    posts,
+    reports,
+    users,
+)
 
 sys.modules["app.auth"] = auth
 sys.modules["app.users"] = users
@@ -15,3 +27,4 @@ sys.modules["app.notifications"] = notifications
 sys.modules["app.dogs"] = dogs
 sys.modules["app.reports"] = reports
 sys.modules["app.admin"] = admin
+sys.modules["app.chat"] = chat

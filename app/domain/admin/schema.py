@@ -1,6 +1,6 @@
 # 관리자 API 응답 DTO.
 
-from app.common import BaseSchema, UtcDatetime
+from app.common import BaseSchema, PublicId, UtcDatetime
 
 
 class UnblindedResponse(BaseSchema):
@@ -28,7 +28,7 @@ class MediaSweepResponse(BaseSchema):
 
 
 class ReportedPostAuthorInfo(BaseSchema):
-    id: str
+    id: PublicId
     nickname: str
     profile_image_url: str | None = None
     status: str | None = None  # ACTIVE, SUSPENDED 등 (배지·토글용)
@@ -36,11 +36,11 @@ class ReportedPostAuthorInfo(BaseSchema):
 
 class ReportedPostItem(BaseSchema):
     target_type: str  # "POST" | "COMMENT"
-    id: str  # post_id (POST) or comment_id (COMMENT)
-    post_id: str  # 게시글 상세 링크용 (POST면 id와 동일, COMMENT면 댓글이 달린 글 id)
+    id: PublicId  # post_id (POST) or comment_id (COMMENT)
+    post_id: PublicId  # 게시글 상세 링크용 (POST면 id와 동일, COMMENT면 댓글이 달린 글 id)
     title: str  # 게시글 제목 (POST=해당 글 제목, COMMENT=댓글이 달린 글 제목)
     content_preview: str = ""  # 내용 일부 (POST=게시글 본문, COMMENT=댓글 내용)
-    user_id: str
+    user_id: PublicId
     author: ReportedPostAuthorInfo | None = None
     author_status: str | None = None  # ACTIVE, SUSPENDED
     report_count: int = 0

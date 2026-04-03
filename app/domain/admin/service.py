@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
@@ -130,7 +131,7 @@ class AdminService:
             return items, total
 
     @classmethod
-    async def unblind_post(cls, post_id: str, db: AsyncSession) -> None:
+    async def unblind_post(cls, post_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             try:
                 ok = await PostsModel.unblind_post(post_id, db=db)
@@ -140,7 +141,7 @@ class AdminService:
             raise PostNotFoundException()
 
     @classmethod
-    async def reset_post_reports(cls, post_id: str, db: AsyncSession) -> None:
+    async def reset_post_reports(cls, post_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             await ReportsModel.delete_by_post_id(post_id, db=db)
             await db.flush()  # delete 반영 후 reset_reports 실행해 재신고 시 목록 노출 보장
@@ -152,7 +153,7 @@ class AdminService:
             raise PostNotFoundException()
 
     @classmethod
-    async def suspend_user(cls, user_id: str, db: AsyncSession, redis: Any | None = None) -> None:
+    async def suspend_user(cls, user_id: UUID, db: AsyncSession, redis: Any | None = None) -> None:
         async with db.begin():
             user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
@@ -165,7 +166,7 @@ class AdminService:
         await AuthService.invalidate_user_status_cache(redis, user_id)
 
     @classmethod
-    async def activate_user(cls, user_id: str, db: AsyncSession, redis: Any | None = None) -> None:
+    async def activate_user(cls, user_id: UUID, db: AsyncSession, redis: Any | None = None) -> None:
         async with db.begin():
             user = await UsersModel.get_user_by_id_including_deleted(user_id, db=db)
             if not user:
@@ -178,7 +179,7 @@ class AdminService:
         await AuthService.invalidate_user_status_cache(redis, user_id)
 
     @classmethod
-    async def blind_post(cls, post_id: str, db: AsyncSession) -> None:
+    async def blind_post(cls, post_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             try:
                 ok = await PostsModel.set_blinded(post_id, db=db)
@@ -188,7 +189,7 @@ class AdminService:
             raise PostNotFoundException()
 
     @classmethod
-    async def delete_post(cls, post_id: str, db: AsyncSession) -> None:
+    async def delete_post(cls, post_id: UUID, db: AsyncSession) -> None:
         # NOTE: AsyncSessionLocal(autobegin=False)이므로, 모든 DB I/O는 명시적 트랜잭션 내부에서 수행.
         #       또한 삭제는 단일 트랜잭션에서 원자적으로 처리(연관 댓글/좋아요/이미지 정리 포함).
         async with db.begin():
@@ -197,21 +198,21 @@ class AdminService:
                 raise PostNotFoundException()
 
     @classmethod
-    async def unblind_comment(cls, comment_id: str, db: AsyncSession) -> None:
+    async def unblind_comment(cls, comment_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             ok = await CommentsModel.unblind_comment(comment_id, db=db)
         if not ok:
             raise CommentNotFoundException()
 
     @classmethod
-    async def blind_comment(cls, comment_id: str, db: AsyncSession) -> None:
+    async def blind_comment(cls, comment_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             ok = await CommentsModel.set_blinded(comment_id, db=db)
         if not ok:
             raise CommentNotFoundException()
 
     @classmethod
-    async def reset_comment_reports(cls, comment_id: str, db: AsyncSession) -> None:
+    async def reset_comment_reports(cls, comment_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             await ReportsModel.delete_by_comment_id(comment_id, db=db)
             await db.flush()
@@ -220,7 +221,7 @@ class AdminService:
             raise CommentNotFoundException()
 
     @classmethod
-    async def delete_comment(cls, post_id: str, comment_id: str, db: AsyncSession) -> None:
+    async def delete_comment(cls, post_id: UUID, comment_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             # 삭제는 멱등이 아니므로, 먼저 대상 존재 확인 후 삭제/카운트 감소를 같은 트랜잭션에서 처리.
             if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:

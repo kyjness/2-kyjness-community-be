@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -224,7 +225,7 @@ async def idempotency_after_failure(
 
 
 async def post_create_idempotency_before(
-    request: Request, user_id: str, raw_key: str | None
+    request: Request, user_id: UUID, raw_key: str | None
 ) -> JSONResponse | None:
     return await idempotency_before(
         request,
@@ -239,7 +240,7 @@ async def post_create_idempotency_before(
 
 async def post_create_idempotency_after_success(
     request: Request,
-    user_id: str,
+    user_id: UUID,
     raw_key: str | None,
     response_obj: Any,
 ) -> None:
@@ -255,7 +256,7 @@ async def post_create_idempotency_after_success(
 
 async def post_create_idempotency_after_failure(
     request: Request,
-    user_id: str,
+    user_id: UUID,
     raw_key: str | None,
 ) -> None:
     await idempotency_after_failure(
@@ -290,7 +291,7 @@ async def media_image_upload_idempotency_prepare(
 
 async def media_upload_idempotency_after_success(
     request: Request,
-    user_id: str,
+    user_id: UUID,
     purpose: Literal["profile", "post"],
     raw_key: str | None,
     response_obj: Any,
@@ -307,7 +308,7 @@ async def media_upload_idempotency_after_success(
 
 async def media_upload_idempotency_after_failure(
     request: Request,
-    user_id: str,
+    user_id: UUID,
     purpose: Literal["profile", "post"],
     raw_key: str | None,
 ) -> None:

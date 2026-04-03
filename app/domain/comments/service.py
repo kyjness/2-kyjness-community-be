@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from math import ceil
+from uuid import UUID
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,22 +25,22 @@ from app.notifications.model import NotificationsModel
 from app.notifications.service import NotificationService
 
 
-async def _increment_post_comment_count(post_id: str, db: AsyncSession) -> None:
+async def _increment_post_comment_count(post_id: UUID, db: AsyncSession) -> None:
     from app.posts.repository import PostsModel
 
     await PostsModel.increment_comment_count(post_id, db=db)
 
 
-async def _decrement_post_comment_count(post_id: str, db: AsyncSession) -> None:
+async def _decrement_post_comment_count(post_id: UUID, db: AsyncSession) -> None:
     from app.posts.repository import PostsModel
 
     await PostsModel.decrement_comment_count(post_id, db=db)
 
 
 async def _ensure_post_visible(
-    post_id: str,
+    post_id: UUID,
     db: AsyncSession,
-    current_user_id: str | None = None,
+    current_user_id: UUID | None = None,
 ) -> None:
     from app.posts.repository import PostsModel
 
@@ -110,13 +111,15 @@ class CommentService:
     @classmethod
     async def create_comment(
         cls,
-        post_id: str,
-        user_id: str,
+        post_id: UUID,
+        user_id: UUID,
         data: CommentUpsertRequest,
         db: AsyncSession,
         redis: Redis | None = None,
     ) -> CommentIdData:
-        notify: tuple[str, str, NotificationKind, str | None, str | None, str | None] | None = None
+        notify: (
+            tuple[UUID, UUID, NotificationKind, UUID | None, UUID | None, UUID | None] | None
+        ) = None
         async with db.begin():
             await _ensure_post_visible(post_id, db=db, current_user_id=user_id)
             parent_id = getattr(data, "parent_id", None)
@@ -170,12 +173,12 @@ class CommentService:
     @classmethod
     async def get_comments(
         cls,
-        post_id: str,
+        post_id: UUID,
         page: int,
         size: int,
         db: AsyncSession,
         sort: str | None = None,
-        current_user_id: str | None = None,
+        current_user_id: UUID | None = None,
     ) -> CommentsPageData:
         async with db.begin():
             from app.posts.repository import PostsModel
@@ -215,8 +218,8 @@ class CommentService:
     @classmethod
     async def update_comment(
         cls,
-        post_id: str,
-        comment_id: str,
+        post_id: UUID,
+        comment_id: UUID,
         data: CommentUpsertRequest,
         db: AsyncSession,
     ) -> None:
@@ -226,7 +229,7 @@ class CommentService:
                 raise CommentNotFoundException()
 
     @classmethod
-    async def delete_comment(cls, post_id: str, comment_id: str, db: AsyncSession) -> None:
+    async def delete_comment(cls, post_id: UUID, comment_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             comment = await CommentsModel.get_comment_by_id(comment_id, db=db, include_deleted=True)
             if comment is None or comment.post_id != post_id:

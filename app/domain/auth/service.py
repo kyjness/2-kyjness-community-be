@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from typing import Any, cast
+from uuid import UUID
 
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,7 @@ from app.common.exceptions import (
     SignupImageTokenInvalidException,
     UnauthorizedException,
 )
+from app.core.ids import jwt_sub_to_uuid
 from app.core.security import (
     access_jti_blacklist_redis_key,
     create_access_token,
@@ -63,7 +65,8 @@ return 1
 """
 
 
-def _user_refresh_key(user_id: str) -> str:
+def _user_refresh_key(user_id: UUID) -> str:
+    # JWT sub(Base62/레거시 ULID)와 무관하게 항상 UUID 문자열로 정규화(배포 직후 기존 refresh 키는 무효화됨).
     return f"{_USER_REFRESH_KEY_PREFIX}{user_id}"
 
 
@@ -72,7 +75,7 @@ _USER_STATUS_CACHE_PREFIX = "user:status:"
 _USER_STATUS_CACHE_TTL_SECONDS = 240
 
 
-def _user_status_cache_key(user_id: str) -> str:
+def _user_status_cache_key(user_id: UUID) -> str:
     return f"{_USER_STATUS_CACHE_PREFIX}{user_id}"
 
 
@@ -112,7 +115,7 @@ async def _refresh_rotation_sequential(
 async def _try_refresh_rotation_redis(
     redis_client: Any,
     *,
-    user_id: str,
+    user_id: UUID,
     user_key: str,
     incoming_digest: str,
     new_digest: str,
@@ -162,7 +165,7 @@ async def _try_refresh_rotation_redis(
         return False
 
 
-async def invalidate_user_status_cache(redis_client: Redis | None, user_id: str) -> None:
+async def invalidate_user_status_cache(redis_client: Redis | None, user_id: UUID) -> None:
     """
     ``users.status`` 변경(정지·해제·탈퇴 등) 후 refresh용 캐시를 제거한다.
 
@@ -179,7 +182,7 @@ async def invalidate_user_status_cache(redis_client: Redis | None, user_id: str)
 
 async def _set_user_status_cache_best_effort(
     redis_client: Any,
-    user_id: str,
+    user_id: UUID,
     status_value: str,
 ) -> None:
     """로그인 등 확실히 ACTIVE인 시점에 캐시를 채워 첫 refresh DB 조회를 줄인다."""
@@ -195,7 +198,7 @@ async def _set_user_status_cache_best_effort(
 
 async def _ensure_user_may_refresh(
     redis_client: Any,
-    user_id: str,
+    user_id: UUID,
     db: AsyncSession,
 ) -> None:
     """
@@ -329,7 +332,7 @@ class AuthService:
     async def logout(
         cls,
         *,
-        user_id: str,
+        user_id: UUID,
         refresh_token: str | None,
         access_payload: dict,
         redis: Redis | None = None,
@@ -352,12 +355,12 @@ class AuthService:
         await cast(Any, redis).delete(_user_refresh_key(user_id))
 
     @classmethod
-    async def revoke_refresh_for_user(cls, user_id: str, redis: Redis | None = None) -> None:
+    async def revoke_refresh_for_user(cls, user_id: UUID, redis: Redis | None = None) -> None:
         if redis:
             await cast(Any, redis).delete(_user_refresh_key(user_id))
 
     @classmethod
-    async def invalidate_user_status_cache(cls, redis: Redis | None, user_id: str) -> None:
+    async def invalidate_user_status_cache(cls, redis: Redis | None, user_id: UUID) -> None:
         """도메인·라우터에서 status 변경 직후 호출. 모듈 함수 ``invalidate_user_status_cache`` 위임."""
         await invalidate_user_status_cache(redis, user_id)
 
@@ -382,23 +385,28 @@ class AuthService:
         sub = payload.get("sub")
         if not isinstance(sub, str) or not sub:
             raise UnauthorizedException()
-        user_id = sub
+        try:
+            user_uuid = jwt_sub_to_uuid(sub)
+        except ValueError:
+            raise UnauthorizedException(
+                message="인증을 갱신할 수 없습니다. 다시 로그인해 주세요.",
+            ) from None
         if redis is None:
             raise UnauthorizedException(
                 message="인증을 갱신할 수 없습니다. 잠시 후 다시 시도하세요."
             )
         r = cast(Any, redis)
         incoming_digest = refresh_token_digest(refresh_token)
-        user_key = _user_refresh_key(user_id)
+        user_key = _user_refresh_key(user_uuid)
 
-        await _ensure_user_may_refresh(r, user_id, db)
+        await _ensure_user_may_refresh(r, user_uuid, db)
 
-        new_refresh = create_refresh_token(sub=user_id)
+        new_refresh = create_refresh_token(sub=user_uuid)
         new_digest = refresh_token_digest(new_refresh)
 
         rotated = await _try_refresh_rotation_redis(
             r,
-            user_id=user_id,
+            user_id=user_uuid,
             user_key=user_key,
             incoming_digest=incoming_digest,
             new_digest=new_digest,
@@ -409,5 +417,5 @@ class AuthService:
                 message="인증을 갱신할 수 없습니다. 다시 로그인해 주세요.",
             )
 
-        new_access = create_access_token(sub=user_id)
+        new_access = create_access_token(sub=user_uuid)
         return AccessTokenData(access_token=new_access), new_refresh

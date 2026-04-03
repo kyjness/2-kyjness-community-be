@@ -1,9 +1,28 @@
 # 공통 스키마·응답 래퍼. BaseSchema, ApiResponse, PaginatedResponse 등.
-from typing import Generic, TypeVar
+from typing import Annotated, Generic, TypeVar
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer, WithJsonSchema
 
 from app.common.codes import ApiCode
+from app.core.ids import parse_optional_public_id_value, parse_public_id_value, uuid_to_base62
+
+PublicId = Annotated[
+    UUID,
+    BeforeValidator(parse_public_id_value),
+    PlainSerializer(lambda u: uuid_to_base62(u), return_type=str),
+    WithJsonSchema({"type": "string", "description": "엔티티 공개 ID (Base62)"}),
+]
+
+OptionalPublicId = Annotated[
+    UUID | None,
+    BeforeValidator(parse_optional_public_id_value),
+    PlainSerializer(
+        lambda u: None if u is None else uuid_to_base62(u),
+        return_type=str | None,
+    ),
+    WithJsonSchema({"type": ["string", "null"]}),
+]
 
 
 def to_camel(name: str) -> str:

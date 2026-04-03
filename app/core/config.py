@@ -55,7 +55,9 @@ class Settings:
     # ----- 회원가입 임시 이미지 TTL 정리 (주기 초. 0이면 백그라운드 루프 비활성, 시작 시 1회는 항상 실행) -----
     SIGNUP_IMAGE_CLEANUP_INTERVAL: int = int(os.getenv("SIGNUP_IMAGE_CLEANUP_INTERVAL", "3600"))
     # 고아 이미지 스윕: 한 번에 조회·삭제하는 최대 건수(배치). 긴 단일 트랜잭션·락 점유 완화.
-    MEDIA_SWEEP_UNUSED_BATCH_SIZE: int = max(1, int(os.getenv("MEDIA_SWEEP_UNUSED_BATCH_SIZE", "200")))
+    MEDIA_SWEEP_UNUSED_BATCH_SIZE: int = max(
+        1, int(os.getenv("MEDIA_SWEEP_UNUSED_BATCH_SIZE", "200"))
+    )
 
     # ----- Redis (비우면 연결 시도 안 함, rate limit 등 Fail-open) -----
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()

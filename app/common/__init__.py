@@ -6,7 +6,9 @@ from .responses import api_response, dump_api_response, get_request_id
 from .schemas import (
     ApiResponse,
     BaseSchema,
+    OptionalPublicId,
     PaginatedResponse,
+    PublicId,
     RootData,
 )
 from .validators import UtcDatetime, ensure_utc_datetime
@@ -19,7 +21,9 @@ __all__ = [
     "dump_api_response",
     "get_request_id",
     "DogGender",
+    "OptionalPublicId",
     "PaginatedResponse",
+    "PublicId",
     "RootData",
     "UserStatus",
     "UtcDatetime",

@@ -27,7 +27,7 @@ async def test_signup_success(client: AsyncClient, db_session: AsyncSession):
     result = await db_session.execute(stmt)
     db_user = result.scalar_one_or_none()
     assert db_user is not None
-    assert len(db_user.id) == 26
+    assert isinstance(db_user.id, uuid.UUID)
     assert db_user.password != payload["password"]
 
 

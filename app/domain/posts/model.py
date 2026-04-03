@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
@@ -15,17 +16,20 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.ids import new_ulid_str
+from app.core.ids import new_uuid7
 from app.db.base_class import Base
 from app.media.model import Image
 from app.users.model import User
 
+_PG_UUID = PG_UUID(as_uuid=True)
+
 post_hashtags = Table(
     "post_hashtags",
     Base.metadata,
-    Column("post_id", String(26), ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True),
+    Column("post_id", _PG_UUID, ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True),
     Column(
         "hashtag_id",
         Integer,
@@ -62,9 +66,9 @@ class Hashtag(Base):
 class Post(Base):
     __tablename__ = "posts"
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
-    user_id: Mapped[str | None] = mapped_column(
-        String(26), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    user_id: Mapped[UUID | None] = mapped_column(
+        _PG_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -133,12 +137,12 @@ class PostImage(Base):
     __tablename__ = "post_images"
     __table_args__ = (UniqueConstraint("image_id", name="uq_post_images_image_id"),)
 
-    id: Mapped[str] = mapped_column(String(26), primary_key=True, default=new_ulid_str)
-    post_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("posts.id", ondelete="RESTRICT"), nullable=False, index=True
+    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    post_id: Mapped[UUID] = mapped_column(
+        _PG_UUID, ForeignKey("posts.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    image_id: Mapped[str] = mapped_column(
-        String(26), ForeignKey("images.id", ondelete="CASCADE"), nullable=False
+    image_id: Mapped[UUID] = mapped_column(
+        _PG_UUID, ForeignKey("images.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

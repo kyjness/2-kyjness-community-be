@@ -1,6 +1,6 @@
 # 관리자 전용 API. 관리자 검증은 APIRouter.dependencies 로 일괄 적용.
 import logging
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +16,7 @@ from app.admin.schema import (
 )
 from app.admin.service import AdminService
 from app.api.dependencies import get_current_admin, get_master_db
-from app.common import ApiCode, ApiResponse, PaginatedResponse, api_response
+from app.common import ApiCode, ApiResponse, PaginatedResponse, PublicId, api_response
 from app.db import AsyncSessionLocal
 from app.media.service import MediaService
 
@@ -86,7 +86,7 @@ async def get_reported_posts(
 )
 async def unblind_post(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.unblind_post(post_id, db=db)
@@ -100,7 +100,7 @@ async def unblind_post(
 )
 async def reset_post_reports(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.reset_post_reports(post_id, db=db)
@@ -114,7 +114,7 @@ async def reset_post_reports(
 )
 async def suspend_user(
     request: Request,
-    user_id: str = Path(..., min_length=26, max_length=26),
+    user_id: Annotated[PublicId, Path(..., description="사용자 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     redis = getattr(request.app.state, "redis", None)
@@ -129,7 +129,7 @@ async def suspend_user(
 )
 async def activate_user(
     request: Request,
-    user_id: str = Path(..., min_length=26, max_length=26),
+    user_id: Annotated[PublicId, Path(..., description="사용자 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     redis = getattr(request.app.state, "redis", None)
@@ -144,7 +144,7 @@ async def activate_user(
 )
 async def blind_post(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.blind_post(post_id, db=db)
@@ -158,7 +158,7 @@ async def blind_post(
 )
 async def delete_post_admin(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.delete_post(post_id, db=db)
@@ -172,7 +172,7 @@ async def delete_post_admin(
 )
 async def unblind_comment(
     request: Request,
-    comment_id: str = Path(..., min_length=26, max_length=26),
+    comment_id: Annotated[PublicId, Path(..., description="댓글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.unblind_comment(comment_id, db=db)
@@ -186,7 +186,7 @@ async def unblind_comment(
 )
 async def blind_comment(
     request: Request,
-    comment_id: str = Path(..., min_length=26, max_length=26),
+    comment_id: Annotated[PublicId, Path(..., description="댓글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.blind_comment(comment_id, db=db)
@@ -200,7 +200,7 @@ async def blind_comment(
 )
 async def reset_comment_reports(
     request: Request,
-    comment_id: str = Path(..., min_length=26, max_length=26),
+    comment_id: Annotated[PublicId, Path(..., description="댓글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.reset_comment_reports(comment_id, db=db)
@@ -214,8 +214,8 @@ async def reset_comment_reports(
 )
 async def delete_comment_admin(
     request: Request,
-    post_id: str = Path(..., min_length=26, max_length=26),
-    comment_id: str = Path(..., min_length=26, max_length=26),
+    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
+    comment_id: Annotated[PublicId, Path(..., description="댓글 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
     await AdminService.delete_comment(post_id, comment_id, db=db)

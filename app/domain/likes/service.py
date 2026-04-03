@@ -2,6 +2,8 @@
 # 하나의 요청당 하나의 async with db.begin()으로 묶어 Race Condition 방지.
 from __future__ import annotations
 
+from uuid import UUID
+
 from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,18 +32,20 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
 
 class LikeService:
     @classmethod
-    async def is_post_liked(cls, post_id: str, user_id: str, db: AsyncSession) -> bool:
+    async def is_post_liked(cls, post_id: UUID, user_id: UUID, db: AsyncSession) -> bool:
         return await PostLikesModel.has_like(post_id, user_id, db=db)
 
     @classmethod
     async def like_post(
         cls,
-        post_id: str,
-        user_id: str,
+        post_id: UUID,
+        user_id: UUID,
         db: AsyncSession,
         redis: Redis | None = None,
     ) -> tuple[bool, int, bool]:
-        notify: tuple[str, str, NotificationKind, str | None, str | None, str | None] | None = None
+        notify: (
+            tuple[UUID, UUID, NotificationKind, UUID | None, UUID | None, UUID | None] | None
+        ) = None
         inserted_out = False
         like_count_out = 0
         async with db.begin():
@@ -98,7 +102,7 @@ class LikeService:
         return (True, like_count_out, inserted_out)
 
     @classmethod
-    async def unlike_post(cls, post_id: str, user_id: str, db: AsyncSession) -> tuple[bool, int]:
+    async def unlike_post(cls, post_id: UUID, user_id: UUID, db: AsyncSession) -> tuple[bool, int]:
         async with db.begin():
             if await PostsModel.get_post_by_id(post_id, db=db) is None:
                 raise PostNotFoundException()
@@ -115,12 +119,14 @@ class LikeService:
     @classmethod
     async def like_comment(
         cls,
-        comment_id: str,
-        user_id: str,
+        comment_id: UUID,
+        user_id: UUID,
         db: AsyncSession,
         redis: Redis | None = None,
     ) -> tuple[bool, int, bool]:
-        notify: tuple[str, str, NotificationKind, str | None, str | None, str | None] | None = None
+        notify: (
+            tuple[UUID, UUID, NotificationKind, UUID | None, UUID | None, UUID | None] | None
+        ) = None
         inserted_out = False
         like_count_out = 0
         async with db.begin():
@@ -179,7 +185,7 @@ class LikeService:
 
     @classmethod
     async def unlike_comment(
-        cls, comment_id: str, user_id: str, db: AsyncSession
+        cls, comment_id: UUID, user_id: UUID, db: AsyncSession
     ) -> tuple[bool, int]:
         async with db.begin():
             if await CommentsModel.get_comment_by_id(comment_id, db=db) is None:

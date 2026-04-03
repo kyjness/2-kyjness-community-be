@@ -3,12 +3,13 @@ import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import bcrypt
 import jwt
 
 from app.core.config import settings
-from app.core.ids import new_ulid_str
+from app.core.ids import new_ulid_str, uuid_to_base62
 
 
 def password_with_pepper(plain: str) -> str:
@@ -58,11 +59,11 @@ def _now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-def create_access_token(sub: str) -> str:
-    """sub=user_id(ULID 문자열). ACCESS_TOKEN_EXPIRE_SECONDS 후 만료."""
+def create_access_token(sub: UUID) -> str:
+    """sub=user_id(Base62 공개 ID). jti는 비엔티티 식별용 ULID 유지."""
     expire = _now_utc() + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
     payload = {
-        "sub": str(sub),
+        "sub": uuid_to_base62(sub),
         "exp": expire,
         "iat": _now_utc(),
         "type": "access",
@@ -71,11 +72,10 @@ def create_access_token(sub: str) -> str:
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_refresh_token(sub: str) -> str:
-    """sub=user_id(ULID). REFRESH_TOKEN_EXPIRE_DAYS 후 만료."""
+def create_refresh_token(sub: UUID) -> str:
     expire = _now_utc() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {
-        "sub": str(sub),
+        "sub": uuid_to_base62(sub),
         "exp": expire,
         "iat": _now_utc(),
         "type": "refresh",

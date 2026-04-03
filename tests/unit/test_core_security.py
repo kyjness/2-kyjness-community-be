@@ -1,9 +1,10 @@
 from datetime import UTC, datetime, timedelta
+import uuid
 
 import jwt
 import pytest
 from app.core.config import settings
-from app.core.ids import is_valid_ulid_str
+from app.core.ids import is_valid_ulid_str, uuid_to_base62
 from app.core.security import create_access_token, hash_password, verify_password
 
 
@@ -18,14 +19,14 @@ async def test_password_hashing():
 
 
 def test_create_access_token():
-    sub = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    sub = uuid.uuid4()
     token = create_access_token(sub)
     decoded = jwt.decode(
         token,
         settings.JWT_SECRET_KEY,
         algorithms=[settings.JWT_ALGORITHM],
     )
-    assert decoded.get("sub") == sub
+    assert decoded.get("sub") == uuid_to_base62(sub)
     assert decoded.get("type") == "access"
     assert "exp" in decoded
     jti = decoded.get("jti")

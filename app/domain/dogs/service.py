@@ -1,6 +1,8 @@
 # 강아지 프로필 비즈니스 로직. 순수 데이터/커스텀 예외. Full-Async.
 from __future__ import annotations
 
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import (
@@ -19,16 +21,16 @@ class DogService:
     @classmethod
     async def upsert_dog_profile(
         cls,
-        owner_id: str,
+        owner_id: UUID,
         items: list[dict | DogProfileUpsertItem],
         db: AsyncSession,
     ) -> None:
         """강아지 목록 전체 교체(생성/수정/삭제). 대표 강아지 설정은 한 트랜잭션 내 원자적."""
         existing_ids = await DogProfilesModel.get_ids_by_owner_id(owner_id, db=db)
-        update_ids: list[str] = []
+        update_ids: list[UUID] = []
         create_rows: list[dict[str, object]] = []
         update_rows: list[dict[str, object]] = []
-        representative_existing_id: str | None = None
+        representative_existing_id: UUID | None = None
         representative_new_index: int | None = None
 
         for raw in items:
@@ -77,14 +79,14 @@ class DogService:
 
         created = await DogProfilesModel.create_many(owner_id, create_rows, db=db)
 
-        requested_ids: set[str] = set(update_ids)
+        requested_ids: set[UUID] = set(update_ids)
         requested_ids.update(d.id for d in created)
 
         delete_ids = list(existing_ids - requested_ids)
         if delete_ids:
             await DogProfilesModel.bulk_delete_by_owner_ids(owner_id, delete_ids, db=db)
 
-        representative_id: str | None = representative_existing_id
+        representative_id: UUID | None = representative_existing_id
         if representative_new_index is not None:
             if 0 <= representative_new_index < len(created):
                 representative_id = created[representative_new_index].id
@@ -95,7 +97,7 @@ class DogService:
 
     @classmethod
     async def set_representative_dog(
-        cls, owner_id: str, dog_id: str, db: AsyncSession
+        cls, owner_id: UUID, dog_id: UUID, db: AsyncSession
     ) -> UserProfileResponse:
         """대표 강아지 설정. dog_id가 해당 owner_id 소유가 아니면 NotFoundException. 반환: 갱신된 사용자 프로필."""
         async with db.begin():

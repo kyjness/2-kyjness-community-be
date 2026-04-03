@@ -1,4 +1,6 @@
 # 사용자 라우터. Router → Service. 예외는 전역 handler 처리.
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Path, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +12,7 @@ from app.api.dependencies import (
     parse_availability_query,
 )
 from app.auth.service import AuthService
-from app.common import ApiCode, ApiResponse, api_response
+from app.common import ApiCode, ApiResponse, PublicId, api_response
 from app.users.schema import (
     AvailabilityData,
     BlocksData,
@@ -99,7 +101,7 @@ async def get_my_blocks(
 )
 async def toggle_block_user(
     request: Request,
-    target_user_id: str = Path(..., min_length=26, max_length=26),
+    target_user_id: Annotated[PublicId, Path(..., description="대상 사용자 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):

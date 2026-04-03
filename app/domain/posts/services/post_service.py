@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
@@ -15,7 +16,7 @@ from app.common.exceptions import (
     PostNotFoundException,
 )
 from app.core.config import settings
-from app.core.ids import new_ulid_str
+from app.core.ids import new_ulid_str, parse_public_id_value
 from app.media.model import MediaModel
 from app.posts.schemas import PostCreateRequest, PostResponse, PostUpdateRequest
 
@@ -66,12 +67,12 @@ def _normalize_hashtags(raw: list[str]) -> list[str]:
     return out
 
 
-def _view_redis_key(post_id: str, viewer_key: str) -> str:
+def _view_redis_key(post_id: UUID, viewer_key: str) -> str:
     return f"view:post:{post_id}:viewer:{viewer_key}"
 
 
 async def _consume_view_if_new_redis(
-    post_id: str, viewer_key: str, redis_client: Any | None
+    post_id: UUID, viewer_key: str, redis_client: Any | None
 ) -> bool:
     if _VIEW_REDIS_EX_SECONDS <= 0:
         return True
@@ -86,22 +87,22 @@ async def _consume_view_if_new_redis(
         return True
 
 
-async def _get_buffer_pending(redis_client: Any | None, post_id: str) -> int:
+async def _get_buffer_pending(redis_client: Any | None, post_id: UUID) -> int:
     if redis_client is None:
         return 0
     try:
-        raw = await redis_client.hget(VIEW_BUFFER_KEY, post_id)
+        raw = await redis_client.hget(VIEW_BUFFER_KEY, str(post_id))
         return int(raw) if raw is not None else 0
     except Exception as e:
         log.warning("조회수 버퍼 HGET 실패(Fail-open 0): %s", e)
         return 0
 
 
-async def _try_view_increment_in_buffer(post_id: str, redis_client: Any | None) -> bool:
+async def _try_view_increment_in_buffer(post_id: UUID, redis_client: Any | None) -> bool:
     try:
         if redis_client is None:
             raise ConnectionError("redis unavailable")
-        await redis_client.hincrby(VIEW_BUFFER_KEY, post_id, 1)
+        await redis_client.hincrby(VIEW_BUFFER_KEY, str(post_id), 1)
         return True
     except Exception as e:
         log.warning("조회수 버퍼 HINCRBY 실패 Fail-open DB: %s", e)
@@ -112,10 +113,10 @@ class PostService:
     @classmethod
     async def create_post(
         cls,
-        user_id: str,
+        user_id: UUID,
         data: PostCreateRequest,
         db: AsyncSession,
-    ) -> str:
+    ) -> UUID:
         async with db.begin():
             if data.category_id is not None:
                 ok = await PostsModel.category_exists(data.category_id, db=db)
@@ -145,7 +146,7 @@ class PostService:
         db: AsyncSession,
         q: str | None = None,
         category_id: int | None = None,
-        current_user_id: str | None = None,
+        current_user_id: UUID | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
         search_q = q.strip() if (q and q.strip()) else None
         async with db.begin():
@@ -173,10 +174,10 @@ class PostService:
     @classmethod
     async def record_post_view(
         cls,
-        post_id: str,
+        post_id: UUID,
         viewer_key: str,
         db: AsyncSession,
-        current_user_id: str | None = None,
+        current_user_id: UUID | None = None,
         redis_client: Any | None = None,
     ) -> None:
         async with db.begin():
@@ -196,9 +197,9 @@ class PostService:
     @classmethod
     async def get_post_detail(
         cls,
-        post_id: str,
+        post_id: UUID,
         db: AsyncSession,
-        current_user_id: str | None = None,
+        current_user_id: UUID | None = None,
         *,
         viewer_key: str,
         redis_client: Any | None = None,
@@ -268,7 +269,14 @@ class PostService:
                         for pid, cnt_raw in fields.items():
                             delta = int(cnt_raw)
                             if delta > 0:
-                                await PostsModel.increment_view_count_delta(pid, delta, db=db)
+                                pk = (
+                                    pid.decode("utf-8")
+                                    if isinstance(pid, (bytes, bytearray))
+                                    else str(pid)
+                                )
+                                await PostsModel.increment_view_count_delta(
+                                    parse_public_id_value(pk), delta, db=db
+                                )
                 await redis_client.delete(drain_key)
             except Exception:
                 await cls._merge_drain_into_buffer(redis_client, drain_key, VIEW_BUFFER_KEY)
@@ -293,7 +301,7 @@ class PostService:
     @classmethod
     async def update_post(
         cls,
-        post_id: str,
+        post_id: UUID,
         data: PostUpdateRequest,
         db: AsyncSession,
     ) -> None:
@@ -338,7 +346,7 @@ class PostService:
                 raise PostNotFoundException()
 
     @classmethod
-    async def delete_post(cls, post_id: str, db: AsyncSession) -> None:
+    async def delete_post(cls, post_id: UUID, db: AsyncSession) -> None:
         async with db.begin():
             success, _image_ids = await PostsModel.delete_post(post_id, db=db)
             if not success:

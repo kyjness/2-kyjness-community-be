@@ -1,4 +1,6 @@
 # 신고 접수·report_count 증가·임계값 도달 시 자동 블라인드. 단일 트랜잭션.
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.comments.model import CommentsModel
@@ -14,9 +16,9 @@ class ReportService:
     @classmethod
     async def _create_report_and_maybe_blind(
         cls,
-        reporter_id: str,
+        reporter_id: UUID,
         target_type: TargetType,
-        target_id: str,
+        target_id: UUID,
         reason: str | None,
         db: AsyncSession,
     ) -> bool:
@@ -37,7 +39,7 @@ class ReportService:
     @classmethod
     async def submit_report(
         cls,
-        reporter_id: str,
+        reporter_id: UUID,
         data: ReportCreateRequest,
         db: AsyncSession,
     ) -> ReportSubmitData:

@@ -74,10 +74,17 @@ async def lifespan(app: FastAPI):
     stop_event = asyncio.Event()
     cleanup_task = None
     view_flush_task: asyncio.Task[None] | None = None
+    chat_pubsub_task: asyncio.Task[None] | None = None
     if settings.SIGNUP_IMAGE_CLEANUP_INTERVAL > 0:
         cleanup_task = asyncio.create_task(run_loop_async(stop_event, redis=redis_client))
     if redis_client is not None and settings.VIEW_BUFFER_FLUSH_INTERVAL_SECONDS > 0:
         view_flush_task = asyncio.create_task(_view_buffer_flush_loop(stop_event, redis_client))
+    if redis_client is not None and settings.REDIS_URL:
+        from app.domain.chat.pubsub import run_chat_subscribe_listener
+
+        chat_pubsub_task = asyncio.create_task(
+            run_chat_subscribe_listener(redis_url=settings.REDIS_URL, stop_event=stop_event)
+        )
 
     yield
 
@@ -100,6 +107,12 @@ async def lifespan(app: FastAPI):
                 await view_flush_task
             except asyncio.CancelledError:
                 pass
+    if chat_pubsub_task is not None:
+        chat_pubsub_task.cancel()
+        try:
+            await chat_pubsub_task
+        except asyncio.CancelledError:
+            pass
     await close_redis(app)
     await close_database()
 
