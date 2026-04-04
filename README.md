@@ -14,22 +14,24 @@
 | 구분 | 기술 |
 |------|------|
 | **언어** | Python 3.11+ |
-| **패키지 관리** | uv (Rust 기반 고성능 매니저, pyproject.toml 및 uv.lock 기반 결정적 빌드) |
-| **프레임워크** | FastAPI (Starlette 기반, HTTP + **WebSocket** DM) |
-| **서버** | Uvicorn (개발), Gunicorn + Uvicorn worker (프로덕션) |
-| **DB** | PostgreSQL (psycopg3, Full-Async). 게시글 제목·본문 **GIN**(`pg_trgm`), 미삭제·비블라인드 최신 피드용 **부분 복합 인덱스** `idx_posts_feed_latest` 등으로 조회 경로 최적화. |
-| **ORM** | SQLAlchemy 2.x (AsyncSession, autobegin=False) |
+| **패키지 관리** | uv |
+| **프레임워크** | FastAPI, Starlette |
+| **실시간** | WebSocket |
+| **서버** | Uvicorn, Gunicorn |
+| **DB** | PostgreSQL, psycopg3 (async) |
+| **ORM** | SQLAlchemy 2.x |
 | **마이그레이션** | Alembic |
-| **스토리지** | 로컬 파일 / AWS S3 (boto3) |
+| **캐시·메시징** | Redis |
+| **스토리지** | 로컬 파일, AWS S3 (boto3) |
 | **검증** | Pydantic v2 |
-| **식별자** | **DB**: 엔티티 PK·대부분의 FK는 PostgreSQL 네이티브 **`uuid`**; 신규 행은 앱에서 **UUID v7**을 발급해 B-Tree 인덱스 **시간 국소성(Locality)**·디스크 I/O를 개선합니다. **`categories`·`hashtags` 등 시드 테이블은 Integer 유지.** **API(JSON)**: Pydantic v2 커스텀 타입(`BeforeValidator`·`PlainSerializer`)으로 요청·응답 모두 **Base62 공개 ID(대략 22자 전후, 가변)** 로 직렬화·역직렬화합니다. OpenAPI·실제 페이로드 길이는 ULID(고정 26자)와 다르므로, 프론트는 **문자열 ID를 고정 길이로 가정하지 말 것**. JWT `sub` 등 토큰 클레임도 동일한 Base62 규칙을 따릅니다. 비엔티티 키(예: Access `jti`, `X-Request-ID`)는 기존처럼 **ULID** 문자열을 쓸 수 있습니다. |
-| **인증** | JWT (PyJWT), bcrypt는 **`asyncio.to_thread`**로 해시·검증. 비밀번호는 **`PASSWORD_PEPPER`**와 함께 저장. Redis: **RTR**(refresh 다이제스트 **Lua CAS** 원자 회전), Access **`jti` 블랙리스트**(로그아웃), Rate Limit, 백그라운드 잡 **분산 락**, **알림 Pub/Sub**(SSE 팬아웃), **DM 채팅 메시지 Pub/Sub**(WebSocket 다중 인스턴스 팬아웃). |
+| **식별자** | PostgreSQL `uuid`, UUID v7, Base62(공개 ID), ULID(`jti`·요청 ID 등) |
+| **인증** | JWT (PyJWT), bcrypt |
 
 ---
 
 ## 폴더 구조
 
-**app/** 단일 패키지 아래에 공용 레이어(api·common·core·db·infra)와 **domain/** 기능 도메인이 계층화되어 있습니다. 각 도메인은 **router → service → model → schema** 순으로 요청이 흐르며, 엔드포인트·비즈니스 로직·데이터 접근·DTO가 명확히 분리된 구조를 갖습니다. **`app/__init__.py`**에서 `app.domain.auth` 등을 **`app.auth`**처럼 주입해, 기존·문서상의 `from app.posts...` 형태 import와 호환됩니다( **`app.chat`**도 `domain.chat`).
+**app/** 단일 패키지 아래에 공용 레이어(api·common·core·db·infra)와 **domain/** 기능 도메인이 계층화되어 있습니다. 각 도메인은 **router → service → model → schema** 순으로 요청이 흐르며, 엔드포인트·비즈니스 로직·데이터 접근·DTO가 명확히 분리된 구조를 갖습니다. 
 
 ```
 2-kyjness-community-be/
@@ -149,14 +151,6 @@ cp .env.example .env
 | `uv run python -m alembic current` | 현재 DB에 적용된 리비전 확인. |
 | `uv run python -m alembic history` | 리비전 목록 확인. |
 
-#### 스테이징·프로덕션: `005_ulid_to_uuid` (ULID 문자열 → `uuid`) 적용 전 점검
-
-레거시 DB에 이미 다른 FK 제약 이름이 붙어 있으면 마이그레이션 초반 `DROP CONSTRAINT` 단계에서 실패할 수 있습니다. **적용 전** `migrations/versions/005_entity_ids_ulid_to_uuid_v7.py` 파일 **상단 주석**에 있는 PostgreSQL **사전 검증 쿼리**로 `pg_constraint`와 스크립트에 하드코딩된 이름을 대조하세요. 대용량 테이블에서는 `ALTER COLUMN TYPE`이 **ACCESS EXCLUSIVE** 락을 유발하므로, 같은 파일 주석의 **`lock_timeout` / `statement_timeout`** 권장 패턴으로 세션 상한을 두고 점검 창구에서 실행하는 것이 안전합니다.
-
-#### `006_chat_dm_tables` (DM 채팅)
-
-1:1 DM용 `chat_rooms`, `chat_messages` 등 스키마를 추가합니다. **`uv run poe migrate`**로 `head`까지 올리면 포함됩니다. 프론트·모바일 클라이언트는 **`/v1/ws/chat`**·`/v1/chat/*` OpenAPI 설명을 참고하면 됩니다.
-
 #### 3-A. Docker로 DB/Redis 실행 (권장)
 
 - Docker Compose 파일은 인프라 레포에 있습니다: [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra)
@@ -186,10 +180,21 @@ psql -U postgres -d puppytalk -f docs/clear_db.sql
 uv run poe run
 ```
 
-- **실시간 알림 스트림**을 쓰려면 Redis가 떠 있고 `.env`에 **`REDIS_URL`**이 설정되어 있어야 합니다. Redis 없이도 API·DB 알림 기록은 동작하지만, **`GET /v1/notifications/stream`** 은 503을 반환합니다.
-- **DM WebSocket·인스턴스 간 채팅 전달**도 Redis(`REDIS_URL`)와 DB 마이그레이션( **`006_chat_dm_tables`** 적용)이 맞아야 합니다. Redis가 없으면 채팅 Pub/Sub 리스너는 기동되지 않을 수 있습니다.
+### 5. 문서 사이트 (MkDocs)
 
-### 5. 개발 도구 (Ruff, Pyright, Vulture, pip-audit)
+아키텍처·인프라 설계 등 `docs/` 마크다운을 **Material 테마**로 묶어 보려면 [MkDocs](https://www.mkdocs.org/)를 사용합니다. 설정은 저장소 루트의 [`mkdocs.yml`](mkdocs.yml)이며, 네비게이션·Mermaid 등이 정의되어 있습니다.
+
+```bash
+# 최초 1회 (프로젝트 venv에 설치)
+uv pip install mkdocs-material
+
+# 로컬 미리보기 (기본 8000은 API 서버와 겹치므로 8001 권장)
+uv run mkdocs serve -a 127.0.0.1:8001
+```
+
+브라우저에서 **http://127.0.0.1:8001** 로 접속합니다. 정적 사이트만 생성할 때는 `uv run mkdocs build` — 결과는 `site/` 디렉터리입니다.
+
+### 6. 개발 도구 (Ruff, Pyright, Vulture, pip-audit)
 
 **수정/적용용** (코드를 직접 변경):
 
@@ -210,11 +215,7 @@ uv run poe vulture-check # vulture (데드코드 탐지, 설정은 pyproject.tom
 uv run poe audit        # pip-audit (의존성 보안 취약점 스캔)
 ```
 
-**데드코드 스캔**: `poe vulture-check`는 [vulture](https://github.com/jendrikseipp/vulture)로 `app/`을 검사합니다. `pyproject.toml`의 `[tool.vulture]`에서 `min_confidence = 100`으로 두어 **신뢰도 100%로만 보고**하도록 했습니다(오탐은 줄고, 동적·프레임워크 마법 코드는 놓칠 수 있음). 오탐이 있으면 `vulture app --make-whitelist`로 화이트리스트를 만들거나 `ignore_names` 등으로 조정합니다.
-
-**보안·의존성 스캔**: `poe audit`은 `pip freeze` 기반으로 `.audit-requirements.txt`를 생성한 뒤 `pip-audit`로 취약점을 검사합니다. 일부 환경(WSL 등)에서 `ensurepip`가 비활성화된 경우에도 동작하도록 `--no-deps --disable-pip` 모드로 실행합니다.
-
-### 6. 테스트 실행 (Pytest)
+### 7. 테스트 실행 (Pytest)
 
 테스트 DB를 사용하므로, 먼저 PostgreSQL에 `puppytalk_test` DB를 준비하고 연결 문자열을 설정하세요.
 
@@ -239,22 +240,17 @@ uv run pytest tests/integration/test_auth.py -v
 uv run pytest tests/integration/test_auth.py::test_login_and_refresh_token -v
 ```
 
-### 7. 관리자 기능 (Admin)
+### 8. 관리자 기능 (Admin)
 
 관리자 전용 API(`/v1/admin/*`)와 프론트 대시보드(`/admin/dashboard`)는 **role이 `ADMIN`인 유저만** 사용할 수 있습니다.
 
-1. **관리자 계정 만들기**  
+**관리자 계정 만들기**  
    DB에서 해당 유저의 `role`을 `ADMIN`으로 변경합니다.
 
    ```sql
    -- users.id는 DB에서 uuid 타입입니다. 아래는 이메일로 지정하는 예시입니다.
    UPDATE users SET role = 'ADMIN' WHERE email = 'your-admin@example.com';
    ```
-
-2. **프론트에서 사용**  
-   관리자 계정으로 로그인하면 헤더의 **프로필 드롭다운**에 **관리자 대시보드** 링크가 표시됩니다. 해당 링크로 이동하면 신고된 게시글·댓글 통합 목록과 [블라인드 해제/처리], [유저 정지/해제], [글 삭제]/[댓글 삭제], [신고 무시] 버튼을 사용할 수 있습니다.
-
-Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra) 레포를 참고하면 됩니다.
 
 ---
 
@@ -281,9 +277,7 @@ Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-ky
 - **성능 가속**: 메시지 큐(SQS/Kafka)를 활용한 시스템 간 결합도 완화 검토.
 - **Presigned URL 기반 스토리지 확장**: 서버를 업로드/다운로드 데이터 경로에서 분리하기 위해, S3 Presigned URL을 발급하여 클라이언트가 S3에 직접 업로드(POST/PUT)·다운로드(GET)하도록 전환. 업로드 완료 후에는 메타데이터만 서버에 등록하고, URL은 짧은 TTL·콘텐츠 타입/사이즈 조건·키 네이밍 정책으로 보안 제어.
 
----
-
-## 구독 및 비즈니스 운영
+### 구독 및 비즈니스 운영
 
 - **AI 운영 비용 최적화**:
   - **Tiered Quota 관리**: Redis 기반의 실시간 사용량 제한(Rate Limiting) 로직을 구축하여, 사용자 등급별(Basic/Premium) AI 호출 횟수를 차등 제어하고 LLM 추론 비용(Token Cost) 리스크를 최소화.
@@ -299,6 +293,8 @@ Docker·프로덕션 배포는 [PuppyTalk Infra](https://github.com/kyjness/2-ky
 ---
 
 ## 문서
+
+로컬에서 목차·검색·Mermaid 렌더까지 포함해 보려면 위 **[5. 문서 사이트 (MkDocs)](#5-문서-사이트-mkdocs)** 를 참고하세요.
 
 | 문서 | 설명 |
 |------|------|
