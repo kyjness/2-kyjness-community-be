@@ -181,7 +181,7 @@ sequenceDiagram
 
 - 워커(프로세스) 로컬에서 `user_id → Set[WebSocket]`을 유지한다.
 - **`asyncio.Lock`**으로 `_by_user` 맵 갱신(connect/disconnect)과 스냅샷 읽기를 직렬화해, 동시 연결·해제 시 set이 깨지지 않게 한다.
-- **인스턴스 간** 일관성은 이 락이 아니라 **Redis Pub/Sub**(`app/domain/chat/pubsub.py`)으로 보완한다. 상세는 [§14](#14-dm-채팅-websocket--redis-pubsub--다중-워커).
+- **인스턴스 간** 일관성은 이 락이 아니라 **Redis Pub/Sub**(`app/domain/chat/pubsub.py`)으로 보완한다. 상세는 [#14](#14-dm-채팅-websocket--redis-pubsub--다중-워커).
 
 ### 6.3 낙관적 충돌
 
@@ -304,7 +304,7 @@ PublicId = Annotated[
 
 - **Access**: Bearer, 짧은 TTL, `jti`로 로그아웃 시 블랙리스트.
 - **Refresh**: HttpOnly 쿠키, Redis에 SHA256 다이제스트, Lua **원자 회전**으로 동시 리프레시 레이스 완화.
-- **비밀번호**: bcrypt + pepper(위 §4.3).
+- **비밀번호**: bcrypt + pepper(위 #4.3).
 
 상세 흐름은 README 「기능 정리」와 동일하며, 여기서는 **아키텍처 관점에서 Redis가 토큰 상태의 단일 진실 공급원(SoT)** 역할을 한다는 점만 강조한다.
 

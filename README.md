@@ -131,7 +131,7 @@ uv sync --extra dev        # 런타임 + dev(테스트·ruff·pyright·vulture·
 
 ### 2. 환경 변수 설정
 
-[`.env.example`](.env.example)을 복사한 뒤 DB·JWT·Redis 등 필수 값을 채웁니다.
+[`.env.example`](https://github.com/kyjness/2-kyjness-community-be/blob/main/.env.example)을 복사한 뒤 DB·JWT·Redis 등 필수 값을 채웁니다.
 
 ```bash
 cp .env.example .env
@@ -182,7 +182,7 @@ uv run poe run
 
 ### 5. 문서 사이트 (MkDocs)
 
-아키텍처·인프라 설계 등 `docs/` 마크다운을 **Material 테마**로 묶어 보려면 [MkDocs](https://www.mkdocs.org/)를 사용합니다. 설정은 저장소 루트의 [`mkdocs.yml`](mkdocs.yml)이며, 네비게이션·Mermaid 등이 정의되어 있습니다.
+아키텍처·인프라 설계 등 `docs/` 마크다운을 **Material 테마**로 묶어 보려면 [MkDocs](https://www.mkdocs.org/)를 사용합니다. 설정은 저장소 루트의 [`mkdocs.yml`](https://github.com/kyjness/2-kyjness-community-be/blob/main/mkdocs.yml)이며, 네비게이션·Mermaid 등이 정의되어 있습니다.
 
 ```bash
 # 최초 1회 (프로젝트 venv에 설치)
@@ -294,12 +294,11 @@ uv run pytest tests/integration/test_auth.py::test_login_and_refresh_token -v
 
 ## 문서
 
-로컬에서 목차·검색·Mermaid 렌더까지 포함해 보려면 위 **[5. 문서 사이트 (MkDocs)](#5-문서-사이트-mkdocs)** 를 참고하세요.
-
 | 문서 | 설명 |
 |------|------|
-| [architecture.md](docs/architecture.md) | 요청 생명주기, 미들웨어, DB, 인증·보안, 전역 에러 포맷, 데이터 정합성, N+1·FK 인덱스 등 성능 최적화 |
-| [api-codes.md](docs/api-codes.md) | API 응답 코드와 HTTP 상태 코드 매핑 |
-| [infrastructure-reliability-design.md](docs/infrastructure-reliability-design.md) | 인프라·신뢰성 설계 (Redis Fail-open 등) |
-| [puppytalkdb.sql](docs/puppytalkdb.sql) | 참고용 DDL (수동 테이블 생성 시) |
-| [clear_db.sql](docs/clear_db.sql) | DB 데이터만 비우기 (테이블 유지, 시퀀스 리셋) |
+| [architecture.md](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/architecture.md) | 요청 생명주기, 미들웨어, DB, 인증·보안, 전역 에러 포맷, 데이터 정합성, N+1·FK 인덱스 등 성능 최적화 |
+| [api-codes.md](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/api-codes.md) | API 응답 코드와 HTTP 상태 코드 매핑 |
+| [infrastructure-reliability-design.md](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/infrastructure-reliability-design.md) | 인프라·신뢰성 설계 (Redis Fail-open 등) |
+| [kubernetes-cicd-pipeline-report.md](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/kubernetes-cicd-pipeline-report.md) | 쿠버네티스·CI/CD 파이프라인 (GitHub Actions, Jenkins, EKS) |
+| [puppytalkdb.sql](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/puppytalkdb.sql) | 참고용 DDL (수동 테이블 생성 시) |
+| [clear_db.sql](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/clear_db.sql) | DB 데이터만 비우기 (테이블 유지, 시퀀스 리셋) |

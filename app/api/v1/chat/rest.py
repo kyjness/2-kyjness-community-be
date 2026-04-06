@@ -27,9 +27,7 @@ async def get_or_create_direct_room(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
-    room_id = await ChatService.resolve_direct_room(
-        db, user_id=user.id, peer_id=peer_user_id
-    )
+    room_id = await ChatService.resolve_direct_room(db, user_id=user.id, peer_id=peer_user_id)
     return api_response(request, code=ApiCode.OK, data=ChatDirectRoomData(room_id=room_id))
 
 

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import NotificationKind
 from app.common.schemas import PaginatedResponse
+from app.core.config import settings
 from app.core.ids import uuid_to_base62
 from app.notifications.model import Notification, NotificationsModel
 from app.notifications.schema import NotificationItem
@@ -50,6 +51,109 @@ class NotificationService:
             "commentId": None if comment_id is None else uuid_to_base62(comment_id),
         }
 
+    @staticmethod
+    def _sns_summary_for_kind(kind: NotificationKind) -> str:
+        if kind == NotificationKind.COMMENT_ON_POST:
+            return "회원님의 게시글에 댓글이 달렸습니다."
+        if kind == NotificationKind.LIKE_POST:
+            return "회원님의 게시글에 좋아요가 눌렸습니다."
+        if kind == NotificationKind.LIKE_COMMENT:
+            return "회원님의 댓글에 좋아요가 눌렸습니다."
+        return kind.value
+
+    @staticmethod
+    def build_sns_payload(
+        *,
+        recipient_user_id: UUID,
+        notification_id: UUID,
+        kind: NotificationKind,
+        actor_id: UUID | None,
+        post_id: UUID | None,
+        comment_id: UUID | None,
+    ) -> dict[str, Any]:
+        """SNS `Message`에 실을 JSON 직렬화용 페이로드(구독자·Lambda에서 파싱)."""
+
+        base = NotificationService.build_realtime_payload(
+            notification_id,
+            kind,
+            actor_id=actor_id,
+            post_id=post_id,
+            comment_id=comment_id,
+        )
+        return {
+            **base,
+            "recipientUserId": uuid_to_base62(recipient_user_id),
+            "message": NotificationService._sns_summary_for_kind(kind),
+        }
+
+    @staticmethod
+    def _sns_publish_sync(topic_arn: str, message_json: str, region: str) -> None:
+        import boto3
+
+        client = boto3.client("sns", region_name=region)
+        client.publish(TopicArn=topic_arn, Message=message_json)
+
+    @classmethod
+    def _schedule_sns_publish(
+        cls,
+        *,
+        recipient_user_id: UUID,
+        notification_id: UUID,
+        kind: NotificationKind,
+        actor_id: UUID | None,
+        post_id: UUID | None,
+        comment_id: UUID | None,
+    ) -> None:
+        if not settings.SNS_TOPIC_ARN:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def _run() -> None:
+            await cls._publish_sns_task(
+                recipient_user_id=recipient_user_id,
+                notification_id=notification_id,
+                kind=kind,
+                actor_id=actor_id,
+                post_id=post_id,
+                comment_id=comment_id,
+            )
+
+        loop.create_task(_run())
+
+    @classmethod
+    async def _publish_sns_task(
+        cls,
+        *,
+        recipient_user_id: UUID,
+        notification_id: UUID,
+        kind: NotificationKind,
+        actor_id: UUID | None,
+        post_id: UUID | None,
+        comment_id: UUID | None,
+    ) -> None:
+        topic = settings.SNS_TOPIC_ARN
+        region = settings.AWS_REGION or "ap-northeast-2"
+        payload = cls.build_sns_payload(
+            recipient_user_id=recipient_user_id,
+            notification_id=notification_id,
+            kind=kind,
+            actor_id=actor_id,
+            post_id=post_id,
+            comment_id=comment_id,
+        )
+        message_json = json.dumps(payload, ensure_ascii=False)
+        try:
+            await asyncio.to_thread(cls._sns_publish_sync, topic, message_json, region)
+        except Exception:
+            log.exception(
+                "알림 SNS publish 실패(인앱·DB는 유지). recipient=%s topic=%s",
+                recipient_user_id,
+                topic,
+            )
+
     @classmethod
     async def publish_after_commit(
         cls,
@@ -64,26 +168,34 @@ class NotificationService:
     ) -> None:
         """트랜잭션이 성공적으로 커밋된 뒤에만 호출. Redis 장애 시 DB 데이터는 유지(fail-open)."""
 
-        if redis is None:
-            return
-        payload = cls.build_realtime_payload(
-            notification_id,
-            kind,
+        if redis is not None:
+            payload = cls.build_realtime_payload(
+                notification_id,
+                kind,
+                actor_id=actor_id,
+                post_id=post_id,
+                comment_id=comment_id,
+            )
+            try:
+                r = cast(Any, redis)
+                await r.publish(
+                    notification_channel_for_user(recipient_user_id),
+                    json.dumps(payload, ensure_ascii=False),
+                )
+            except Exception:
+                log.exception(
+                    "알림 Redis publish 실패(수신자는 GET /notifications 로 동기화 가능). recipient=%s",
+                    recipient_user_id,
+                )
+
+        cls._schedule_sns_publish(
+            recipient_user_id=recipient_user_id,
+            notification_id=notification_id,
+            kind=kind,
             actor_id=actor_id,
             post_id=post_id,
             comment_id=comment_id,
         )
-        try:
-            r = cast(Any, redis)
-            await r.publish(
-                notification_channel_for_user(recipient_user_id),
-                json.dumps(payload, ensure_ascii=False),
-            )
-        except Exception:
-            log.exception(
-                "알림 Redis publish 실패(수신자는 GET /notifications 로 동기화 가능). recipient=%s",
-                recipient_user_id,
-            )
 
     @staticmethod
     def row_to_item(row: Notification) -> NotificationItem:

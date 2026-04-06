@@ -114,6 +114,8 @@ class Settings:
     AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
     AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     S3_PUBLIC_BASE_URL: str = os.getenv("S3_PUBLIC_BASE_URL", "")
+    # 오프라인 푸시·다운스트림 구독용 SNS 토픽(비우면 발행 안 함)
+    SNS_TOPIC_ARN: str = os.getenv("SNS_TOPIC_ARN", "").strip()
 
     # ----- 로깅 -----
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()

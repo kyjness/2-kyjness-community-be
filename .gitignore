@@ -108,3 +108,5 @@ dmypy.json
 *~
 
 aws/
+
+.mkdocs-site-packages/

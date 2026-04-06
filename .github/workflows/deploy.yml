@@ -1,25 +1,25 @@
-name: Deploy Backend to Amazon ECS (Blue/Green)
+# CI만 수행 (lint → test). CD는 GitHub → Jenkins 네이티브 웹훅으로 트리거 — Actions에서 중복 호출 없음.
+# ECS/ECR 이름은 인프라 Terraform(ecs.tf, ecr.tf) 및 Jenkinsfile 과 맞출 것.
+name: Backend CI
 
 on:
   push:
     branches: [main]
-  pull_request: # [수정] PR 시에도 워크플로우가 실행되도록 추가
+  pull_request:
     branches: [main]
+  workflow_dispatch:
 
-env:
-  AWS_REGION: ap-northeast-2
-  ECR_REPOSITORY: puppytalk-be
-  ECS_SERVICE: puppytalk-be-service
-  ECS_CLUSTER: puppytalk-cluster
-  ECS_TASK_DEFINITION_FAMILY: puppytalk-be-task
-  ECS_TASK_DEF_FILE: task-definition.json
-  CONTAINER_NAME: puppytalk-be-container
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  # 1. Lint 단계: PR/Push 모두 실행, 공용 서버에서 가볍게!
   lint:
     name: Lint & quality (ruff, pyright, audit)
-    runs-on: ubuntu-latest # [수정] 공용 서버를 사용하여 Upstream PR 에러 방지
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -49,11 +49,10 @@ jobs:
       - name: pip-audit
         run: uv run poe audit
 
-  # 2. Test 단계: PR/Push 모두 실행, 서비스 컨테이너(Postgres/Redis) 활용
   test:
     name: Run tests (unit + integration)
     needs: lint
-    runs-on: ubuntu-latest # [수정] 공용 서버 사용 (GitHub 제공 서비스 컨테이너 최적화)
+    runs-on: ubuntu-latest
     env:
       TEST_DB_URL: postgresql+psycopg://postgres:testpassword@localhost:5432/puppytalk_test
       WRITER_DB_URL: postgresql+psycopg://postgres:testpassword@localhost:5432/puppytalk_test
@@ -142,15 +141,3 @@ jobs:
 
       - name: Run pytest
         run: uv run pytest tests/ -v --tb=short
-
-# 3. CD Trigger 단계: 내 레포의 main에 Push될 때 젠킨스 호출
-  trigger-cd:
-    name: Trigger Jenkins CD
-    needs: test # test가 성공해야만 실행됨
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest # 가벼운 공용 서버 사용
-    steps:
-      - name: Call Jenkins Webhook
-        run: |
-          curl -X POST "http://${{ secrets.JENKINS_IP }}:8080/job/puppytalk-backend-pipeline/build?token=puppy-deploy-token" \
-          --user "${{ secrets.JENKINS_USER }}:${{ secrets.JENKINS_API_TOKEN }}"
