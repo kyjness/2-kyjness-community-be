@@ -4,6 +4,9 @@ theme:
   features:
     - navigation.tabs
     - content.code.copy
+    - navigation.top
+    - search.suggest
+    - search.highlight
 
 markdown_extensions:
   - pymdownx.superfences:
@@ -12,8 +15,9 @@ markdown_extensions:
           class: mermaid
           format: !!python/name:pymdownx.superfences.fence_code_format
 
-extra_javascript:
-  - https://unpkg.com/mermaid/dist/mermaid.min.js
+  - toc:
+      permalink: true
+      slugify: !!python/name:pymdownx.slugs.uslugify
 
 nav:
   - Home: index.md
