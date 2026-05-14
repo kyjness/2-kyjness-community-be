@@ -15,7 +15,7 @@ from app.api.dependencies import (
     post_create_idempotency_before,
     require_post_author,
 )
-from app.common import ApiCode, ApiResponse, PaginatedResponse, PublicId, api_response
+from app.common import ApiCode, ApiResponse, OptionalPublicId, PaginatedResponse, PublicId, api_response
 from app.posts.schemas import PostCreateRequest, PostIdData, PostResponse, PostUpdateRequest
 from app.posts.services import PostService
 
@@ -46,7 +46,12 @@ async def create_post(
 @router.get("", status_code=200, response_model=ApiResponse[PaginatedResponse[PostResponse]])
 async def get_posts(
     request: Request,
-    page: int = Query(1, ge=1, description="페이지 번호"),
+    cursor: Annotated[
+        OptionalPublicId,
+        Query(
+            description="무한 스크롤: 직전 응답의 마지막 게시글 id(공개 ID). 미지정 시 최신부터.",
+        ),
+    ] = None,
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
     q: str | None = Query(None, description="검색어 (title, content ILIKE)"),
     category_id: int | None = Query(None, ge=1, description="카테고리 ID 필터"),
@@ -54,12 +59,12 @@ async def get_posts(
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
     result, has_more, total = await PostService.get_posts(
-        page=page,
         size=size,
         db=db,
         q=q,
         category_id=category_id,
         current_user_id=current_user.id if current_user else None,
+        cursor=cursor,
     )
     return api_response(
         request,

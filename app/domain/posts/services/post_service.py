@@ -141,12 +141,12 @@ class PostService:
     @classmethod
     async def get_posts(
         cls,
-        page: int,
         size: int,
         db: AsyncSession,
         q: str | None = None,
         category_id: int | None = None,
         current_user_id: UUID | None = None,
+        cursor: UUID | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
         search_q = q.strip() if (q and q.strip()) else None
         async with db.begin():
@@ -154,14 +154,16 @@ class PostService:
                 ok = await PostsModel.category_exists(category_id, db=db)
                 if not ok:
                     raise InvalidRequestException("존재하지 않는 카테고리입니다.")
-            posts, has_more = await PostsModel.get_all_posts(
-                page,
+            fetched = await PostsModel.get_all_posts(
                 size,
                 db=db,
+                cursor=cursor,
                 search_q=search_q,
                 category_id=category_id,
                 current_user_id=current_user_id,
             )
+            has_more = len(fetched) > size
+            posts = fetched[:size]
             total = await PostsModel.get_posts_count(
                 db=db,
                 search_q=search_q,
@@ -355,9 +357,9 @@ class PostService:
     @classmethod
     async def search_posts(
         cls,
-        page: int,
         size: int,
         db: AsyncSession,
         q: str | None = None,
+        cursor: UUID | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
-        return await cls.get_posts(page=page, size=size, db=db, q=q)
+        return await cls.get_posts(size=size, db=db, q=q, cursor=cursor)

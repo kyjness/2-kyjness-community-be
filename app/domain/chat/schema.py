@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from datetime import date as DateType
 from pydantic import Field, field_validator
 
 from app.common import BaseSchema, PublicId, UtcDatetime
@@ -73,3 +74,40 @@ class ChatDirectRoomData(BaseSchema):
     """1:1 방 조회·없으면 생성 후 공개 room id."""
 
     room_id: PublicId
+
+
+class ChatRoomListItem(BaseSchema):
+    room_id: PublicId
+    peer_user_id: PublicId
+    peer_nickname: str = Field(default="", description="상대방 닉네임(표시명)")
+    peer_profile_image_url: str | None = Field(default=None, description="상대방 프로필 이미지 URL")
+    peer_dog_profile_image_url: str | None = Field(
+        default=None, description="상대 대표 강아지 프로필 이미지 URL"
+    )
+    peer_dog_name: str | None = Field(default=None, description="상대 대표견 이름")
+    peer_dog_breed: str | None = Field(default=None, description="상대 대표견 견종")
+    peer_dog_gender: str | None = Field(default=None, description="상대 대표견 성별 코드(male/female)")
+    peer_dog_birth_date: DateType | None = Field(default=None, description="상대 대표견 생년월일")
+    last_message_preview: str = Field(default="", description="최근 메시지 미리보기(짧게)")
+    unread_count: int = Field(default=0, ge=0, description="내 기준 미읽음 개수(상대가 보낸 것만)")
+    updated_at: UtcDatetime | None = Field(default=None, description="최근 메시지 시각")
+
+
+class ChatRoomsListData(BaseSchema):
+    items: list[ChatRoomListItem]
+
+
+class ChatRoomMarkedReadData(BaseSchema):
+    ok: bool = True
+
+
+class ChatRoomPeerInfoData(BaseSchema):
+    room_id: PublicId
+    peer_user_id: PublicId
+    peer_nickname: str = Field(default="", description="상대방 닉네임(표시명)")
+    peer_profile_image_url: str | None = Field(default=None, description="상대방 프로필 이미지 URL")
+    peer_dog_name: str | None = Field(default=None, description="상대 대표 강아지 이름")
+    peer_dog_profile_image_url: str | None = Field(default=None, description="상대 대표 강아지 프로필 이미지 URL")
+    peer_dog_breed: str | None = Field(default=None, description="상대 대표 강아지 견종")
+    peer_dog_gender: str | None = Field(default=None, description="상대 대표 강아지 성별 코드(male/female)")
+    peer_dog_birth_date: DateType | None = Field(default=None, description="상대 대표 강아지 생년월일")

@@ -7,7 +7,13 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, get_current_user, get_master_db, get_slave_db
-from app.chat.schema import ChatDirectRoomData, ChatMessagesPageData
+from app.chat.schema import (
+    ChatDirectRoomData,
+    ChatMessagesPageData,
+    ChatRoomMarkedReadData,
+    ChatRoomPeerInfoData,
+    ChatRoomsListData,
+)
 from app.chat.service import ChatService
 from app.common import ApiCode, ApiResponse, PublicId, api_response
 from app.common.exceptions import InvalidRequestException
@@ -29,6 +35,51 @@ async def get_or_create_direct_room(
 ):
     room_id = await ChatService.resolve_direct_room(db, user_id=user.id, peer_id=peer_user_id)
     return api_response(request, code=ApiCode.OK, data=ChatDirectRoomData(room_id=room_id))
+
+
+@router.get(
+    "/rooms",
+    status_code=200,
+    response_model=ApiResponse[ChatRoomsListData],
+)
+async def list_recent_rooms(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    limit: int = Query(20, ge=1, le=50, description="최근 대화 목록 개수"),
+    db: AsyncSession = Depends(get_slave_db),
+):
+    data = await ChatService.list_recent_rooms(db, user_id=user.id, limit=limit)
+    return api_response(request, code=ApiCode.OK, data=data)
+
+
+@router.get(
+    "/rooms/{room_id}",
+    status_code=200,
+    response_model=ApiResponse[ChatRoomPeerInfoData],
+)
+async def get_room_peer_info(
+    request: Request,
+    room_id: Annotated[PublicId, Path(..., description="채팅방 공개 ID (Base62)")],
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_slave_db),
+):
+    data = await ChatService.get_room_peer_info(db, room_id=room_id, user_id=user.id)
+    return api_response(request, code=ApiCode.OK, data=data)
+
+
+@router.post(
+    "/rooms/{room_id}/read",
+    status_code=200,
+    response_model=ApiResponse[ChatRoomMarkedReadData],
+)
+async def mark_room_read(
+    request: Request,
+    room_id: Annotated[PublicId, Path(..., description="채팅방 공개 ID (Base62)")],
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_master_db),
+):
+    data = await ChatService.mark_room_read(db, room_id=room_id, user_id=user.id)
+    return api_response(request, code=ApiCode.OK, data=data)
 
 
 @router.get(

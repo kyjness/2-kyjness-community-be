@@ -8,7 +8,7 @@
 
 > **대상 서비스**: PuppyTalk (반려견 커뮤니티)
 >
-> **문서 성격**: 초기 예산을 고려한 **실운영(Current)** 과, 트래픽·기능 요구에 대비한 **Target** 을 함께 정리한 **프로젝트 결과 보고서**입니다.
+> **문서 성격**: 초기 예산을 고려한 **Current** 과, 트래픽·기능 요구에 대비한 **Target** 을 함께 정리한 **프로젝트 결과 보고서**입니다.
 >
 > **초점**
 >
@@ -25,7 +25,7 @@
 >   - **`ecs.tf`**: ECS 서비스·태스크/컨테이너
 >   - **`ec2_db.tf`**: EC2 **단일 인스턴스**에 PostgreSQL·Redis 직접 설치
 >   - **한 줄 요약**: 스타트업·초기 서비스에 맞춰 **전략적 비용 최적화**를 구현한 구성입니다.
-> - **Target — 단순한 이상향이 아니라, 임계점 도달 시 즉각 전환할 수 있도록 설계한 확장 기술 자산**
+> - **Target — 임계점 도달 시 즉각 전환할 수 있도록 설계한 확장 기술 자산**
 >   - **EKS(쿠버네티스)** 등: IaC로 자산화하고 배포 파이프라인을 구성해, 대규모 트래픽 시 **즉시 투입 가능한 경로**로 정리했습니다. (인프라 레포의 EKS용 `.tf` 명칭은 운영에 따라 달라질 수 있습니다.)
 >   - **운영 현실**: **프로덕션 트래픽은 현재 ECS**에서 처리하고 있습니다.
 >   - **DB Target — RDS Multi-AZ** (가용 영역 분산: 서울 내 서로 다른 데이터센터에 나누어 배치해 정전 등에 대비): 고가용 데이터 계층 설계를 문서화했습니다.
@@ -217,7 +217,37 @@ graph LR
 | **동일 타겟 그룹** | HTTP와 WebSocket을 **동일 WAS 타겟**으로 처리 가능. `Connection: Upgrade` 후 **단일 TCP 세션** 장시간 유지. |
 | **TLS** | `wss://`는 ACM 인증서로 ALB에서 종단 간 암호화. |
 
-### 1.2.2 짧은 DB 트랜잭션과 Connection Pool 방어
+### 1.2.3 인앱 알림(SSE)·PostgreSQL·Redis (Current 포함)
+
+**Current(ECS + EC2 DB/Redis)** 에서도 별도 마이크로서비스 없이 **동일 WAS·동일 DB·동일 Redis** 위에서 인앱 알림이 동작하도록 구현했습니다. DM(WebSocket)과 **장시간 연결 + Redis Pub/Sub** 패턴이 겹치므로, 인프라 관점에서는 한 축으로 묶어 이해하는 것이 맞습니다.
+
+**앱 동작(요지)**
+
+- **영속화**: 알림 레코드는 **PostgreSQL**(`notifications` 테이블)에 저장합니다. 좋아요·댓글 등 도메인 서비스에서 생성 후, **트랜잭션 커밋 이후**에만 실시간 전달을 시도합니다.
+- **실시간**: 클라이언트는 **`GET /v1/notifications/stream`** 으로 **SSE**(`text/event-stream`)를 구독하고, 서버는 수신자별 **Redis Pub/Sub 채널**을 구독해 이벤트를 흘려보냅니다. 채팅 DM과 **채널 네임스페이스를 분리**해 두었습니다.
+- **폴백**: Redis가 없으면 스트림은 **503**으로 거절되며, 목록·읽음 처리 등 **REST**로 상태를 맞출 수 있습니다(`get_optional_redis`).
+
+**인프라 영향**
+
+| 항목 | Impact |
+|------|--------|
+| **ALB·SSE** | WebSocket과 마찬가지로 **장시간 HTTP 연결**이므로 **Idle timeout**·버퍼/프록시 설정이 끊김에 영향을 줍니다. 필요 시 타임아웃 상향·클라이언트 재연결 정책을 채팅과 동일하게 검토합니다. |
+| **Redis** | 알림 실시간 경로는 **Redis Critical Path**에 포함됩니다. EC2 동반 Redis 장애 시 **SSE는 불가**하지만 DB 기반 조회는 유지되는 완화 구조입니다. |
+| **DB·풀** | 알림 생성·목록·읽음 처리는 **짧은 세션/트랜잭션**으로 처리해, DM 절의 Connection Pool 상한 논의와 동일 선상에서 운영합니다. |
+| **푸시(APNs/FCM 등)** | 본 프로젝트 Current/Target 설계 범위의 **인앱·SSE 중심**이며, 모바일 푸시는 별도 브로커·토큰 저장소가 필요해 **확장 시 과제**로 구분했습니다. |
+
+```mermaid
+graph LR
+    UA[Client] -->|HTTPS SSE| ALB[ALB / ECS 타겟]
+    ALB --> W1[WAS Task 1]
+    ALB --> W2[WAS Task 2]
+    W1 <-->|Pub/Sub 알림 채널| REDIS[(Redis)]
+    W2 <-->|Pub/Sub 알림 채널| REDIS
+    W1 --> PG[(PostgreSQL)]
+    W2 --> PG
+```
+
+### 1.2.4 짧은 DB 트랜잭션과 Connection Pool 방어
 
 **앱 동작**
 
@@ -241,14 +271,14 @@ graph LR
 | 4      | **ECS + WAS (Current)**                | **ECS Service** 의 **태스크/컨테이너** 에서 Gunicorn+Uvicorn. **ECS 서비스 오토스케일링**(CPU·메모리 등)으로 태스크 수 1차 확장, 클러스터 용량·시작 타입 정책에 따른 **용량 조정**   | Terraform `ecs.tf`: 프라이빗 서브넷, `desired_count`/`capacity` 등 |
 | 5      | **PostgreSQL (Current)**     | **`ec2_db.tf`**: 단일 EC2에 **Self-hosted** PostgreSQL — 비즈니스 데이터 쓰기·읽기 | **SPOF(단일 고장점: 서버 한 대가 고장 나면 전체 서비스가 멈출 수 있는 위험 지점)·수동 페일오버** 리스크 — #3.1·#3.3·요약 표 참고 |
 | 6      | **S3**                       | 업로드 이미지, 정적 웹 자산(선택), 버전·수명 주기로 백업                     | -                         |
-| **Redis (Current)** | **`ec2_db.tf` user_data**로 DB EC2에 **Redis6** 동반 설치 | 앱 `REDIS_URL`로 접속. **Critical Path(이게 끊기면 핵심 기능이 같이 멈추는 경로)** — **Target**은 ElastiCache **Multi-AZ(가용 영역 분산)** 등 분리·HA 권장 |
+| **Redis (Current)** | **`ec2_db.tf` user_data**로 DB EC2에 **Redis6** 동반 설치 | 앱 `REDIS_URL`로 접속. **DM 채팅 Fan-out**, **SSE 인앱 알림**, Refresh Token·Rate Limit 등 **Critical Path** — **Target**은 ElastiCache **Multi-AZ(가용 영역 분산)** 등 분리·HA 권장 |
 | **Target** | **RDS PostgreSQL (Multi-AZ)** · **Read Replica** | 트래픽·**RTO** 요구에 맞춰 **Managed DB 전환 시나리오·읽기 분산·자동 페일오버를 설계** | Terraform 필수 리소스에는 **아직 미포함** — 요구사항·패턴은 본 보고서에 **자산화** |
 
 
 ### 1.4 요청 흐름 (단계별)
 
 - **도메인**: `app/domain` 및 `app` 하위 — auth, users, media, posts, comments, likes, dogs, reports, admin. 각각 router → service → model → schema 4계층 패턴.
-- **주요 API 경로**: `v1_router` prefix `/v1`. 예: `/v1/auth/login`, `/v1/users/me`, `/v1/posts`, `/v1/media/images`, **`/v1/ws/chat`**(WebSocket), **`/v1/chat/*`**(채팅 REST) 등.
+- **주요 API 경로**: `v1_router` prefix `/v1`. 예: `/v1/auth/login`, `/v1/users/me`, `/v1/posts`, `/v1/media/images`, **`/v1/ws/chat`**(WebSocket), **`/v1/chat/*`**(채팅 REST), **`/v1/notifications/*`**(알림 REST), **`/v1/notifications/stream`**(실시간 알림 SSE) 등.
 - **미들웨어 순서** (LIFO 기준 안→바깥): CORS → security_headers → access_log → GZip → rate_limit → ProxyHeaders → RequestId.  
   - CORS: `allow_credentials=True`로 쿠키 전송.  
   - GZip: 응답 1KB 이상 시 압축(`minimum_size=1024`), 대역폭 절감.  
@@ -295,6 +325,7 @@ sequenceDiagram
     WAS-->>C: 201 Created
 
     Note over C,PG: WebSocket DM: 연결은 ALB→Task 유지, 메시지 처리 시 짧은 DB 세션·Redis PUBLISH로 타 인스턴스 Fan-out(메시지 뿌려주기)
+    Note over C,PG: 인앱 알림: SSE는 ALB→Task 장시간 연결, Redis Pub/Sub로 팬아웃, 알림 본문은 PostgreSQL에 영속
 ```
 
 ### 1.5 현재 코드·설정 기준 구현 상태
@@ -306,6 +337,7 @@ sequenceDiagram
 - **헬스체크**: `/health`(또는 EKS 전환 시 `/v1/health`로 표준화)에서 DB 연결 상태를 200/503으로 반환해 L7 헬스체크 및 무중단 배포 판단에 활용했습니다.
 - **DB 세션/트랜잭션**: 고빈도 경로에서도 **짧은 트랜잭션**을 유지해 Connection Pool 점유를 최소화했습니다.
 - **실시간 확장성**: DM 채팅은 **Redis Pub/Sub Fan-out**으로 다중 워커/인스턴스 환경에서 전달되도록 구성했습니다.
+- **인앱 알림**: PostgreSQL 영속 + 커밋 후 Redis Pub/Sub + **`/v1/notifications/stream` SSE**; Redis 미구성 시 스트림은 503, 목록·읽음은 REST로 동기화 가능합니다.
 
 
 ---
@@ -526,13 +558,13 @@ CloudWatch (**ECS·ALB·EC2 DB·(선택) Container Insights·Target 시 EKS**) +
 - **DB 마이그레이션**: Alembic 마이그레이션은 **비파괴적** 변경 우선 적용, 필요 시 단계별 배포(스키마 → 코드).
 - **헬스체크 일치**: ALB 헬스체크 경로(`/health`)는 **현재 DB(writer·reader 엔진)만 검사**합니다. Redis 사용 시 `/health`에서 Redis 연결도 검사해, 장애 인스턴스가 트래픽에서 제외되도록 유지하시길 권장합니다.
 
-### 4.5 병목 방어 및 안정성: WebSocket × Connection Pool
+### 4.5 병목 방어 및 안정성: WebSocket·SSE × Connection Pool
 
 | 구분 | 인프라 관점 |
 |------|----------------|
-| **문제** | WebSocket은 **연결**을 오래 유지해, “동시 소켓 수 = 동시 DB 작업 수”로 오인하기 쉽습니다. 실제로는 **풀·PostgreSQL `max_connections`** 한도에 걸리면 REST·WS 전반이 지연됩니다. |
-| **현재 설계** | DM 처리 시 **메시지당 짧은 `AsyncSession`/`async with db.begin()`** 만 사용해 **Connection Pool(접속 대기줄) 점유 시간**을 최소화했습니다. **Fan-out(메시지 뿌려주기)** 은 **Redis Pub/Sub**이 담당하고, WAS는 **Stateless**에 가깝게 **ECS 태스크** 단위로 Scale-out합니다. |
-| **운영** | `(pool_size + max_overflow) × Worker 수 × 태스크 수`가 **EC2 PostgreSQL( Current )** 또는 **RDS( Target )** 상한을 넘지 않게 조정. WebSocket 급증 시 **ECS 서비스 오토스케일로 태스크 증설 → 필요 시 기반 용량 조정**; **Target(EKS)** 에서는 **HPA로 Pod 증설 → 필요 시 노드 스케일**과 **Read Replica**를 함께 본다. |
+| **문제** | WebSocket·**SSE(알림 스트림)** 모두 **장시간 HTTP 연결**을 유지해, “동시 연결 수 = 동시 DB 작업 수”로 오인하기 쉽습니다. 실제로는 **풀·PostgreSQL `max_connections`** 한도에 걸리면 REST·실시간 경로 전반이 지연됩니다. |
+| **현재 설계** | DM 처리 시 **메시지당 짧은 `AsyncSession`/`async with db.begin()`** 만 사용해 **Connection Pool(접속 대기줄) 점유 시간**을 최소화했습니다. 알림은 **DB 커밋 후 Redis Pub/Sub**로 팬아웃하고, SSE는 **구독 루프만 장시간** 유지합니다. **Fan-out**은 **Redis Pub/Sub**이 담당하고, WAS는 **Stateless**에 가깝게 **ECS 태스크** 단위로 Scale-out합니다. |
+| **운영** | `(pool_size + max_overflow) × Worker 수 × 태스크 수`가 **EC2 PostgreSQL( Current )** 또는 **RDS( Target )** 상한을 넘지 않게 조정. WebSocket·SSE 연결 급증 시 **ECS 서비스 오토스케일로 태스크 증설 → 필요 시 기반 용량 조정**; **Target(EKS)** 에서는 **HPA로 Pod 증설 → 필요 시 노드 스케일**과 **Read Replica**를 함께 본다. |
 
 ---
 
@@ -541,10 +573,10 @@ CloudWatch (**ECS·ALB·EC2 DB·(선택) Container Insights·Target 시 EKS**) +
 
 | 영역           | 핵심 조치                                                                                                                         |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| **아키텍처 (Current)** | CloudFront → ALB → **ECS Task/Container (Stateless WAS, 초기 운영 비용을 고려한 가성비 운영)** → **EC2 Self-hosted PostgreSQL + Redis** (`ec2_db.tf`) + S3. **WSS** + **Redis Pub/Sub Fan-out(메시지 뿌려주기)**(DM). Rate Limit: **Redis Lua** + Fail-open(장애 시 막지 않고 통과시키는 완화 동작). |
+| **아키텍처 (Current)** | CloudFront → ALB → **ECS Task/Container (Stateless WAS, 초기 운영 비용을 고려한 가성비 운영)** → **EC2 Self-hosted PostgreSQL + Redis** (`ec2_db.tf`) + S3. **WSS** + **Redis Pub/Sub Fan-out**(DM), **SSE** + **Redis Pub/Sub**(인앱 알림). Rate Limit: **Redis Lua** + Fail-open(장애 시 막지 않고 통과시키는 완화 동작). |
 | **DB 리스크 (Current)** | **단일 DB EC2 SPOF** — **EBS 스냅샷·논리 백업**으로 **RPO** 방어, **RTO** 는 수동 복구에 민감. **Target**: **RDS Multi-AZ(가용 영역 분산) (+ Read Replica)** 로 페일오버·RTO 개선. |
 | **컴퓨트 스케일 (Current)** | **ECS 서비스 오토스케일링** 등으로 태스크를 1차 확장, 용량·클러스터 한도 내에서 기반 용량 조정 (`ecs.tf` 등). **Target**: **HPA**가 Pod를 1차 확장, 자원 부족 시 **Managed Node Group(및 CA)** 이 노드를 확장 (`eks.tf` 상한 내) — 운영 정책에 따라 프로덕션 트래픽 전환을 선택합니다. |
-| **실시간·병목 방어** | **짧은 DB 트랜잭션**, **UUID v7**로 PostgreSQL INSERT·I/O 완화, Redis는 **Target**에서 **ElastiCache HA** 권장. |
+| **실시간·병목 방어** | **짧은 DB 트랜잭션**, **UUID v7**로 PostgreSQL INSERT·I/O 완화, DM(WSS)·알림(SSE)은 **ALB Idle·연결 수**와 함께 설계, Redis는 **Target**에서 **ElastiCache HA** 권장. |
 | **장애 전파 억제** | Circuit Breaker, Throttling, ALB **Idle timeout**·WS keepalive 검토 |
 | **고가용성 (Target)** | **EKS(쿠버네티스)** Multi-AZ 노드, ALB–Ingress, **RDS Multi-AZ(가용 영역 분산)**, **ElastiCache Multi-AZ** — #3.1·#3.2 |
 | **DR**       | #3.5 — **Current vs Target** 별 **RTO/RPO** 인지 |
@@ -573,7 +605,7 @@ CloudWatch (**ECS·ALB·EC2 DB·(선택) Container Insights·Target 시 EKS**) +
 
 **확보한 기반**
 
-- **Stateless WAS** + **Redis**(Pub/Sub·Rate Limit·토큰 상태) + **짧은 DB 트랜잭션** + **UUID v7**
+- **Stateless WAS** + **Redis**(Pub/Sub — DM·**인앱 알림**, Rate Limit·토큰 상태) + **짧은 DB 트랜잭션** + **UUID v7**
 - 이 조합으로 **고비용 연산·트래픽 스파이크**가 와도 **수평 확장·큐 분리·스토리지 오프로드**를 **덧붙이기 쉬운 바닥**을 마련했습니다.
 
 ### 5.3 기능·데이터 계층 (README 확장 전략 — 기능)

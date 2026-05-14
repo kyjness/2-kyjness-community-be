@@ -6,9 +6,10 @@ import logging
 from uuid import UUID
 
 from redis.asyncio import Redis
-from sqlalchemy import select, tuple_
+from sqlalchemy import case, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.chat.model import ChatMessage, ChatRoom, normalize_dm_user_ids
 from app.chat.schema import (
@@ -16,12 +17,17 @@ from app.chat.schema import (
     ChatMessageItem,
     ChatMessageSend,
     ChatMessagesPageData,
+    ChatRoomMarkedReadData,
+    ChatRoomPeerInfoData,
+    ChatRoomListItem,
+    ChatRoomsListData,
 )
 from app.common.enums import UserStatus
 from app.common.exceptions import ForbiddenException, InvalidRequestException, UserNotFoundException
 from app.core.ids import new_uuid7, uuid_to_base62
 from app.db.base_class import utc_now
-from app.users.model import UsersModel
+from app.media.model import Image
+from app.users.model import DogProfile, User, UsersModel
 
 from .manager import chat_connection_manager
 from .pubsub import publish_chat_dm
@@ -210,3 +216,214 @@ class ChatService:
         if has_more and page_rows:
             next_cursor = uuid_to_base62(page_rows[-1].id)
         return ChatMessagesPageData(items=items, next_cursor=next_cursor)
+
+    @classmethod
+    async def list_recent_rooms(
+        cls,
+        db: AsyncSession,
+        *,
+        user_id: UUID,
+        limit: int,
+    ) -> ChatRoomsListData:
+        """최근 대화 목록(헤더 인박스용).
+
+        - 방은 "최근 메시지가 존재"하는 경우만 노출(빈 방 제외)
+        - 미읽음은 내 기준: is_read=false AND sender_id != me
+        - N+1 방지: 방/상대/최근메시지/미읽음을 1회 쿼리로 조립
+        """
+        limit = max(1, min(int(limit), 50))
+
+        peer_id_expr = case(
+            (ChatRoom.user1_id == user_id, ChatRoom.user2_id),
+            else_=ChatRoom.user1_id,
+        ).label("peer_id")
+
+        last_msg_ranked = (
+            select(
+                ChatMessage.room_id.label("room_id"),
+                ChatMessage.content.label("last_content"),
+                ChatMessage.created_at.label("last_created_at"),
+                func.row_number()
+                .over(
+                    partition_by=ChatMessage.room_id,
+                    order_by=(ChatMessage.created_at.desc(), ChatMessage.id.desc()),
+                )
+                .label("rn"),
+            )
+            .subquery()
+        )
+        last_msg = (
+            select(
+                last_msg_ranked.c.room_id,
+                last_msg_ranked.c.last_content,
+                last_msg_ranked.c.last_created_at,
+            )
+            .where(last_msg_ranked.c.rn == 1)
+            .subquery()
+        )
+
+        unread = (
+            select(
+                ChatMessage.room_id.label("room_id"),
+                func.count(ChatMessage.id).label("unread_count"),
+            )
+            .where(
+                ChatMessage.is_read.is_(False),
+                ChatMessage.sender_id != user_id,
+            )
+            .group_by(ChatMessage.room_id)
+            .subquery()
+        )
+
+        peer = aliased(User)
+        peer_img = aliased(Image)
+        peer_dog = aliased(DogProfile)
+        peer_dog_img = aliased(Image)
+
+        async with db.begin():
+            stmt = (
+                select(
+                    ChatRoom.id.label("room_id"),
+                    peer_id_expr,
+                    peer.nickname.label("peer_nickname"),
+                    peer_img.file_url.label("peer_profile_image_url"),
+                    peer_dog_img.file_url.label("peer_dog_profile_image_url"),
+                    peer_dog.name.label("peer_dog_name"),
+                    peer_dog.breed.label("peer_dog_breed"),
+                    peer_dog.gender.label("peer_dog_gender"),
+                    peer_dog.birth_date.label("peer_dog_birth_date"),
+                    last_msg.c.last_content,
+                    last_msg.c.last_created_at,
+                    func.coalesce(unread.c.unread_count, 0).label("unread_count"),
+                )
+                .where(or_(ChatRoom.user1_id == user_id, ChatRoom.user2_id == user_id))
+                .join(peer, peer.id == peer_id_expr)
+                .outerjoin(peer_img, peer_img.id == peer.profile_image_id)
+                .outerjoin(
+                    peer_dog,
+                    (peer_dog.owner_id == peer.id)
+                    & (peer_dog.is_representative.is_(True)),
+                )
+                .outerjoin(peer_dog_img, peer_dog_img.id == peer_dog.profile_image_id)
+                .join(last_msg, last_msg.c.room_id == ChatRoom.id)
+                .outerjoin(unread, unread.c.room_id == ChatRoom.id)
+                .order_by(last_msg.c.last_created_at.desc(), ChatRoom.id.desc())
+                .limit(limit)
+            )
+            res = await db.execute(stmt)
+            rows = res.all()
+
+        items: list[ChatRoomListItem] = []
+        for r in rows:
+            preview = (r.last_content or "").replace("\n", " ").strip()
+            if len(preview) > 120:
+                preview = preview[:117] + "…"
+            items.append(
+                ChatRoomListItem(
+                    room_id=r.room_id,
+                    peer_user_id=r.peer_id,
+                    peer_nickname=r.peer_nickname or "",
+                    peer_profile_image_url=r.peer_profile_image_url,
+                    peer_dog_profile_image_url=r.peer_dog_profile_image_url,
+                    peer_dog_name=r.peer_dog_name,
+                    peer_dog_breed=r.peer_dog_breed,
+                    peer_dog_gender=r.peer_dog_gender,
+                    peer_dog_birth_date=r.peer_dog_birth_date,
+                    last_message_preview=preview,
+                    unread_count=int(r.unread_count or 0),
+                    updated_at=r.last_created_at,
+                )
+            )
+        return ChatRoomsListData(items=items)
+
+    @classmethod
+    async def mark_room_read(
+        cls,
+        db: AsyncSession,
+        *,
+        room_id: UUID,
+        user_id: UUID,
+    ) -> ChatRoomMarkedReadData:
+        """내 기준 미읽음(상대가 보낸 메시지)을 읽음으로 일괄 표시."""
+        async with db.begin():
+            rres = await db.execute(select(ChatRoom).where(ChatRoom.id == room_id).limit(1))
+            room = rres.scalar_one_or_none()
+            if room is None or not cls._is_room_member(room, user_id):
+                raise ForbiddenException(message="이 채팅방에 접근할 수 없습니다.")
+            await db.execute(
+                update(ChatMessage)
+                .where(
+                    ChatMessage.room_id == room_id,
+                    ChatMessage.sender_id != user_id,
+                    ChatMessage.is_read.is_(False),
+                )
+                .values(is_read=True)
+            )
+        return ChatRoomMarkedReadData(ok=True)
+
+    @classmethod
+    async def get_room_peer_info(
+        cls,
+        db: AsyncSession,
+        *,
+        room_id: UUID,
+        user_id: UUID,
+    ) -> ChatRoomPeerInfoData:
+        """채팅방 상단용 상대 정보(닉네임/프로필).
+
+        - 멤버가 아니면 Forbidden
+        - N+1 없이 1쿼리
+        """
+        peer_id_expr = case(
+            (ChatRoom.user1_id == user_id, ChatRoom.user2_id),
+            else_=ChatRoom.user1_id,
+        ).label("peer_id")
+
+        peer = aliased(User)
+        peer_img = aliased(Image)
+        peer_dog = aliased(DogProfile)
+        peer_dog_img = aliased(Image)
+
+        async with db.begin():
+            rres = await db.execute(select(ChatRoom).where(ChatRoom.id == room_id).limit(1))
+            room = rres.scalar_one_or_none()
+            if room is None or not cls._is_room_member(room, user_id):
+                raise ForbiddenException(message="이 채팅방에 접근할 수 없습니다.")
+
+            stmt = (
+                select(
+                    ChatRoom.id.label("room_id"),
+                    peer_id_expr,
+                    peer.nickname.label("peer_nickname"),
+                    peer_img.file_url.label("peer_profile_image_url"),
+                    peer_dog.name.label("peer_dog_name"),
+                    peer_dog_img.file_url.label("peer_dog_profile_image_url"),
+                    peer_dog.breed.label("peer_dog_breed"),
+                    peer_dog.gender.label("peer_dog_gender"),
+                    peer_dog.birth_date.label("peer_dog_birth_date"),
+                )
+                .where(ChatRoom.id == room_id)
+                .join(peer, peer.id == peer_id_expr)
+                .outerjoin(peer_img, peer_img.id == peer.profile_image_id)
+                .outerjoin(
+                    peer_dog,
+                    (peer_dog.owner_id == peer.id)
+                    & (peer_dog.is_representative.is_(True)),
+                )
+                .outerjoin(peer_dog_img, peer_dog_img.id == peer_dog.profile_image_id)
+                .limit(1)
+            )
+            res = await db.execute(stmt)
+            row = res.one()
+
+        return ChatRoomPeerInfoData(
+            room_id=row.room_id,
+            peer_user_id=row.peer_id,
+            peer_nickname=row.peer_nickname or "",
+            peer_profile_image_url=row.peer_profile_image_url,
+            peer_dog_name=row.peer_dog_name,
+            peer_dog_profile_image_url=row.peer_dog_profile_image_url,
+            peer_dog_breed=row.peer_dog_breed,
+            peer_dog_gender=row.peer_dog_gender,
+            peer_dog_birth_date=row.peer_dog_birth_date,
+        )

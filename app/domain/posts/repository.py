@@ -207,15 +207,15 @@ class PostsModel:
     @classmethod
     async def get_all_posts(
         cls,
-        page: int = 1,
         size: int = 20,
         *,
         db: AsyncSession,
+        cursor: UUID | None = None,
         search_q: str | None = None,
         category_id: int | None = None,
         current_user_id: UUID | None = None,
-    ) -> tuple[list[Post], bool]:
-        offset = (page - 1) * size
+    ) -> list[Post]:
+        # UUIDv7 PK: ORDER BY id DESC + id < cursor는 PK B-Tree만으로 범위 스캔(추가 인덱스 불필요).
         fetch_limit = size + 1
         stmt = (
             select(Post)
@@ -237,12 +237,13 @@ class PostsModel:
         stmt = _apply_post_list_search_filter(stmt, search_q=search_q)
         if category_id is not None:
             stmt = stmt.where(Post.category_id == category_id)
-        stmt = stmt.order_by(Post.created_at.desc())
-        stmt = stmt.limit(fetch_limit).offset(offset)
+        if cursor is not None:
+            stmt = stmt.where(Post.id < cursor)
+        stmt = stmt.order_by(Post.id.desc())
+        stmt = stmt.limit(fetch_limit)
         result = await db.execute(stmt)
         rows = result.unique().scalars().all()
-        has_more = len(rows) > size
-        return list(rows[:size]), has_more
+        return list(rows)
 
     @classmethod
     async def get_posts_count(
