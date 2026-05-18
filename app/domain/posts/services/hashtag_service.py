@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.posts.schemas import TrendingHashtagResponse
+from app.domain.posts.schemas import TrendingHashtagResponse
 
 from ..repository import PostsModel
 

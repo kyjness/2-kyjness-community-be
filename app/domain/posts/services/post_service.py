@@ -17,10 +17,10 @@ from app.common.exceptions import (
 )
 from app.core.config import settings
 from app.core.ids import new_ulid_str, parse_public_id_value
-from app.media.model import MediaModel
-from app.posts.schemas import PostCreateRequest, PostResponse, PostUpdateRequest
+from app.domain.media.model import MediaModel
+from app.domain.posts.schemas import PostCreateRequest, PostResponse, PostUpdateRequest
 
-from ..repository import PostsModel
+from ..repository import PostsModel, validate_search_query
 
 log = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ class PostService:
         current_user_id: UUID | None = None,
         cursor: UUID | None = None,
     ) -> tuple[list[PostResponse], bool, int]:
-        search_q = q.strip() if (q and q.strip()) else None
+        search_q = validate_search_query(q)
         async with db.begin():
             if category_id is not None:
                 ok = await PostsModel.category_exists(category_id, db=db)
@@ -353,13 +353,3 @@ class PostService:
             success, _image_ids = await PostsModel.delete_post(post_id, db=db)
             if not success:
                 raise PostNotFoundException()
-
-    @classmethod
-    async def search_posts(
-        cls,
-        size: int,
-        db: AsyncSession,
-        q: str | None = None,
-        cursor: UUID | None = None,
-    ) -> tuple[list[PostResponse], bool, int]:
-        return await cls.get_posts(size=size, db=db, q=q, cursor=cursor)

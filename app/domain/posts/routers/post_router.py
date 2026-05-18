@@ -15,9 +15,16 @@ from app.api.dependencies import (
     post_create_idempotency_before,
     require_post_author,
 )
-from app.common import ApiCode, ApiResponse, OptionalPublicId, PaginatedResponse, PublicId, api_response
-from app.posts.schemas import PostCreateRequest, PostIdData, PostResponse, PostUpdateRequest
-from app.posts.services import PostService
+from app.common import (
+    ApiCode,
+    ApiResponse,
+    OptionalPublicId,
+    PaginatedResponse,
+    PublicId,
+    api_response,
+)
+from app.domain.posts.schemas import PostCreateRequest, PostIdData, PostResponse, PostUpdateRequest
+from app.domain.posts.services import PostService
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
@@ -53,7 +60,10 @@ async def get_posts(
         ),
     ] = None,
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
-    q: str | None = Query(None, description="검색어 (title, content ILIKE)"),
+    q: str | None = Query(
+        None,
+        description="검색어 (제목·본문·해시태그, pg_trgm GIN. 공백=AND, #태그=정확 매칭, 토큰 3자+)",
+    ),
     category_id: int | None = Query(None, ge=1, description="카테고리 ID 필터"),
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),

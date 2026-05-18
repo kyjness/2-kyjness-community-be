@@ -6,16 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse
 
 from app.api.dependencies import CurrentUser, get_current_user, get_master_db
-from app.auth.schema import (
+from app.common import ApiCode, ApiResponse, api_response, dump_api_response
+from app.core.config import settings
+from app.core.security import verify_access_token
+from app.domain.auth.schema import (
     AccessTokenData,
     LoginRequest,
     LoginSuccessData,
     SignUpRequest,
 )
-from app.auth.service import AuthService
-from app.common import ApiCode, ApiResponse, api_response, dump_api_response
-from app.core.config import settings
-from app.core.security import verify_access_token
+from app.domain.auth.service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

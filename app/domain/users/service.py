@@ -16,10 +16,10 @@ from app.core.security import (
     password_with_pepper,
     verify_password_with_legacy_fallback,
 )
-from app.dogs.service import DogService
-from app.media.model import MediaModel
-from app.users.model import UsersModel
-from app.users.schema import (
+from app.domain.dogs.service import DogService
+from app.domain.media.model import MediaModel
+from app.domain.users.model import UsersModel
+from app.domain.users.schema import (
     AvailabilityData,
     BlockedUserItem,
     BlocksData,
@@ -97,8 +97,7 @@ class UserService:
 
             # 3) 강아지 프로필(동일 트랜잭션)
             if data.dogs is not None:
-                dog_rows = [item.model_dump(mode="python") for item in data.dogs]
-                await DogService.upsert_dog_profile(user_id, dog_rows, db=db)
+                await DogService.upsert_dog_profile(user_id, data.dogs, db=db)
 
             db.expire(user)
             user_updated = await UsersModel.get_user_by_id_with_dogs(user_id, db=db)

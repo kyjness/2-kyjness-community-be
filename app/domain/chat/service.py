@@ -11,23 +11,23 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.chat.model import ChatMessage, ChatRoom, normalize_dm_user_ids
-from app.chat.schema import (
-    ChatMessageBroadcast,
-    ChatMessageItem,
-    ChatMessageSend,
-    ChatMessagesPageData,
-    ChatRoomMarkedReadData,
-    ChatRoomPeerInfoData,
-    ChatRoomListItem,
-    ChatRoomsListData,
-)
 from app.common.enums import UserStatus
 from app.common.exceptions import ForbiddenException, InvalidRequestException, UserNotFoundException
 from app.core.ids import new_uuid7, uuid_to_base62
 from app.db.base_class import utc_now
-from app.media.model import Image
-from app.users.model import DogProfile, User, UsersModel
+from app.domain.chat.model import ChatMessage, ChatRoom, normalize_dm_user_ids
+from app.domain.chat.schema import (
+    ChatMessageBroadcast,
+    ChatMessageItem,
+    ChatMessageSend,
+    ChatMessagesPageData,
+    ChatRoomListItem,
+    ChatRoomMarkedReadData,
+    ChatRoomPeerInfoData,
+    ChatRoomsListData,
+)
+from app.domain.media.model import Image
+from app.domain.users.model import DogProfile, User, UsersModel
 
 from .manager import chat_connection_manager
 from .pubsub import publish_chat_dm
@@ -238,20 +238,17 @@ class ChatService:
             else_=ChatRoom.user1_id,
         ).label("peer_id")
 
-        last_msg_ranked = (
-            select(
-                ChatMessage.room_id.label("room_id"),
-                ChatMessage.content.label("last_content"),
-                ChatMessage.created_at.label("last_created_at"),
-                func.row_number()
-                .over(
-                    partition_by=ChatMessage.room_id,
-                    order_by=(ChatMessage.created_at.desc(), ChatMessage.id.desc()),
-                )
-                .label("rn"),
+        last_msg_ranked = select(
+            ChatMessage.room_id.label("room_id"),
+            ChatMessage.content.label("last_content"),
+            ChatMessage.created_at.label("last_created_at"),
+            func.row_number()
+            .over(
+                partition_by=ChatMessage.room_id,
+                order_by=(ChatMessage.created_at.desc(), ChatMessage.id.desc()),
             )
-            .subquery()
-        )
+            .label("rn"),
+        ).subquery()
         last_msg = (
             select(
                 last_msg_ranked.c.room_id,
@@ -301,8 +298,7 @@ class ChatService:
                 .outerjoin(peer_img, peer_img.id == peer.profile_image_id)
                 .outerjoin(
                     peer_dog,
-                    (peer_dog.owner_id == peer.id)
-                    & (peer_dog.is_representative.is_(True)),
+                    (peer_dog.owner_id == peer.id) & (peer_dog.is_representative.is_(True)),
                 )
                 .outerjoin(peer_dog_img, peer_dog_img.id == peer_dog.profile_image_id)
                 .join(last_msg, last_msg.c.room_id == ChatRoom.id)
@@ -407,8 +403,7 @@ class ChatService:
                 .outerjoin(peer_img, peer_img.id == peer.profile_image_id)
                 .outerjoin(
                     peer_dog,
-                    (peer_dog.owner_id == peer.id)
-                    & (peer_dog.is_representative.is_(True)),
+                    (peer_dog.owner_id == peer.id) & (peer_dog.is_representative.is_(True)),
                 )
                 .outerjoin(peer_dog_img, peer_dog_img.id == peer_dog.profile_image_id)
                 .limit(1)

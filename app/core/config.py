@@ -11,12 +11,19 @@ if _env_file.exists():
     load_dotenv(_env_file)
 
 
+_JWT_INSECURE_DEFAULTS = frozenset({"", "change-me-in-production"})
+_MIN_JWT_SECRET_LEN = 32
+
+
 class Settings:
     # ----- 서버 (노출 주소·CORS·디버그) -----
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     BE_API_URL: str = os.getenv("BE_API_URL", "http://localhost:8000")
-    DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
+    ENVIRONMENT: str = (
+        os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).strip().lower() or "development"
+    )
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     CORS_ORIGINS: list[str] = [
         origin.strip()
         for origin in os.getenv(
@@ -61,6 +68,23 @@ class Settings:
 
     # ----- Redis (비우면 연결 시도 안 함, rate limit 등 Fail-open) -----
     REDIS_URL: str = os.getenv("REDIS_URL", "").strip()
+    # ----- Celery (REDIS_URL 기반 broker/result DB 인덱스 분리) -----
+    CELERY_ENABLED: bool = os.getenv("CELERY_ENABLED", "false").lower() == "true"
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "").strip()
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "").strip()
+    CELERY_BROKER_DB: int = int(os.getenv("CELERY_BROKER_DB", "1"))
+    CELERY_RESULT_DB: int = int(os.getenv("CELERY_RESULT_DB", "2"))
+    CELERY_BROKER_VISIBILITY_TIMEOUT: int = max(
+        300, int(os.getenv("CELERY_BROKER_VISIBILITY_TIMEOUT", "3600"))
+    )
+    CELERY_RESULT_EXPIRES_SECONDS: int = max(
+        60, int(os.getenv("CELERY_RESULT_EXPIRES_SECONDS", "3600"))
+    )
+    CELERY_TASK_SOFT_TIME_LIMIT: int = max(60, int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "300")))
+    CELERY_TASK_TIME_LIMIT: int = max(120, int(os.getenv("CELERY_TASK_TIME_LIMIT", "600")))
+    CELERY_TASK_IDEMPOTENCY_TTL_SECONDS: int = max(
+        300, int(os.getenv("CELERY_TASK_IDEMPOTENCY_TTL_SECONDS", "86400"))
+    )
     # SSE 알림 pubsub이 연결을 길게 점유하므로 기본 풀 크기를 넉넉히 둠(.env로 조정 가능).
     REDIS_MAX_CONNECTIONS: int = int(os.getenv("REDIS_MAX_CONNECTIONS", "128"))
     # POST /posts 멱등성: 성공 응답 캐시 TTL, in-flight 잠금 TTL(초)
@@ -145,3 +169,16 @@ class Settings:
 
 
 settings = Settings()
+
+
+def validate_settings_for_environment() -> None:
+    """production/prod 환경에서 JWT 기본값·짧은 시크릿이면 기동을 막는다."""
+    env = settings.ENVIRONMENT
+    if env not in ("production", "prod"):
+        return
+    secret = settings.JWT_SECRET_KEY.strip()
+    if secret in _JWT_INSECURE_DEFAULTS or len(secret) < _MIN_JWT_SECRET_LEN:
+        raise ValueError(
+            "JWT_SECRET_KEY must be a strong secret (at least 32 characters) in production. "
+            "Set ENVIRONMENT=production only with a non-default JWT_SECRET_KEY."
+        )

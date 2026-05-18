@@ -1,9 +1,9 @@
 # 채팅 WS·REST DTO. 수신(send)·송신(broadcast) 분리, 공개 ID는 PublicId(Base62).
 from __future__ import annotations
 
+from datetime import date as DateType
 from typing import Literal
 
-from datetime import date as DateType
 from pydantic import Field, field_validator
 
 from app.common import BaseSchema, PublicId, UtcDatetime
@@ -86,7 +86,9 @@ class ChatRoomListItem(BaseSchema):
     )
     peer_dog_name: str | None = Field(default=None, description="상대 대표견 이름")
     peer_dog_breed: str | None = Field(default=None, description="상대 대표견 견종")
-    peer_dog_gender: str | None = Field(default=None, description="상대 대표견 성별 코드(male/female)")
+    peer_dog_gender: str | None = Field(
+        default=None, description="상대 대표견 성별 코드(male/female)"
+    )
     peer_dog_birth_date: DateType | None = Field(default=None, description="상대 대표견 생년월일")
     last_message_preview: str = Field(default="", description="최근 메시지 미리보기(짧게)")
     unread_count: int = Field(default=0, ge=0, description="내 기준 미읽음 개수(상대가 보낸 것만)")
@@ -107,7 +109,13 @@ class ChatRoomPeerInfoData(BaseSchema):
     peer_nickname: str = Field(default="", description="상대방 닉네임(표시명)")
     peer_profile_image_url: str | None = Field(default=None, description="상대방 프로필 이미지 URL")
     peer_dog_name: str | None = Field(default=None, description="상대 대표 강아지 이름")
-    peer_dog_profile_image_url: str | None = Field(default=None, description="상대 대표 강아지 프로필 이미지 URL")
+    peer_dog_profile_image_url: str | None = Field(
+        default=None, description="상대 대표 강아지 프로필 이미지 URL"
+    )
     peer_dog_breed: str | None = Field(default=None, description="상대 대표 강아지 견종")
-    peer_dog_gender: str | None = Field(default=None, description="상대 대표 강아지 성별 코드(male/female)")
-    peer_dog_birth_date: DateType | None = Field(default=None, description="상대 대표 강아지 생년월일")
+    peer_dog_gender: str | None = Field(
+        default=None, description="상대 대표 강아지 성별 코드(male/female)"
+    )
+    peer_dog_birth_date: DateType | None = Field(
+        default=None, description="상대 대표 강아지 생년월일"
+    )

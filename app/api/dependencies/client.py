@@ -17,8 +17,8 @@ from app.common.codes import ApiCode
 from app.common.responses import get_request_id
 from app.common.schemas import ApiResponse
 from app.core.config import settings
-from app.media.schema import ImageUploadResponse, SignupImageUploadData
-from app.posts.schemas import PostIdData
+from app.domain.media.schema import ImageUploadResponse, SignupImageUploadData
+from app.domain.posts.schemas import PostIdData
 
 log = logging.getLogger(__name__)
 

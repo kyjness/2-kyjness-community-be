@@ -18,7 +18,7 @@ async def run_once(redis: Redis | None = None) -> None:
 
     # 1) 회원가입 임시 이미지 정리
     try:
-        from app.media.service import MediaService
+        from app.domain.media.service import MediaService
 
         async with get_connection() as db:
             deleted_count, failed_file_keys = await MediaService.cleanup_expired_signup_images(
@@ -42,7 +42,7 @@ async def run_once(redis: Redis | None = None) -> None:
 
     # 2) 게시글 작성 중 이탈 등으로 남은 고아 이미지(24h+) 정리
     try:
-        from app.media.service import MediaService
+        from app.domain.media.service import MediaService
 
         async with get_connection() as db:
             deleted = await MediaService.sweep_unused_images(db, redis=redis)
@@ -53,7 +53,7 @@ async def run_once(redis: Redis | None = None) -> None:
 
     # 3) 탈퇴 유저 파기(30일 경과 하드 삭제, 청크 단위)
     try:
-        from app.users.service import UserService
+        from app.domain.users.service import UserService
 
         async with get_connection() as db:
             deleted_users = await UserService.purge_withdrawn_users(older_than_days=30, db=db)
@@ -66,7 +66,7 @@ async def run_once(redis: Redis | None = None) -> None:
 
     # 4) 알림 자동 삭제(30일 경과)
     try:
-        from app.notifications.service import NotificationService
+        from app.domain.notifications.service import NotificationService
 
         async with get_connection() as db:
             deleted = await NotificationService.purge_old_notifications(

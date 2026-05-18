@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, get_current_user, get_master_db
 from app.common import ApiCode, ApiResponse, api_response
-from app.reports.schema import ReportCreateRequest, ReportSubmitData
-from app.reports.service import ReportService
+from app.domain.reports.schema import ReportCreateRequest, ReportSubmitData
+from app.domain.reports.service import ReportService
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 

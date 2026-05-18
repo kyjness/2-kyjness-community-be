@@ -64,3 +64,34 @@ async def test_search_posts_gin_index(client: AsyncClient):
     items = payload.get("items", [])
     assert len(items) >= 1
     assert "불닭" in (items[0].get("title") or "")
+
+    short_res = await client.get("/v1/posts", params={"q": "불"})
+    assert short_res.status_code == 400
+
+    and_res = await client.get("/v1/posts", params={"q": "카보 불닭"})
+    assert and_res.status_code == 200
+    and_items = and_res.json().get("data", and_res.json()).get("items", [])
+    assert len(and_items) >= 1
+    assert "불닭" in (and_items[0].get("title") or "")
+
+
+async def test_get_trending_posts(client: AsyncClient):
+    headers = await setup_auth_user(client, "trending_user@example.com", "트렌딩퍼피")
+    idem = {"X-Idempotency-Key": new_ulid_str()}
+    await client.post(
+        "/v1/posts",
+        json={"title": "인기글 후보", "content": "본문"},
+        headers={**headers, **idem},
+    )
+
+    res = await client.get("/v1/posts/trending")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body.get("requestId") or body.get("request_id")
+    data = body.get("data", body)
+    assert isinstance(data, list)
+    if data:
+        row = data[0]
+        assert "id" in row
+        assert "title" in row
+        assert "commentCount" in row or "comment_count" in row

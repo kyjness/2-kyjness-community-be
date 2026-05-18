@@ -13,7 +13,7 @@ from app.common.exceptions import ForbiddenException, UnauthorizedException
 from app.core.ids import jwt_sub_to_uuid
 from app.core.security import access_jti_blacklist_redis_key, verify_access_token
 from app.db import utc_now
-from app.users.model import UsersModel
+from app.domain.users.model import UsersModel
 
 from .db import get_slave_db
 

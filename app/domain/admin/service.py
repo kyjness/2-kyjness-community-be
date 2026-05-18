@@ -7,9 +7,6 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.admin.schema import ReportedPostAuthorInfo, ReportedPostItem
-from app.auth.service import AuthService
-from app.comments.model import CommentsModel
 from app.common import UserStatus
 from app.common.enums import TargetType
 from app.common.exceptions import (
@@ -19,9 +16,12 @@ from app.common.exceptions import (
     UserNotFoundException,
     UserWithdrawnException,
 )
-from app.posts.repository import PostsModel
-from app.reports.model import ReportsModel
-from app.users.model import UsersModel
+from app.domain.admin.schema import ReportedPostAuthorInfo, ReportedPostItem
+from app.domain.auth.service import AuthService
+from app.domain.comments.model import CommentsModel
+from app.domain.posts.repository import PostsModel
+from app.domain.reports.model import ReportsModel
+from app.domain.users.model import UsersModel
 
 CONTENT_PREVIEW_LEN = 80  # 게시글/댓글 내용 미리보기 글자 수
 
@@ -74,6 +74,8 @@ class AdminService:
             )
             post_items: list[ReportedPostItem] = []
             for p in posts:
+                if p.user_id is None:
+                    continue
                 author, author_status = _author_from_user(p.user)
                 content_preview = (p.content or "")[:CONTENT_PREVIEW_LEN]
                 if len(p.content or "") > CONTENT_PREVIEW_LEN:
@@ -99,6 +101,8 @@ class AdminService:
             titles_map = await PostsModel.get_titles_by_ids(title_post_ids, db=db)
             comment_items: list[ReportedPostItem] = []
             for c in comments:
+                if c.author_id is None:
+                    continue
                 author, author_status = _author_from_user(c.author)
                 content_preview = (c.content or "")[:CONTENT_PREVIEW_LEN]
                 if len(c.content or "") > CONTENT_PREVIEW_LEN:

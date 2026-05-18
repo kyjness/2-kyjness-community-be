@@ -25,8 +25,8 @@ from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, sele
 from app.common.enums import UserStatus
 from app.core.ids import new_uuid7
 from app.db.base_class import Base, utc_now
+from app.domain.media.model import Image
 from app.infra.storage import build_url
-from app.media.model import Image
 
 _PG_UUID = PG_UUID(as_uuid=True)
 

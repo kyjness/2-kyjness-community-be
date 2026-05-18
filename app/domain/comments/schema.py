@@ -3,7 +3,7 @@
 from pydantic import Field, model_validator
 
 from app.common import BaseSchema, OptionalPublicId, PublicId, UserStatus, UtcDatetime
-from app.users.schema import RepresentativeDogInfo
+from app.domain.users.schema import RepresentativeDogInfo
 
 
 class CommentIdData(BaseSchema):

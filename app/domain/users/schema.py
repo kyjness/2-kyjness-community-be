@@ -8,7 +8,7 @@ from pydantic import AfterValidator, Field, field_validator, model_validator
 
 from app.common import BaseSchema, OptionalPublicId, PublicId, UserStatus, UtcDatetime
 from app.common.codes import ApiCode
-from app.dogs.schema import (
+from app.domain.dogs.schema import (
     DogProfileResponse,
     DogProfileUpsertItem,
     RepresentativeDogInfo,

@@ -5,7 +5,6 @@ from uuid import UUID
 from fastapi import Depends, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.comments.model import CommentsModel
 from app.common import PublicId
 from app.common.exceptions import (
     CommentNotFoundException,
@@ -13,7 +12,8 @@ from app.common.exceptions import (
     InvalidPostIdFormatException,
     PostNotFoundException,
 )
-from app.posts.repository import PostsModel
+from app.domain.comments.model import CommentsModel
+from app.domain.posts.repository import PostsModel
 
 from .auth import CurrentUser, get_current_user
 from .db import get_slave_db

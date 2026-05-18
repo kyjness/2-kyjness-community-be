@@ -1,39 +1,116 @@
 # 게시글·post_images 데이터 접근. ORM은 .model 참조.
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import delete, exists, false, func, literal, or_, select, update
+from sqlalchemy import Select, and_, delete, exists, false, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
+from app.common.exceptions import InvalidRequestException
 from app.db.base_class import utc_now
-from app.users.model import DogProfile, User, UserBlock
+from app.domain.users.model import DogProfile, User, UserBlock
 
 from .model import Category, Hashtag, Post, PostImage, post_hashtags
 
+# pg_trgm: 라틴 3자 미만·한글 1음절·숫자 1자리는 인덱스 효율 저하 → 앱 레벨 거부.
+POST_SEARCH_MIN_TOKEN_LEN = 3
+_POST_SEARCH_MIN_TOKEN_LEN_HANGUL = 2
+_POST_SEARCH_MIN_TOKEN_LEN_DIGIT = 2
+
+
+def tokenize_search_query(raw: str) -> list[str]:
+    return [part for part in raw.split() if part]
+
+
+def _min_token_length(token: str) -> int:
+    if any("\uac00" <= ch <= "\ud7a3" for ch in token):
+        return _POST_SEARCH_MIN_TOKEN_LEN_HANGUL
+    if token.isdigit():
+        return _POST_SEARCH_MIN_TOKEN_LEN_DIGIT
+    return POST_SEARCH_MIN_TOKEN_LEN
+
+
+def _is_token_too_short(token: str) -> bool:
+    return len(token) < _min_token_length(token)
+
+
+def validate_search_query(q: str | None) -> str | None:
+    """검색어 정규화·길이 검증. #태그는 정확 매칭(길이 제한 별도)."""
+    if not q or not (stripped := q.strip()):
+        return None
+    if stripped.startswith("#"):
+        tag_name = stripped.lstrip("#").strip().lower()
+        if not tag_name:
+            raise InvalidRequestException("검색할 해시태그를 입력해주세요.")
+        return stripped
+    tokens = tokenize_search_query(stripped)
+    if not tokens:
+        return None
+    if any(_is_token_too_short(t) for t in tokens):
+        raise InvalidRequestException(
+            "검색어는 공백으로 구분된 각 단어가 최소 2글자(한글·숫자) 또는 3글자(영문) 이상이어야 합니다."
+        )
+    return stripped
+
+
+def _hashtag_exact_exists(tag_name: str):
+    return exists(
+        select(literal(1))
+        .select_from(post_hashtags)
+        .join(Hashtag, Hashtag.id == post_hashtags.c.hashtag_id)
+        .where(
+            post_hashtags.c.post_id == Post.id,
+            Hashtag.name == tag_name,
+        )
+    )
+
+
+def _hashtag_partial_exists(pattern: str):
+    return exists(
+        select(literal(1))
+        .select_from(post_hashtags)
+        .join(Hashtag, Hashtag.id == post_hashtags.c.hashtag_id)
+        .where(
+            post_hashtags.c.post_id == Post.id,
+            Hashtag.name.ilike(pattern),
+        )
+    )
+
+
+def _token_match_clause(token: str):
+    """단일 토큰: 제목 OR 본문 OR 해시태그명 부분 일치.
+
+    EXPLAIN 검증 예:
+      EXPLAIN (ANALYZE, BUFFERS)
+      SELECT id FROM posts
+      WHERE deleted_at IS NULL AND is_blinded = false
+        AND (title ILIKE '%불닭%' OR content ILIKE '%불닭%');
+    → Bitmap Index Scan on idx_posts_title_gin / idx_posts_content_gin (pg_trgm 활성 시).
+    """
+    pattern = f"%{token}%"
+    return or_(
+        Post.title.ilike(pattern),
+        Post.content.ilike(pattern),
+        _hashtag_partial_exists(pattern),
+    )
+
 
 def _apply_post_list_search_filter(stmt, *, search_q: str | None):
-    """목록/카운트 공통: #태그면 M:N 정확 매칭, 아니면 제목·본문 ILIKE."""
+    """목록/카운트 공통: #태그 정확 매칭, 그 외 토큰 AND + ILIKE(pg_trgm GIN 활용)."""
     if not search_q or not (raw := search_q.strip()):
         return stmt
     if raw.startswith("#"):
         tag_name = raw.lstrip("#").strip().lower()
         if not tag_name:
             return stmt.where(false())
-        hb = exists(
-            select(literal(1))
-            .select_from(post_hashtags)
-            .join(Hashtag, Hashtag.id == post_hashtags.c.hashtag_id)
-            .where(
-                post_hashtags.c.post_id == Post.id,
-                Hashtag.name == tag_name,
-            )
-        )
-        return stmt.where(hb)
-    pattern = f"%{raw}%"
-    return stmt.where(or_(Post.title.ilike(pattern), Post.content.ilike(pattern)))
+        return stmt.where(_hashtag_exact_exists(tag_name))
+    tokens = tokenize_search_query(raw)
+    if not tokens:
+        return stmt
+    return stmt.where(and_(*(_token_match_clause(token) for token in tokens)))
 
 
 class PostsModel:
@@ -42,6 +119,29 @@ class PostsModel:
     @classmethod
     async def category_exists(cls, category_id: int, *, db: AsyncSession) -> bool:
         r = await db.execute(select(exists().where(Category.id == category_id)))
+        return bool(r.scalar())
+
+    @classmethod
+    async def post_is_visible(
+        cls,
+        post_id: UUID,
+        *,
+        db: AsyncSession,
+        current_user_id: UUID | None = None,
+    ) -> bool:
+        """삭제·블라인드·차단 관계만 확인. 상세 조회용 eager load 없음."""
+        visible_where = [
+            Post.id == post_id,
+            Post.deleted_at.is_(None),
+            Post.is_blinded.is_(False),
+        ]
+        if current_user_id is not None:
+            block_exists = exists(1).where(
+                UserBlock.blocker_id == current_user_id,
+                UserBlock.blocked_id == Post.user_id,
+            )
+            visible_where.append(~block_exists)
+        r = await db.execute(select(exists().where(*visible_where)))
         return bool(r.scalar())
 
     @classmethod
@@ -155,7 +255,7 @@ class PostsModel:
         user_id: UUID,
         db: AsyncSession,
     ) -> tuple[Post, bool] | None:
-        from app.likes.model import PostLike
+        from app.domain.likes.model import PostLike
 
         is_liked_expr = (
             exists(1).where(PostLike.post_id == Post.id, PostLike.user_id == user_id)
@@ -291,6 +391,71 @@ class PostsModel:
         return [(str(r[0]), int(r[1] or 0)) for r in rows]
 
     @classmethod
+    def get_trending_posts_query(
+        cls,
+        *,
+        window_hours: int | None = 24,
+        category_id: int | None = None,
+        current_user_id: UUID | None = None,
+        limit: int = 10,
+        use_time_decay: bool = True,
+    ) -> Select[tuple[Post]]:
+        # created_at 하한을 최상단에 두어 idx_posts_feed_latest(created_at DESC, partial) 범위 스캔 유도.
+        # window_hours=None 이면 기간 제한 없음(최종 fallback용).
+        stmt = select(Post).where(
+            Post.deleted_at.is_(None),
+            Post.is_blinded.is_(False),
+        )
+        if window_hours is not None:
+            cutoff = utc_now() - timedelta(hours=window_hours)
+            stmt = stmt.where(Post.created_at >= cutoff)
+        stmt = stmt.options(selectinload(Post.category))
+        if category_id is not None:
+            stmt = stmt.where(Post.category_id == category_id)
+        if current_user_id is not None:
+            block_exists = exists(1).where(
+                UserBlock.blocker_id == current_user_id,
+                UserBlock.blocked_id == Post.user_id,
+            )
+            stmt = stmt.where(~block_exists)
+
+        if use_time_decay:
+            age_hours = func.extract("epoch", func.now() - Post.created_at) / 3600.0
+            score = (
+                Post.comment_count * 3 + Post.like_count * 2 + Post.view_count * 0.1
+            ) / func.power(age_hours + 2, 1.3)
+            stmt = stmt.order_by(score.desc(), Post.id.desc())
+        else:
+            stmt = stmt.order_by(
+                Post.like_count.desc(),
+                Post.comment_count.desc(),
+                Post.id.desc(),
+            )
+
+        return stmt.limit(limit)
+
+    @classmethod
+    async def get_trending_posts(
+        cls,
+        *,
+        db: AsyncSession,
+        window_hours: int | None = 24,
+        category_id: int | None = None,
+        current_user_id: UUID | None = None,
+        limit: int = 10,
+        use_time_decay: bool = True,
+    ) -> list[Post]:
+        stmt = cls.get_trending_posts_query(
+            window_hours=window_hours,
+            category_id=category_id,
+            current_user_id=current_user_id,
+            limit=limit,
+            use_time_decay=use_time_decay,
+        )
+        result = await db.execute(stmt)
+        return list(result.scalars().unique().all())
+
+    @classmethod
     async def update_post(
         cls,
         post_id: UUID,
@@ -352,8 +517,8 @@ class PostsModel:
 
     @classmethod
     async def delete_post(cls, post_id: UUID, db: AsyncSession) -> tuple[bool, list[UUID]]:
-        from app.comments.model import Comment
-        from app.likes.model import PostLikesModel
+        from app.domain.comments.model import Comment
+        from app.domain.likes.model import PostLikesModel
 
         r_post = await db.execute(
             update(Post)

@@ -14,13 +14,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.exceptions import (
     ImageNotFoundException,
     InternalServerErrorException,
+    InvalidImageFileException,
     InvalidRequestException,
 )
 from app.core.config import settings
-from app.infra.storage import storage_delete
-from app.media.image_policy import save_image_for_media
-from app.media.model import MediaModel
-from app.media.schema import ImageUploadResponse, SignupImageUploadData
+from app.core.ids import new_uuid7
+from app.domain.media.image_policy import (
+    build_pending_file_key,
+    sanitize_presign_filename,
+    save_image_for_media,
+    validate_image_content_type,
+    validate_purpose,
+)
+from app.domain.media.model import MediaModel
+from app.domain.media.schema import (
+    ConfirmSignupUploadRequest,
+    ConfirmUploadRequest,
+    ImageUploadResponse,
+    PresignUploadRequest,
+    PresignUploadResponse,
+    SignupImageUploadData,
+)
+from app.infra.storage import (
+    build_url,
+    is_valid_pending_file_key,
+    issue_presigned_post,
+    promote_pending_object,
+    require_s3_direct_upload,
+    storage_delete,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +89,124 @@ async def _try_acquire_job_lock(
 
 
 class MediaService:
+    @classmethod
+    def _ensure_s3_direct_upload(cls) -> None:
+        try:
+            require_s3_direct_upload()
+        except ValueError as e:
+            raise InvalidRequestException(
+                message="Direct S3 upload is only available when STORAGE_BACKEND=s3."
+            ) from e
+
+    @classmethod
+    async def issue_presigned_upload(cls, body: PresignUploadRequest) -> PresignUploadResponse:
+        cls._ensure_s3_direct_upload()
+        content_type = validate_image_content_type(body.content_type)
+        safe_name = sanitize_presign_filename(body.filename, content_type)
+        upload_id = new_uuid7()
+        file_key = build_pending_file_key(upload_id, safe_name)
+        url, fields, _ = await issue_presigned_post(file_key, content_type)
+        return PresignUploadResponse(url=url, fields=fields, file_key=file_key)
+
+    @classmethod
+    async def _confirm_pending_key(
+        cls,
+        file_key: str,
+        *,
+        purpose: str,
+        expected_size: int | None,
+    ) -> tuple[str, str, str, int]:
+        key = file_key.strip().lstrip("/")
+        if not is_valid_pending_file_key(key):
+            raise InvalidRequestException(message="Invalid or expired pending file_key.")
+        try:
+            dest_key, size, content_type = await promote_pending_object(key, purpose)
+        except ValueError as e:
+            raise InvalidImageFileException(message="Uploaded object is missing or invalid.") from e
+        if expected_size is not None and expected_size != size:
+            raise InvalidImageFileException(message="Reported size does not match stored object.")
+        validate_image_content_type(content_type)
+        return dest_key, build_url(dest_key), content_type, size
+
+    @classmethod
+    async def confirm_presigned_upload(
+        cls,
+        body: ConfirmUploadRequest,
+        user_id: UUID,
+        db: AsyncSession,
+    ) -> ImageUploadResponse:
+        validate_purpose(body.purpose)
+        dest_key, file_url, content_type, size = await cls._confirm_pending_key(
+            body.file_key,
+            purpose=body.purpose,
+            expected_size=body.size,
+        )
+        try:
+            async with db.begin():
+                image = await MediaModel.create_image(
+                    file_key=dest_key,
+                    file_url=file_url,
+                    content_type=content_type,
+                    size=size,
+                    uploader_id=user_id,
+                    db=db,
+                )
+                return ImageUploadResponse.model_validate(image)
+        except Exception:
+            try:
+                await asyncio.to_thread(storage_delete, dest_key)
+            except Exception as rollback_e:
+                logger.warning(
+                    "Rollback storage delete failed after confirm_presigned_upload DB error "
+                    "file_key=%s: %s",
+                    dest_key,
+                    rollback_e,
+                )
+            raise
+
+    @classmethod
+    async def confirm_presigned_signup_upload(
+        cls,
+        body: ConfirmSignupUploadRequest,
+        db: AsyncSession,
+        redis: Redis | None,
+    ) -> SignupImageUploadData:
+        dest_key, file_url, content_type, size = await cls._confirm_pending_key(
+            body.file_key,
+            purpose="signup",
+            expected_size=body.size,
+        )
+        image = None
+        try:
+            async with db.begin():
+                image = await MediaModel.create_temp_image(
+                    file_key=dest_key,
+                    file_url=file_url,
+                    content_type=content_type,
+                    size=size,
+                    db=db,
+                )
+            signup_token = await cls.issue_upload_token(image.id, redis=redis)
+            return SignupImageUploadData(
+                id=image.id,
+                file_url=image.file_url,
+                signup_token=signup_token,
+            )
+        except Exception:
+            try:
+                if image is not None:
+                    async with db.begin():
+                        await MediaModel.delete_images_by_ids([image.id], db=db)
+                await asyncio.to_thread(storage_delete, dest_key)
+            except Exception as rollback_e:
+                logger.warning(
+                    "Rollback storage delete failed after confirm_presigned_signup_upload "
+                    "file_key=%s: %s",
+                    dest_key,
+                    rollback_e,
+                )
+            raise
+
     @classmethod
     async def issue_upload_token(cls, image_id: UUID, redis: Redis | None) -> str:
         if redis is None:
@@ -217,7 +357,7 @@ class MediaService:
                     break
 
                 # 2) 스토리지 I/O는 DB 트랜잭션 밖에서 수행.
-                deletable_ids: list[str] = []
+                deletable_ids: list[UUID] = []
                 for img in orphan_images:
                     try:
                         await asyncio.to_thread(storage_delete, img.file_key)

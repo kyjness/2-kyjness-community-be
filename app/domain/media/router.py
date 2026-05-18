@@ -20,10 +20,74 @@ from app.api.dependencies import (
     media_upload_idempotency_after_success,
 )
 from app.common import ApiCode, ApiResponse, PublicId, api_response
-from app.media.schema import ImageUploadResponse, SignupImageUploadData
-from app.media.service import MediaService
+from app.domain.media.schema import (
+    ConfirmSignupUploadRequest,
+    ConfirmUploadRequest,
+    ImageUploadResponse,
+    PresignUploadRequest,
+    PresignUploadResponse,
+    SignupImageUploadData,
+)
+from app.domain.media.service import MediaService
 
 router = APIRouter(prefix="/media", tags=["media"])
+
+
+@router.post(
+    "/images/presign",
+    status_code=200,
+    response_model=ApiResponse[PresignUploadResponse],
+)
+async def presign_image_upload(
+    request: Request,
+    body: PresignUploadRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    data = await MediaService.issue_presigned_upload(body)
+    return api_response(request, code=ApiCode.OK, data=data)
+
+
+@router.post(
+    "/images/signup/presign",
+    status_code=200,
+    response_model=ApiResponse[PresignUploadResponse],
+)
+async def presign_signup_image_upload(
+    request: Request,
+    body: PresignUploadRequest,
+):
+    data = await MediaService.issue_presigned_upload(body)
+    return api_response(request, code=ApiCode.OK, data=data)
+
+
+@router.post(
+    "/images/confirm",
+    status_code=201,
+    response_model=ApiResponse[ImageUploadResponse],
+)
+async def confirm_image_upload(
+    request: Request,
+    body: ConfirmUploadRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_master_db),
+):
+    data = await MediaService.confirm_presigned_upload(body, user.id, db=db)
+    return api_response(request, code=ApiCode.OK, data=data)
+
+
+@router.post(
+    "/images/signup/confirm",
+    status_code=201,
+    response_model=ApiResponse[SignupImageUploadData],
+)
+async def confirm_signup_image_upload(
+    request: Request,
+    body: ConfirmSignupUploadRequest,
+    db: AsyncSession = Depends(get_master_db),
+):
+    redis: Redis | None = getattr(request.app.state, "redis", None)
+    data = await MediaService.confirm_presigned_signup_upload(body, db=db, redis=redis)
+    return api_response(request, code=ApiCode.OK, data=data)
 
 
 @router.post(

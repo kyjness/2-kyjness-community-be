@@ -8,32 +8,29 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.comments.model import CommentLikesModel, CommentsModel
-from app.comments.schema import (
-    CommentIdData,
-    CommentResponse,
-    CommentsPageData,
-    CommentUpsertRequest,
-)
 from app.common.enums import NotificationKind
 from app.common.exceptions import (
     CommentNotFoundException,
     ConcurrentUpdateException,
     PostNotFoundException,
 )
-from app.notifications.model import NotificationsModel
-from app.notifications.service import NotificationService
+from app.domain.comments.model import CommentLikesModel, CommentsModel
+from app.domain.comments.schema import (
+    CommentIdData,
+    CommentResponse,
+    CommentsPageData,
+    CommentUpsertRequest,
+)
+from app.domain.notifications.model import NotificationsModel
+from app.domain.notifications.service import NotificationService
+from app.domain.posts.repository import PostsModel
 
 
 async def _increment_post_comment_count(post_id: UUID, db: AsyncSession) -> None:
-    from app.posts.repository import PostsModel
-
     await PostsModel.increment_comment_count(post_id, db=db)
 
 
 async def _decrement_post_comment_count(post_id: UUID, db: AsyncSession) -> None:
-    from app.posts.repository import PostsModel
-
     await PostsModel.decrement_comment_count(post_id, db=db)
 
 
@@ -42,9 +39,7 @@ async def _ensure_post_visible(
     db: AsyncSession,
     current_user_id: UUID | None = None,
 ) -> None:
-    from app.posts.repository import PostsModel
-
-    if await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id) is None:
+    if not await PostsModel.post_is_visible(post_id, db=db, current_user_id=current_user_id):
         raise PostNotFoundException()
 
 
@@ -137,8 +132,6 @@ class CommentService:
             except StaleDataError as e:
                 raise ConcurrentUpdateException() from e
             comment_id = comment.id
-            from app.posts.repository import PostsModel
-
             post_author_id = await PostsModel.get_post_author_id(post_id, db=db)
             if post_author_id and post_author_id != user_id:
                 nid = await NotificationsModel.insert(
@@ -181,10 +174,9 @@ class CommentService:
         current_user_id: UUID | None = None,
     ) -> CommentsPageData:
         async with db.begin():
-            from app.posts.repository import PostsModel
-
-            post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id)
-            if not post:
+            if not await PostsModel.post_is_visible(
+                post_id, db=db, current_user_id=current_user_id
+            ):
                 raise PostNotFoundException()
             comments = await CommentsModel.get_comments_by_post_id(
                 post_id,

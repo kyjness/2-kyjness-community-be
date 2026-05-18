@@ -3,13 +3,13 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.comments.model import CommentsModel
 from app.common.enums import TargetType
 from app.common.exceptions import CommentNotFoundException, PostNotFoundException
 from app.core.config import settings
-from app.posts.repository import PostsModel
-from app.reports.model import ReportsModel
-from app.reports.schema import ReportCreateRequest, ReportSubmitData
+from app.domain.comments.model import CommentsModel
+from app.domain.posts.repository import PostsModel
+from app.domain.reports.model import ReportsModel
+from app.domain.reports.schema import ReportCreateRequest, ReportSubmitData
 
 
 class ReportService:

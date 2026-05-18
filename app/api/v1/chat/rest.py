@@ -7,17 +7,17 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, get_current_user, get_master_db, get_slave_db
-from app.chat.schema import (
+from app.common import ApiCode, ApiResponse, PublicId, api_response
+from app.common.exceptions import InvalidRequestException
+from app.core.ids import parse_public_id_value
+from app.domain.chat.schema import (
     ChatDirectRoomData,
     ChatMessagesPageData,
     ChatRoomMarkedReadData,
     ChatRoomPeerInfoData,
     ChatRoomsListData,
 )
-from app.chat.service import ChatService
-from app.common import ApiCode, ApiResponse, PublicId, api_response
-from app.common.exceptions import InvalidRequestException
-from app.core.ids import parse_public_id_value
+from app.domain.chat.service import ChatService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 

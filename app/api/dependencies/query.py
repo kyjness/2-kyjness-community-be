@@ -4,7 +4,7 @@ from fastapi import Query
 from pydantic import ValidationError
 
 from app.common.exceptions import InvalidRequestException
-from app.users.schema import UserAvailabilityQuery
+from app.domain.users.schema import UserAvailabilityQuery
 
 
 def parse_availability_query(

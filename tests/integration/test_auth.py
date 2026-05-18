@@ -3,8 +3,8 @@ import uuid
 
 import pytest
 from app.common.codes import ApiCode
+from app.domain.users.model import User
 from app.main import app
-from app.users.model import User
 from httpx import AsyncClient, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

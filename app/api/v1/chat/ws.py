@@ -9,11 +9,6 @@ from pydantic import ValidationError
 from redis.asyncio import Redis
 from starlette.websockets import WebSocketDisconnect
 
-from app.chat.manager import chat_connection_manager
-from app.chat.payload import parse_incoming_message, validation_error_to_ws_error
-from app.chat.schema import ChatWsErrorPayload
-from app.chat.service import DM_SAME_USER, ChatService
-from app.chat.ws_auth import authenticate_chat_websocket
 from app.common.exceptions import (
     BaseProjectException,
     ForbiddenException,
@@ -21,6 +16,11 @@ from app.common.exceptions import (
     UserNotFoundException,
 )
 from app.db import AsyncSessionLocal
+from app.domain.chat.manager import chat_connection_manager
+from app.domain.chat.payload import parse_incoming_message, validation_error_to_ws_error
+from app.domain.chat.schema import ChatWsErrorPayload
+from app.domain.chat.service import DM_SAME_USER, ChatService
+from app.domain.chat.ws_auth import authenticate_chat_websocket
 
 log = logging.getLogger(__name__)
 

@@ -1,6 +1,7 @@
 # 강아지 프로필 비즈니스 로직. 순수 데이터/커스텀 예외. Full-Async.
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +12,10 @@ from app.common.exceptions import (
     NotFoundException,
 )
 from app.db import utc_now
-from app.dogs.model import DogProfilesModel
-from app.dogs.schema import DogProfileUpsertItem
-from app.users.model import UsersModel
-from app.users.schema import UserProfileResponse
+from app.domain.dogs.model import DogProfilesModel
+from app.domain.dogs.schema import DogProfileUpsertItem
+from app.domain.users.model import UsersModel
+from app.domain.users.schema import UserProfileResponse
 
 
 class DogService:
@@ -22,7 +23,7 @@ class DogService:
     async def upsert_dog_profile(
         cls,
         owner_id: UUID,
-        items: list[dict | DogProfileUpsertItem],
+        items: Sequence[DogProfileUpsertItem | dict[str, object]],
         db: AsyncSession,
     ) -> None:
         """강아지 목록 전체 교체(생성/수정/삭제). 대표 강아지 설정은 한 트랜잭션 내 원자적."""

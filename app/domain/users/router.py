@@ -11,9 +11,9 @@ from app.api.dependencies import (
     get_slave_db,
     parse_availability_query,
 )
-from app.auth.service import AuthService
 from app.common import ApiCode, ApiResponse, PublicId, api_response
-from app.users.schema import (
+from app.domain.auth.service import AuthService
+from app.domain.users.schema import (
     AvailabilityData,
     BlocksData,
     BlockToggleResponse,
@@ -22,7 +22,7 @@ from app.users.schema import (
     UserAvailabilityQuery,
     UserProfileResponse,
 )
-from app.users.service import UserService
+from app.domain.users.service import UserService
 
 router = APIRouter(prefix="/users", tags=["users"])
 

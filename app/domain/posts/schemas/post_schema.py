@@ -4,7 +4,7 @@ from pydantic import AfterValidator, Field, computed_field, field_validator, mod
 
 from app.common import BaseSchema, OptionalPublicId, PublicId, UserStatus, UtcDatetime
 from app.common.codes import ApiCode
-from app.users.schema import RepresentativeDogInfo
+from app.domain.users.schema import RepresentativeDogInfo
 
 _POST_HASHTAGS_MAX = 6
 

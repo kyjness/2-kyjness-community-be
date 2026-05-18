@@ -1,4 +1,3 @@
-from .category_schema import CategoryResponse
 from .hashtag_schema import TrendingHashtagResponse
 from .post_schema import (
     AuthorInfo,
@@ -10,10 +9,10 @@ from .post_schema import (
     PostResponse,
     PostUpdateRequest,
 )
+from .trending_post_schema import TrendingPostResponse
 
 __all__ = [
     "AuthorInfo",
-    "CategoryResponse",
     "FileInfo",
     "HashtagsMaxSix",
     "ImageIdsMaxFive",
@@ -22,4 +21,5 @@ __all__ = [
     "PostResponse",
     "PostUpdateRequest",
     "TrendingHashtagResponse",
+    "TrendingPostResponse",
 ]

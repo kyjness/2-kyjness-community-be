@@ -15,8 +15,8 @@ from app.common.enums import NotificationKind
 from app.common.schemas import PaginatedResponse
 from app.core.config import settings
 from app.core.ids import uuid_to_base62
-from app.notifications.model import Notification, NotificationsModel
-from app.notifications.schema import NotificationItem
+from app.domain.notifications.model import Notification, NotificationsModel
+from app.domain.notifications.schema import NotificationItem
 
 log = logging.getLogger(__name__)
 

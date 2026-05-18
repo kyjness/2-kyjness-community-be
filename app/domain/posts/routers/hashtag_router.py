@@ -3,8 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_slave_db
 from app.common import ApiCode, ApiResponse, api_response
-from app.posts.schemas import TrendingHashtagResponse
-from app.posts.services import HashtagService
+from app.domain.posts.schemas import TrendingHashtagResponse
+from app.domain.posts.services import HashtagService
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 

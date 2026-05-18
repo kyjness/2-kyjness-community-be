@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.db.base_class import utc_now
-from app.users.model import DogProfile
+from app.domain.users.model import DogProfile
 
 
 class DogProfilesModel:

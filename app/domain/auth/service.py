@@ -10,12 +10,6 @@ from uuid import UUID
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.schema import (
-    AccessTokenData,
-    LoginRequest,
-    LoginSuccessData,
-    SignUpRequest,
-)
 from app.common.enums import UserStatus
 from app.common.exceptions import (
     EmailAlreadyExistsException,
@@ -37,9 +31,15 @@ from app.core.security import (
     verify_password_with_legacy_fallback,
     verify_refresh_token,
 )
-from app.media.model import MediaModel
-from app.media.service import MediaService
-from app.users.model import UsersModel
+from app.domain.auth.schema import (
+    AccessTokenData,
+    LoginRequest,
+    LoginSuccessData,
+    SignUpRequest,
+)
+from app.domain.media.model import MediaModel
+from app.domain.media.service import MediaService
+from app.domain.users.model import UsersModel
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +312,7 @@ class AuthService:
                 id=user.id,
                 email=user.email,
                 nickname=user.nickname,
-                status=user.status,
+                status=UserStatus(user.status),
                 profile_image_id=user.profile_image_id,
                 profile_image_url=user.profile_image_url,
                 access_token=access_token,

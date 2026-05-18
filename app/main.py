@@ -16,10 +16,10 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.v1 import v1_router
-from app.common import ApiCode, ApiResponse, RootData, api_response, get_request_id, setup_logging
+from app.common import ApiCode, ApiResponse, RootData, api_response, setup_logging
 from app.core.cleanup import run_loop_async
 from app.core.cleanup import run_once as cleanup_once
-from app.core.config import settings
+from app.core.config import settings, validate_settings_for_environment
 from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import (
     RequestIdMiddleware,
@@ -36,7 +36,7 @@ async def _view_buffer_flush_loop(stop_event: asyncio.Event, redis_client: Any) 
     """조회수 Redis 버퍼를 주기적으로 DB에 반영."""
     flush_log = logging.getLogger("app.view_buffer_flush")
     interval = settings.VIEW_BUFFER_FLUSH_INTERVAL_SECONDS
-    from app.posts.services import PostService
+    from app.domain.posts.services import PostService
 
     while True:
         try:
@@ -57,6 +57,7 @@ async def lifespan(app: FastAPI):
     from app.db import close_database, init_database
     from app.infra.redis import close_redis, init_redis
 
+    validate_settings_for_environment()
     setup_logging()
     log = logging.getLogger(__name__)
     if not await init_database():
@@ -181,18 +182,19 @@ def root(request: Request):
     )
 
 
-@base_router.get("/health")
+@base_router.get("/health", response_model=ApiResponse[dict[str, str]])
 async def health(request: Request):
     ok = await check_database()
-    status_code = 200 if ok else 503
+    payload = api_response(
+        request,
+        code=ApiCode.OK if ok else ApiCode.DB_ERROR,
+        data={"status": "ok" if ok else "degraded"},
+    )
+    if ok:
+        return payload
     return JSONResponse(
-        status_code=status_code,
-        content={
-            "code": ApiCode.OK.value if ok else ApiCode.DB_ERROR.value,
-            "message": "",
-            "data": {"status": "ok" if ok else "degraded"},
-            "requestId": get_request_id(request),
-        },
+        status_code=503,
+        content=payload.model_dump(mode="json", by_alias=True),
     )
 
 

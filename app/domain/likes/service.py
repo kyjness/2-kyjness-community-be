@@ -9,7 +9,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.comments.model import CommentLikesModel, CommentsModel
 from app.common.enums import NotificationKind
 from app.common.exceptions import (
     AlreadyLikedException,
@@ -18,10 +17,11 @@ from app.common.exceptions import (
     PostNotFoundException,
 )
 from app.db import get_connection
-from app.likes.model import PostLikesModel
-from app.notifications.model import NotificationsModel
-from app.notifications.service import NotificationService
-from app.posts.repository import PostsModel
+from app.domain.comments.model import CommentLikesModel, CommentsModel
+from app.domain.likes.model import PostLikesModel
+from app.domain.notifications.model import NotificationsModel
+from app.domain.notifications.service import NotificationService
+from app.domain.posts.repository import PostsModel
 
 
 def _is_unique_violation(exc: IntegrityError) -> bool:
@@ -49,7 +49,7 @@ class LikeService:
         inserted_out = False
         like_count_out = 0
         async with db.begin():
-            if await PostsModel.get_post_by_id(post_id, db=db) is None:
+            if not await PostsModel.post_is_visible(post_id, db=db):
                 raise PostNotFoundException()
             try:
                 inserted = await PostLikesModel.create(post_id, user_id, db=db)
@@ -104,7 +104,7 @@ class LikeService:
     @classmethod
     async def unlike_post(cls, post_id: UUID, user_id: UUID, db: AsyncSession) -> tuple[bool, int]:
         async with db.begin():
-            if await PostsModel.get_post_by_id(post_id, db=db) is None:
+            if not await PostsModel.post_is_visible(post_id, db=db):
                 raise PostNotFoundException()
             try:
                 deleted = await PostLikesModel.delete(post_id, user_id, db=db)

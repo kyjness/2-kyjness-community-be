@@ -1,7 +1,7 @@
 from pydantic import EmailStr, Field, model_validator
 
 from app.common import BaseSchema, OptionalPublicId, PublicId, UserStatus
-from app.users.schema import NicknameStr, PasswordStr
+from app.domain.users.schema import NicknameStr, PasswordStr
 
 
 class SignUpRequest(BaseSchema):

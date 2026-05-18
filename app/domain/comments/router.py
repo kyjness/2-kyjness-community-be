@@ -17,9 +17,9 @@ from app.api.dependencies import (
     require_comment_author,
     require_comment_author_for_delete,
 )
-from app.comments.schema import CommentIdData, CommentsPageData, CommentUpsertRequest
-from app.comments.service import CommentService
 from app.common import ApiCode, ApiResponse, PublicId, api_response
+from app.domain.comments.schema import CommentIdData, CommentsPageData, CommentUpsertRequest
+from app.domain.comments.service import CommentService
 
 router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
 

@@ -5,7 +5,10 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Path, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin.schema import (
+from app.api.dependencies import get_current_admin, get_master_db
+from app.common import ApiCode, ApiResponse, PaginatedResponse, PublicId, api_response
+from app.db import AsyncSessionLocal
+from app.domain.admin.schema import (
     ActivatedResponse,
     BlindedResponse,
     MediaSweepResponse,
@@ -14,11 +17,8 @@ from app.admin.schema import (
     SuspendedResponse,
     UnblindedResponse,
 )
-from app.admin.service import AdminService
-from app.api.dependencies import get_current_admin, get_master_db
-from app.common import ApiCode, ApiResponse, PaginatedResponse, PublicId, api_response
-from app.db import AsyncSessionLocal
-from app.media.service import MediaService
+from app.domain.admin.service import AdminService
+from app.domain.media.service import MediaService
 
 router = APIRouter(
     prefix="/admin",

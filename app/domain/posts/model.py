@@ -21,8 +21,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.ids import new_uuid7
 from app.db.base_class import Base
-from app.media.model import Image
-from app.users.model import User
+from app.domain.media.model import Image
+from app.domain.users.model import User
 
 _PG_UUID = PG_UUID(as_uuid=True)
 
@@ -54,6 +54,16 @@ class Hashtag(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+
+    __table_args__ = (
+        Index(
+            "idx_hashtags_name_gin",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+            postgresql_with={"fastupdate": True},
+        ),
+    )
 
     posts: Mapped[list[Post]] = relationship(
         "Post",
@@ -88,17 +98,20 @@ class Post(Base):
     __mapper_args__ = {"version_id_col": version}
 
     __table_args__ = (
+        # pg_trgm GIN: ILIKE '%term%' 시 Bitmap Index Scan 가능 (EXPLAIN으로 idx_posts_*_gin 확인).
         Index(
             "idx_posts_title_gin",
             "title",
             postgresql_using="gin",
             postgresql_ops={"title": "gin_trgm_ops"},
+            postgresql_with={"fastupdate": True},
         ),
         Index(
             "idx_posts_content_gin",
             "content",
             postgresql_using="gin",
             postgresql_ops={"content": "gin_trgm_ops"},
+            postgresql_with={"fastupdate": True},
         ),
         Index(
             "idx_posts_feed_latest",
