@@ -8,6 +8,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from redis.asyncio import Redis
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import UserStatus
@@ -275,13 +276,23 @@ class AuthService:
                 ):
                     raise SignupImageTokenInvalidException()
                 profile_image_id = image_id_from_token
-            created = await UsersModel.create_user(
-                data.email,
-                hashed,
-                data.nickname,
-                profile_image_id=profile_image_id,
-                db=db,
-            )
+            try:
+                created = await UsersModel.create_user(
+                    data.email,
+                    hashed,
+                    data.nickname,
+                    profile_image_id=profile_image_id,
+                    db=db,
+                )
+            except IntegrityError as e:
+                orig = getattr(e, "orig", None)
+                if getattr(orig, "pgcode", None) == "23505":
+                    constraint = getattr(getattr(orig, "diag", None), "constraint_name", "") or ""
+                    if "email" in constraint:
+                        raise EmailAlreadyExistsException() from e
+                    if "nickname" in constraint:
+                        raise NicknameAlreadyExistsException() from e
+                raise
             if profile_image_id is not None:
                 attached = await MediaModel.claim_image_ownership(
                     profile_image_id, created.id, db=db

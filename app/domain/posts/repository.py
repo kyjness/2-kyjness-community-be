@@ -68,6 +68,14 @@ def _hashtag_exact_exists(tag_name: str):
     )
 
 
+_ILIKE_ESCAPE = "\\"
+
+
+def _escape_ilike_token(token: str) -> str:
+    """ILIKE 와일드카드 문자(%, _)와 이스케이프 문자 자체를 이스케이프한다."""
+    return token.replace(_ILIKE_ESCAPE, _ILIKE_ESCAPE * 2).replace("%", "\\%").replace("_", "\\_")
+
+
 def _hashtag_partial_exists(pattern: str):
     return exists(
         select(literal(1))
@@ -75,7 +83,7 @@ def _hashtag_partial_exists(pattern: str):
         .join(Hashtag, Hashtag.id == post_hashtags.c.hashtag_id)
         .where(
             post_hashtags.c.post_id == Post.id,
-            Hashtag.name.ilike(pattern),
+            Hashtag.name.ilike(pattern, escape=_ILIKE_ESCAPE),
         )
     )
 
@@ -90,10 +98,10 @@ def _token_match_clause(token: str):
         AND (title ILIKE '%불닭%' OR content ILIKE '%불닭%');
     → Bitmap Index Scan on idx_posts_title_gin / idx_posts_content_gin (pg_trgm 활성 시).
     """
-    pattern = f"%{token}%"
+    pattern = f"%{_escape_ilike_token(token)}%"
     return or_(
-        Post.title.ilike(pattern),
-        Post.content.ilike(pattern),
+        Post.title.ilike(pattern, escape=_ILIKE_ESCAPE),
+        Post.content.ilike(pattern, escape=_ILIKE_ESCAPE),
         _hashtag_partial_exists(pattern),
     )
 

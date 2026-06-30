@@ -427,6 +427,7 @@ class MediaService:
                             exc_info=True,
                         )
                         failed_file_keys.append(img.file_key)
+                        continue
                     await MediaModel.delete_image_record(img, db=db)
             return len(rows), failed_file_keys
         finally:

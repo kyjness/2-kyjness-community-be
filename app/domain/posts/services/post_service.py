@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import secrets
 from typing import Any
 from uuid import UUID
 
@@ -242,12 +243,13 @@ class PostService:
         if redis_client is None:
             return
         lock_acquired = False
+        lock_value = secrets.token_urlsafe(24)
         drain_key = f"views:{{v}}:drain:{new_ulid_str()}"
         try:
             lock_acquired = bool(
                 await redis_client.set(
                     VIEW_FLUSH_LOCK_KEY,
-                    "1",
+                    lock_value,
                     nx=True,
                     ex=settings.VIEW_FLUSH_LOCK_SECONDS,
                 )
@@ -286,7 +288,13 @@ class PostService:
         finally:
             if lock_acquired:
                 try:
-                    await redis_client.delete(VIEW_FLUSH_LOCK_KEY)
+                    await redis_client.eval(
+                        "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+                        "return redis.call('DEL', KEYS[1]) else return 0 end",
+                        1,
+                        VIEW_FLUSH_LOCK_KEY,
+                        lock_value,
+                    )
                 except Exception as e:
                     log.warning("조회수 flush 락 해제 실패: %s", e)
 
