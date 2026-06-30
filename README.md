@@ -22,7 +22,7 @@
 | **ORM** | SQLAlchemy 2.x |
 | **마이그레이션** | Alembic |
 | **캐시·메시징** | Redis |
-| **비동기 작업(선택)** | Celery (`CELERY_ENABLED`, `app/worker/`, `uv run poe celery-worker`) |
+| **Celery 백그라운드 작업(선택)** | 알림 `dispatch` 등 큐 오프로딩. FastAPI `async/await`와 별개 (`CELERY_ENABLED`, `app/worker/`, `uv run poe celery-worker`) |
 | **스토리지** | 로컬 파일, AWS S3 (boto3, `run_in_threadpool`로 동기 I/O 오프로딩) |
 | **검증** | Pydantic v2 |
 | **식별자** | PostgreSQL `uuid`, UUID v7, Base62(공개 ID), ULID(`jti`·요청 ID 등) |
@@ -63,7 +63,7 @@
 │   │   ├── reports/                        # 신고 접수(POST/COMMENT)·누적 Insert·자동 블라인드
 │   │   └── users/                          # 프로필·비밀번호·탈퇴·차단 목록/토글
 │   ├── infra/                              # Redis(Refresh·RateLimit·채팅·캐시), storage(로컬/S3)
-│   └── worker/                             # Celery 태스크·알림 delivery 등(선택, CELERY_ENABLED)
+│   └── worker/                             # Celery 워커 태스크(선택). 알림 delivery·dispatch 재시도 등
 ├── tests/                                  # unit/(DB 불필요), integration/(PostgreSQL·pg_trgm)
 ├── docs/                                   # 아키텍처·API 코드·인프라 설계 문서
 ├── migrations/                             # Alembic env.py, versions(리비전)
@@ -209,10 +209,10 @@ uv run poe run
 
 기본적으로 `app.core.config`의 **`API_PREFIX`(기본값 `/v1`)**에 맞춰 Swagger·ReDoc·OpenAPI JSON 경로가 잡힙니다(로컬 예: `/v1/docs`). DB 상태 확인은 **`GET /v1/health`** (`ApiResponse`, DB 불가 시 503). 설계 문서 사이트만 따로 보려면 **아래 5번(MkDocs)**을 사용하세요(API와 포트 분리).
 
-Celery를 쓰는 환경(`.env`에 `CELERY_ENABLED=true`)에서는 API와 별도로 워커를 띄웁니다.
+API 요청 처리는 항상 FastAPI 비동기 I/O로 동작합니다. **Celery**는 알림 `dispatch`처럼 별도 큐가 필요할 때만 켭니다(`.env`에 `CELERY_ENABLED=true`). 꺼져 있어도 DB·Redis·SSE(요청 경로 publish)는 동작합니다.
 
 ```bash
-uv run poe celery-worker   # 선택
+uv run poe celery-worker   # CELERY_ENABLED=true 일 때만
 uv run poe celery-beat     # 스케줄이 필요할 때
 ```
 
