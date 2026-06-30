@@ -167,6 +167,7 @@ class AdminService:
             ):
                 raise UserWithdrawnException()
             await UsersModel.update_user(user_id, db=db, status=UserStatus.SUSPENDED.value)
+        await AuthService.revoke_refresh_for_user(user_id, redis)
         await AuthService.invalidate_user_status_cache(redis, user_id)
 
     @classmethod

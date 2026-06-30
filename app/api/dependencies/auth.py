@@ -1,5 +1,6 @@
 # 인증 의존성. Authorization Bearer 검증 → CurrentUser. Full-Async.
 
+import logging
 from typing import Any, cast
 
 import jwt
@@ -13,9 +14,16 @@ from app.common.exceptions import ForbiddenException, UnauthorizedException
 from app.core.ids import jwt_sub_to_uuid
 from app.core.security import access_jti_blacklist_redis_key, verify_access_token
 from app.db import utc_now
+from app.domain.auth.service import (
+    _redis_bulk_to_str,
+    _set_user_status_cache_best_effort,
+    _user_status_cache_key,
+)
 from app.domain.users.model import UsersModel
 
 from .db import get_slave_db
+
+logger = logging.getLogger(__name__)
 
 
 class CurrentUser(BaseSchema):
@@ -109,13 +117,35 @@ async def get_current_user(
         user_id = jwt_sub_to_uuid(sub)
     except ValueError:
         raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.") from None
+
+    # refresh_tokens와 동일한 user:status 캐시(키·TTL 공유)로 정지/탈퇴 사용자를 fast-fail.
+    # CurrentUser는 email/nickname/role 등 전체 row가 필요해 ACTIVE 히트 시에도 DB 조회는 유지.
+    redis_raw = getattr(request.app.state, "redis", None)
+    redis_client = redis_raw if isinstance(redis_raw, Redis) else None
+    cached_status: str | None = None
+    if redis_client is not None:
+        try:
+            cached_raw = await redis_client.get(_user_status_cache_key(user_id))
+            cached_status = _redis_bulk_to_str(cached_raw)
+        except Exception as e:
+            logger.warning("user status cache GET fail-open user_id=%s err=%s", user_id, e)
+            cached_status = None
+        if cached_status is not None and not UserStatus.is_active_value(cached_status):
+            raise ForbiddenException(message=UserStatus.inactive_message_ko(cached_status))
+
     async with db.begin():
         user = await UsersModel.get_user_by_id(user_id, db=db)
         if not user:
             raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.")
-        if not UserStatus.is_active_value(user.status):
-            raise ForbiddenException(message=UserStatus.inactive_message_ko(user.status))
-        return CurrentUser.model_validate(user)
+        status_val = str(user.status)
+        result = CurrentUser.model_validate(user)
+
+    if redis_client is not None and cached_status is None:
+        await _set_user_status_cache_best_effort(redis_client, user_id, status_val)
+
+    if not UserStatus.is_active_value(status_val):
+        raise ForbiddenException(message=UserStatus.inactive_message_ko(status_val))
+    return result
 
 
 async def get_current_admin(

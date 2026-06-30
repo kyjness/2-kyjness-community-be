@@ -50,6 +50,8 @@ async def verify_password(password: str, hashed_password: str) -> bool:
 
 async def verify_password_with_legacy_fallback(plain: str, hashed_password: str) -> bool:
     """Pepper 적용 검증 후, 기존 사용자용으로 미적용 평문 검증."""
+    if not settings.PASSWORD_PEPPER:
+        return await verify_password(plain, hashed_password)
     if await verify_password(password_with_pepper(plain), hashed_password):
         return True
     return await verify_password(plain, hashed_password)
