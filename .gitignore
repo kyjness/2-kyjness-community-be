@@ -110,3 +110,7 @@ dmypy.json
 aws/
 
 .mkdocs-site-packages/
+
+# AI 작업 지침·계획 (로컬 전용, 미공개)
+CLAUDE.md
+WORKPLAN.md
