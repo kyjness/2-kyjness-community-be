@@ -39,29 +39,19 @@ async def access_log_middleware(
     if settings.DEBUG:
         response.headers["X-Process-Time"] = f"{duration_ms:.2f}"
 
-    if response.status_code >= 400:
-        fields: dict[str, object] = {
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-            "duration_ms": round(duration_ms, 2),
-            "client_ip": client_ip,
-        }
-        if response.status_code >= 500:
-            _access_logger.error("access", extra=fields)
-        else:
-            _access_logger.warning("access", extra=fields)
+    fields: dict[str, object] = {
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "duration_ms": round(duration_ms, 2),
+        "client_ip": client_ip,
+    }
+    if response.status_code >= 500:
+        _access_logger.error("access", extra=fields)
+    elif response.status_code >= 400:
+        _access_logger.warning("access", extra=fields)
 
     if duration_ms >= settings.SLOW_REQUEST_MS:
-        _access_logger.warning(
-            "slow request",
-            extra={
-                "method": request.method,
-                "path": request.url.path,
-                "status": response.status_code,
-                "duration_ms": round(duration_ms, 2),
-                "client_ip": client_ip,
-            },
-        )
+        _access_logger.warning("slow request", extra=fields)
 
     return response

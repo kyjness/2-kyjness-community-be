@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import secrets
 from typing import Any
@@ -35,12 +34,9 @@ redis.call('RENAME', KEYS[1], KEYS[2])
 return 1
 """
 
-_raw_view_ttl = os.getenv("VIEW_CACHE_TTL_SECONDS")
-try:
-    _parsed_view_ttl = int(_raw_view_ttl) if _raw_view_ttl is not None else 3600
-except ValueError:
-    _parsed_view_ttl = 3600
-_VIEW_REDIS_EX_SECONDS = _parsed_view_ttl if _parsed_view_ttl > 0 else 3600
+_VIEW_REDIS_EX_SECONDS = (
+    settings.VIEW_CACHE_TTL_SECONDS if settings.VIEW_CACHE_TTL_SECONDS > 0 else 3600
+)
 
 _HASHTAG_ALLOWED_RE = re.compile(r"[^0-9a-z가-힣_]")
 
