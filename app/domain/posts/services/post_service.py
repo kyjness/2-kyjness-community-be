@@ -271,10 +271,16 @@ class PostService:
                                 await PostsModel.increment_view_count_delta(
                                     parse_public_id_value(pk), delta, db=db
                                 )
-                await redis_client.delete(drain_key)
             except Exception:
+                # DB 트랜잭션이 롤백된 경우에만 재병합해야 이중 집계가 없다.
                 await cls._merge_drain_into_buffer(redis_client, drain_key, VIEW_BUFFER_KEY)
                 raise
+            # 커밋 성공 후에는 delta가 이미 durable하므로 drain 삭제 실패는 재병합하면 안 된다
+            # (재병합 시 커밋분을 다시 더해 이중 집계). best-effort 삭제 — 실패해도 유실 없음.
+            try:
+                await redis_client.delete(drain_key)
+            except Exception as e:
+                log.warning("조회수 flush drain 삭제 실패(집계는 반영됨, stale 키만 잔존): %s", e)
         finally:
             if lock_acquired:
                 try:

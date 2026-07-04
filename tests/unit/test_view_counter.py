@@ -15,9 +15,10 @@ pytestmark = pytest.mark.asyncio
 class FakeRedis:
     """post_service가 쓰는 명령만 구현한 인메모리 가짜. eval은 실제 Lua 2종을 흉내낸다."""
 
-    def __init__(self) -> None:
+    def __init__(self, fail_delete_substr: str | None = None) -> None:
         self.kv: dict[str, str] = {}
         self.hashes: dict[str, dict[str, int]] = {}
+        self._fail_delete_substr = fail_delete_substr
 
     async def set(self, key, val, nx=False, ex=None):
         if nx and key in self.kv:
@@ -30,6 +31,8 @@ class FakeRedis:
         return v.encode() if v is not None else None
 
     async def delete(self, key):
+        if self._fail_delete_substr is not None and self._fail_delete_substr in key:
+            raise ConnectionError("redis del failed")
         existed = key in self.kv or key in self.hashes
         self.kv.pop(key, None)
         self.hashes.pop(key, None)
@@ -182,6 +185,28 @@ async def test_flush_merges_back_on_db_error(monkeypatch):
 
     assert await ps._get_buffer_pending(r, p1) == 2  # 재병합됨
     assert ps.VIEW_FLUSH_LOCK_KEY not in r.kv  # finally에서 자기 락 해제
+
+
+async def test_flush_no_double_count_when_drain_delete_fails(monkeypatch):
+    """커밋 성공 후 drain 삭제만 실패해도 재병합하지 않는다(이미 반영된 delta 이중 집계 방지)."""
+    r = FakeRedis(fail_delete_substr=":drain:")
+    p1 = uuid.uuid4()
+    await ps._try_view_increment_in_buffer(p1, r)
+    await ps._try_view_increment_in_buffer(p1, r)  # 2
+
+    calls: list[int] = []
+
+    async def on_delta(post_id, delta):
+        calls.append(delta)
+        return True
+
+    _patch_db(monkeypatch, on_delta)
+    # drain 삭제가 실패해도 예외를 삼키고 정상 종료해야 한다.
+    await ps.PostService.flush_view_counts_to_db(r)
+
+    assert calls == [2]  # delta는 정확히 한 번만 반영
+    assert await ps._get_buffer_pending(r, p1) == 0  # 버퍼로 되돌리지 않음(이중 집계 없음)
+    assert ps.VIEW_FLUSH_LOCK_KEY not in r.kv  # 락은 정상 해제
 
 
 async def test_flush_does_not_release_foreign_lock(monkeypatch):
