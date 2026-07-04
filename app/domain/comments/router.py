@@ -17,8 +17,15 @@ from app.api.dependencies import (
     require_comment_author,
     require_comment_author_for_delete,
 )
-from app.common import ApiCode, ApiResponse, PublicId, api_response
-from app.domain.comments.schema import CommentIdData, CommentsPageData, CommentUpsertRequest
+from app.common import (
+    ApiCode,
+    ApiResponse,
+    CursorPage,
+    OptionalPublicId,
+    PublicId,
+    api_response,
+)
+from app.domain.comments.schema import CommentIdData, CommentResponse, CommentUpsertRequest
 from app.domain.comments.service import CommentService
 
 router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
@@ -37,25 +44,30 @@ async def create_comment(
     return api_response(request, code=ApiCode.OK, data=data)
 
 
-@router.get("", status_code=200, response_model=ApiResponse[CommentsPageData])
+@router.get("", status_code=200, response_model=ApiResponse[CursorPage[CommentResponse]])
 async def get_comments(
     request: Request,
     post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
-    page: int = Query(1, ge=1, description="페이지 번호"),
+    cursor: Annotated[
+        OptionalPublicId,
+        Query(
+            description="무한 스크롤: 직전 응답의 마지막 루트 댓글 id(공개 ID). 미지정 시 처음부터."
+        ),
+    ] = None,
     size: int = Query(10, ge=1, le=100, description="페이지 크기"),
-    sort: str | None = Query(None, description="정렬: latest|oldest|popular"),
+    sort: str | None = Query(None, description="정렬: latest|oldest"),
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
-    data = await CommentService.get_comments(
+    result, has_more = await CommentService.get_comments(
         post_id,
-        page,
         size,
         db=db,
         sort=sort,
+        cursor=cursor,
         current_user_id=current_user.id if current_user else None,
     )
-    return api_response(request, code=ApiCode.OK, data=data)
+    return api_response(request, code=ApiCode.OK, data=CursorPage(items=result, has_more=has_more))
 
 
 @router.patch("/{comment_id}", status_code=200, response_model=ApiResponse[None])

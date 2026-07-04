@@ -21,7 +21,14 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
+from sqlalchemy.orm import (
+    Mapped,
+    aliased,
+    joinedload,
+    mapped_column,
+    relationship,
+    selectinload,
+)
 
 from app.core.ids import new_uuid7
 from app.db.base_class import Base, utc_now
@@ -181,37 +188,92 @@ class CommentsModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_comments_by_post_id(
+    async def get_root_comments(
         cls,
         post_id: UUID,
-        page: int = 1,
-        size: int = 10,
+        size: int,
         *,
         db: AsyncSession,
-        fetch_all_for_tree: bool = False,
+        cursor: UUID | None = None,
+        sort: str = "latest",
         current_user_id: UUID | None = None,
     ) -> list[Comment]:
+        """루트 댓글을 keyset로 조회한다(size+1건으로 has_more 판정).
+
+        삭제된 루트는 표시 가능한 대댓글이 하나라도 있을 때만 placeholder로 살린다
+        (EXISTS를 SQL에서 걸어 페이지 크기를 정확히 유지). 대댓글은 get_replies_for_roots가
+        부모별로 배치 로드한다.
+        """
+        reply = aliased(Comment)
+        reply_visible = [
+            reply.parent_id == Comment.id,
+            reply.deleted_at.is_(None),
+            reply.is_blinded.is_(False),
+        ]
+        if current_user_id is not None:
+            reply_visible.append(
+                ~exists(1).where(
+                    UserBlock.blocker_id == current_user_id,
+                    UserBlock.blocked_id == reply.author_id,
+                )
+            )
         stmt = (
             select(Comment)
             .where(
                 Comment.post_id == post_id,
+                Comment.parent_id.is_(None),
                 Comment.is_blinded.is_(False),
-                or_(Comment.deleted_at.is_(None), Comment.parent_id.is_(None)),
+                or_(Comment.deleted_at.is_(None), exists(1).where(*reply_visible)),
             )
             .options(*_comment_author_loads())
-            .order_by(Comment.parent_id.asc().nulls_first(), Comment.id.asc())
         )
         if current_user_id is not None:
-            block_exists = exists(1).where(
-                UserBlock.blocker_id == current_user_id,
-                UserBlock.blocked_id == Comment.author_id,
+            stmt = stmt.where(
+                ~exists(1).where(
+                    UserBlock.blocker_id == current_user_id,
+                    UserBlock.blocked_id == Comment.author_id,
+                )
             )
-            stmt = stmt.where(~block_exists)
-        if fetch_all_for_tree:
-            stmt = stmt.limit(500)
+        if sort == "oldest":
+            if cursor is not None:
+                stmt = stmt.where(Comment.id > cursor)
+            stmt = stmt.order_by(Comment.id.asc())
         else:
-            offset = (page - 1) * size
-            stmt = stmt.where(Comment.deleted_at.is_(None)).limit(size).offset(offset)
+            if cursor is not None:
+                stmt = stmt.where(Comment.id < cursor)
+            stmt = stmt.order_by(Comment.id.desc())
+        stmt = stmt.limit(size + 1)
+        result = await db.execute(stmt)
+        return list(result.unique().scalars().all())
+
+    @classmethod
+    async def get_replies_for_roots(
+        cls,
+        root_ids: list[UUID],
+        *,
+        db: AsyncSession,
+        current_user_id: UUID | None = None,
+    ) -> list[Comment]:
+        """주어진 루트들의 대댓글을 한 번에 배치 로드한다(부모별 하드리밋 없음)."""
+        if not root_ids:
+            return []
+        stmt = (
+            select(Comment)
+            .where(
+                Comment.parent_id.in_(root_ids),
+                Comment.is_blinded.is_(False),
+                Comment.deleted_at.is_(None),
+            )
+            .options(*_comment_author_loads())
+            .order_by(Comment.id.asc())
+        )
+        if current_user_id is not None:
+            stmt = stmt.where(
+                ~exists(1).where(
+                    UserBlock.blocker_id == current_user_id,
+                    UserBlock.blocked_id == Comment.author_id,
+                )
+            )
         result = await db.execute(stmt)
         return list(result.unique().scalars().all())
 

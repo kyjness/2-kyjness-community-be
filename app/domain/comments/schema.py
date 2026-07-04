@@ -10,13 +10,6 @@ class CommentIdData(BaseSchema):
     id: PublicId
 
 
-class CommentsPageData(BaseSchema):
-    items: list["CommentResponse"] = Field(default_factory=list)
-    total_count: int = 0
-    total_pages: int = 0
-    current_page: int = 1
-
-
 class CommentUpsertRequest(BaseSchema):
     content: str = Field(..., min_length=1, max_length=500, description="댓글 내용 (1~500자)")
     parent_id: OptionalPublicId = None
@@ -63,4 +56,3 @@ class CommentResponse(BaseSchema):
 
 
 CommentResponse.model_rebuild()
-CommentsPageData.model_rebuild()

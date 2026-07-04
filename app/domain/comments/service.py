@@ -1,7 +1,6 @@
 # 댓글 비즈니스 로직. Full-Async. 생성/삭제 시 게시글 comment_count 조정은 서비스에서 조율.
 from __future__ import annotations
 
-from math import ceil
 from uuid import UUID
 
 from redis.asyncio import Redis
@@ -18,7 +17,6 @@ from app.domain.comments.model import CommentLikesModel, CommentsModel
 from app.domain.comments.schema import (
     CommentIdData,
     CommentResponse,
-    CommentsPageData,
     CommentUpsertRequest,
 )
 from app.domain.notifications.model import NotificationsModel
@@ -67,39 +65,22 @@ def _comment_to_response(
 
 
 def _build_comment_tree(
-    comments: list,
+    roots: list,
+    replies: list,
     liked_ids: set,
     sort: str = "latest",
 ) -> list[CommentResponse]:
-    by_id = {}
-    roots: list[CommentResponse] = []
-    for c in comments:
-        resp = _comment_to_response(c, liked_ids)
-        by_id[c.id] = resp
-    for c in comments:
-        resp = by_id[c.id]
-        if c.parent_id is None:
-            roots.append(resp)
-        else:
-            parent = by_id.get(c.parent_id)
-            if parent is not None:
-                parent.replies.append(resp)
-            else:
-                roots.append(resp)
-    roots = [r for r in roots if not (getattr(r, "is_deleted", False) and len(r.replies) == 0)]
-    if sort == "oldest":
-        roots.sort(key=lambda r: r.id)
-        for r in roots:
-            r.replies.sort(key=lambda x: x.id)
-    elif sort == "popular":
-        roots.sort(key=lambda r: (getattr(r, "like_count", 0), r.id), reverse=True)
-        for r in roots:
-            r.replies.sort(key=lambda x: (getattr(x, "like_count", 0), x.id), reverse=True)
-    else:
-        roots.sort(key=lambda r: r.id, reverse=True)
-        for r in roots:
-            r.replies.sort(key=lambda x: x.id, reverse=True)
-    return roots
+    """루트 순서는 keyset로 이미 확정돼 있으므로 보존하고, 대댓글만 부모에 붙여 정렬한다."""
+    root_resps = [_comment_to_response(r, liked_ids) for r in roots]
+    by_id = {r.id: resp for r, resp in zip(roots, root_resps)}
+    for rp in replies:
+        parent = by_id.get(rp.parent_id)
+        if parent is not None:
+            parent.replies.append(_comment_to_response(rp, liked_ids))
+    reverse = sort != "oldest"
+    for resp in root_resps:
+        resp.replies.sort(key=lambda x: x.id, reverse=reverse)
+    return root_resps
 
 
 class CommentService:
@@ -167,26 +148,32 @@ class CommentService:
     async def get_comments(
         cls,
         post_id: UUID,
-        page: int,
         size: int,
         db: AsyncSession,
         sort: str | None = None,
+        cursor: UUID | None = None,
         current_user_id: UUID | None = None,
-    ) -> CommentsPageData:
+    ) -> tuple[list[CommentResponse], bool]:
+        sort_mode = sort if sort in ("latest", "oldest") else "latest"
         async with db.begin():
             if not await PostsModel.post_is_visible(
                 post_id, db=db, current_user_id=current_user_id
             ):
                 raise PostNotFoundException()
-            comments = await CommentsModel.get_comments_by_post_id(
+            fetched = await CommentsModel.get_root_comments(
                 post_id,
-                page=page,
-                size=size,
+                size,
                 db=db,
-                fetch_all_for_tree=True,
+                cursor=cursor,
+                sort=sort_mode,
                 current_user_id=current_user_id,
             )
-            comment_ids = [c.id for c in comments]
+            has_more = len(fetched) > size
+            roots = fetched[:size]
+            replies = await CommentsModel.get_replies_for_roots(
+                [r.id for r in roots], db=db, current_user_id=current_user_id
+            )
+            comment_ids = [c.id for c in roots] + [c.id for c in replies]
             liked_ids = (
                 await CommentLikesModel.get_liked_comment_ids_for_user(
                     current_user_id, comment_ids, db=db
@@ -194,18 +181,8 @@ class CommentService:
                 if current_user_id is not None
                 else set()
             )
-            roots = _build_comment_tree(comments, liked_ids, sort=sort or "latest")
-            total_count = len(roots)
-            total_pages = max(1, ceil(total_count / size)) if size > 0 else 1
-            start = (page - 1) * size
-            end = start + size
-            result = roots[start:end]
-        return CommentsPageData(
-            items=result,
-            total_count=total_count,
-            total_pages=total_pages,
-            current_page=page,
-        )
+            result = _build_comment_tree(roots, replies, liked_ids, sort=sort_mode)
+        return result, has_more
 
     @classmethod
     async def update_comment(
