@@ -136,7 +136,7 @@ class LikeService:
             try:
                 inserted = await CommentLikesModel.create(comment_id, user_id, db=db)
                 if inserted:
-                    like_count = await CommentLikesModel.increment_like_count(comment_id, db=db)
+                    like_count = await CommentsModel.increment_like_count(comment_id, db=db)
                     author_id = comment_row.author_id
                     if author_id and author_id != user_id:
                         nid = await NotificationsModel.insert(
@@ -193,7 +193,7 @@ class LikeService:
             try:
                 deleted = await CommentLikesModel.delete(comment_id, user_id, db=db)
                 if deleted:
-                    like_count = await CommentLikesModel.decrement_like_count(comment_id, db=db)
+                    like_count = await CommentsModel.decrement_like_count(comment_id, db=db)
                 else:
                     like_count = await CommentsModel.get_like_count(comment_id, db=db)
             except StaleDataError as e:

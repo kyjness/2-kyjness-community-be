@@ -466,25 +466,3 @@ class CommentLikesModel:
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none() is not None
-
-    @classmethod
-    async def increment_like_count(cls, comment_id: UUID, db: AsyncSession) -> int:
-        result = await db.execute(
-            update(Comment)
-            .where(Comment.id == comment_id)
-            .values(like_count=Comment.like_count + 1)
-            .returning(Comment.like_count)
-        )
-        row = result.one_or_none()
-        return row[0] if row is not None else 0
-
-    @classmethod
-    async def decrement_like_count(cls, comment_id: UUID, db: AsyncSession) -> int:
-        result = await db.execute(
-            update(Comment)
-            .where(Comment.id == comment_id)
-            .values(like_count=func.greatest(Comment.like_count - 1, 0))
-            .returning(Comment.like_count)
-        )
-        row = result.one_or_none()
-        return row[0] if row is not None else 0
