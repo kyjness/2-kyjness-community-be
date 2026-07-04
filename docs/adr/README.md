@@ -18,7 +18,7 @@ PuppyTalk 백엔드의 주요 설계 결정을 기록한다. 각 ADR은
 | [0005](0005-resilience-no-circuit-breaker.md) | 복원력 — fail-open 표준 & CB 미채택 | 횡단 | 채택됨 |
 | [0006](0006-observability.md) | 관측성 — 구조화 로그 + 얇은 메트릭 | 횡단 | 채택됨 |
 | 0007 | 조회수 집계 — Redis 버퍼링 + 비동기 Flush | 도메인(posts) | 예정 |
-| 0008 | POST 멱등성 — Idempotency-Key + 결과 캐시 | 도메인(posts·media) | 예정 |
+| [0008](0008-idempotency-keys.md) | POST 멱등성 — Idempotency-Key + 결과 캐시 | 도메인(posts·media) | 채택됨 |
 | 0009 | 실시간 전달 — WebSocket·SSE × Redis Pub/Sub | 도메인(chat·notifications) | 예정 |
 
 > 0007~0009는 해당 도메인을 재건하는 **Construction** 단계에서 작성한다(코드 근거가 선명해질 때).
