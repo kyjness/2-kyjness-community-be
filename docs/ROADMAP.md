@@ -30,6 +30,7 @@
 
 ## Transition (Ops)
 - [ ] 관측성 인프라 — `/metrics`(prometheus) · 헬스 liveness/readiness 분리
+- [ ] 스토리지 — docker-compose+CI에 MinIO 배선 → 통합테스트 MinIO 대상 전환 → **local 디스크 백엔드 제거**([ADR 0010](adr/0010-storage-backend-strategy.md))
 - [ ] 배포 — Docker · ECS · CI/CD (재정의)
 - [ ] 모니터링 · 로그 수집
 
