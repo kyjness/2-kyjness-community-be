@@ -95,3 +95,32 @@ async def test_get_trending_posts(client: AsyncClient):
         assert "id" in row
         assert "title" in row
         assert "commentCount" in row or "comment_count" in row
+
+
+async def test_post_list_reflects_is_liked(client: AsyncClient):
+    # 목록이 로그인 사용자의 좋아요 상태를 반영해야 한다(과거엔 항상 False였음).
+    headers = await setup_auth_user(client, "liked_list@example.com", "목록좋아요퍼피")
+    idem = {"X-Idempotency-Key": new_ulid_str()}
+    create_res = await client.post(
+        "/v1/posts",
+        json={"title": "좋아요 목록", "content": "본문"},
+        headers={**headers, **idem},
+    )
+    assert create_res.status_code == 201, create_res.text
+    body = create_res.json()
+    post_id = body.get("data", {}).get("id") or body.get("id")
+
+    like_res = await client.post(f"/v1/likes/posts/{post_id}", headers=headers)
+    assert like_res.status_code == 200, like_res.text
+
+    list_res = await client.get("/v1/posts", headers=headers)
+    assert list_res.status_code == 200, list_res.text
+    items = list_res.json()["data"]["items"]
+    target = next(it for it in items if it["id"] == post_id)
+    assert target["isLiked"] is True
+
+    # 비로그인 목록은 항상 False
+    anon_res = await client.get("/v1/posts")
+    anon_items = anon_res.json()["data"]["items"]
+    anon_target = next(it for it in anon_items if it["id"] == post_id)
+    assert anon_target["isLiked"] is False
