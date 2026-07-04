@@ -220,19 +220,6 @@ class UsersModel:
         return result.unique().scalars().one_or_none()
 
     @classmethod
-    async def get_users_by_ids(cls, user_ids: list[UUID], db: AsyncSession) -> dict[UUID, User]:
-        if not user_ids:
-            return {}
-        stmt = (
-            select(User)
-            .where(User.id.in_(user_ids), User.deleted_at.is_(None))
-            .options(joinedload(User.profile_image))
-        )
-        result = await db.execute(stmt)
-        rows = result.unique().scalars().all()
-        return {r.id: r for r in rows}
-
-    @classmethod
     async def get_user_by_email(cls, email: str, db: AsyncSession) -> User | None:
         stmt = (
             select(User)
