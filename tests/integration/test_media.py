@@ -10,7 +10,7 @@ from app.db.base_class import utc_now
 from app.domain.media.model import Image
 from app.main import app
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.asyncio
@@ -88,39 +88,45 @@ async def test_cleanup_keeps_records_when_storage_delete_fails(
 ):
     """스토리지 삭제 실패 이미지는 DB 레코드를 보존(고아 방지)하고, 성공분만 삭제된다(#1)."""
     old = utc_now() - timedelta(days=1)
+    sfx = uuid.uuid4().hex[:8]
+    ok_key, fail_key = f"cleanup-ok-{sfx}", f"cleanup-fail-{sfx}"
     ok = Image(
-        file_key="cleanup-ok", file_url="u1", content_type="image/png", size=1,
+        file_key=ok_key, file_url="u1", content_type="image/png", size=1,
         uploader_id=None, created_at=old,
     )
     fail = Image(
-        file_key="cleanup-fail", file_url="u2", content_type="image/png", size=1,
+        file_key=fail_key, file_url="u2", content_type="image/png", size=1,
         uploader_id=None, created_at=old,
     )
     db_session.add_all([ok, fail])
     await db_session.commit()
 
     def fake_storage_delete(file_key: str) -> None:
-        if file_key == "cleanup-fail":
+        if file_key == fail_key:
             raise RuntimeError("storage down")
 
     monkeypatch.setattr("app.domain.media.service.storage_delete", fake_storage_delete)
 
     from app.domain.media.service import MediaService
 
-    deleted, failed = await MediaService.cleanup_expired_signup_images(
-        db_session, task_id="test", redis=None
-    )
-
-    assert deleted >= 1
-    assert "cleanup-fail" in failed
-
-    remaining = (
-        await db_session.execute(
-            select(Image.file_key).where(Image.file_key.in_(["cleanup-ok", "cleanup-fail"]))
+    try:
+        deleted, failed = await MediaService.cleanup_expired_signup_images(
+            db_session, task_id="test", redis=None
         )
-    ).scalars().all()
-    # 삭제 실패분만 남고, 성공분은 제거됨.
-    assert set(remaining) == {"cleanup-fail"}
+        assert deleted >= 1
+        assert fail_key in failed
+
+        remaining = (
+            await db_session.execute(
+                select(Image.file_key).where(Image.file_key.in_([ok_key, fail_key]))
+            )
+        ).scalars().all()
+        # 삭제 실패분만 남고, 성공분은 제거됨.
+        assert set(remaining) == {fail_key}
+    finally:
+        # 남긴 만료-orphan 행이 다른 테스트로 새지 않도록 정리.
+        await db_session.execute(delete(Image).where(Image.file_key.in_([ok_key, fail_key])))
+        await db_session.commit()
 
 
 async def test_cleanup_advances_past_failing_head(
@@ -130,37 +136,45 @@ async def test_cleanup_advances_past_failing_head(
     # 배치 1로 좁혀, '실패 머리 → 정상 꼬리'를 서로 다른 배치로 강제.
     monkeypatch.setattr(settings, "MEDIA_CLEANUP_BATCH_SIZE", 1)
     old = utc_now() - timedelta(days=1)
-    # 명시적 id로 순서 고정: head(작은 id)=실패, tail(큰 id)=성공.
-    head = Image(
-        id=uuid.UUID(int=1), file_key="head-fail", file_url="u", content_type="image/png",
-        size=1, uploader_id=None, created_at=old,
+    sfx = uuid.uuid4().hex[:8]
+    a = Image(
+        file_key=f"cleanup-a-{sfx}", file_url="u", content_type="image/png", size=1,
+        uploader_id=None, created_at=old,
     )
-    tail = Image(
-        id=uuid.UUID(int=2), file_key="tail-ok", file_url="u", content_type="image/png",
-        size=1, uploader_id=None, created_at=old,
+    b = Image(
+        file_key=f"cleanup-b-{sfx}", file_url="u", content_type="image/png", size=1,
+        uploader_id=None, created_at=old,
     )
-    db_session.add_all([head, tail])
+    db_session.add_all([a, b])
+    await db_session.flush()  # uuid7 PK 확정
+    # 작은 id를 '실패 머리'로: 실패분이 앞머리에 있어도 커서가 전진해 꼬리에 도달함을 검증.
+    head, tail = sorted((a, b), key=lambda x: x.id)
     await db_session.commit()
 
     def fake_storage_delete(file_key: str) -> None:
-        if file_key == "head-fail":
+        if file_key == head.file_key:
             raise RuntimeError("storage down")
 
     monkeypatch.setattr("app.domain.media.service.storage_delete", fake_storage_delete)
 
     from app.domain.media.service import MediaService
 
-    deleted, failed = await MediaService.cleanup_expired_signup_images(
-        db_session, task_id="test", redis=None
-    )
-
-    assert deleted >= 1
-    assert "head-fail" in failed
-
-    remaining = (
-        await db_session.execute(
-            select(Image.file_key).where(Image.file_key.in_(["head-fail", "tail-ok"]))
+    try:
+        deleted, failed = await MediaService.cleanup_expired_signup_images(
+            db_session, task_id="test", redis=None
         )
-    ).scalars().all()
-    # 실패한 머리는 남고, 커서가 그 뒤로 전진해 꼬리(정상)는 삭제됨.
-    assert set(remaining) == {"head-fail"}
+        assert deleted >= 1
+        assert head.file_key in failed
+
+        remaining = (
+            await db_session.execute(
+                select(Image.file_key).where(Image.file_key.in_([head.file_key, tail.file_key]))
+            )
+        ).scalars().all()
+        # 실패한 머리는 남고, 커서가 그 뒤로 전진해 꼬리(정상)는 삭제됨.
+        assert set(remaining) == {head.file_key}
+    finally:
+        await db_session.execute(
+            delete(Image).where(Image.file_key.in_([head.file_key, tail.file_key]))
+        )
+        await db_session.commit()
