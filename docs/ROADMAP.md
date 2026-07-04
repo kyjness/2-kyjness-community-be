@@ -16,7 +16,7 @@
   - [x] #3 TOCTOU · #8 정지 토큰 무효화 · #9 bcrypt — 기적용 확인
   - [x] #7 인증 캐싱 — status 캐시 fast-fail 확정(ACTIVE는 PK+JOIN 유지; ADR 0004 근거), `auth.py:128` 타이핑 해소
   - [x] 테스트 보강 — #9 단위 · #8 통합
-  - ⏳ 마감: `/code-review` + `/security-review` (사용자 실행 권장)
+  - [x] 마감: `/security-review`(취약점 0) · `/code-review`(회귀 1건 발견→수정: `.env` 전용 `VIEW_CACHE_TTL_SECONDS`를 Settings 필드로 승격)
 - [ ] **media** ← **다음** — #1 스토리지 삭제 실패 시 고아 방지 · 업로드 멱등성(ADR 0008)
 - [ ] **posts** (핵심) — #2 view flush CAS · #4 ILIKE 이스케이프 · #10 COUNT · #11 대표견만 · #12 해시태그 왕복 · #17 redis 해시태그 · cursor(ADR 0002) · 조회수(ADR 0007) · 멱등성(ADR 0008)
 - [ ] **comments / likes** — #6 트리 페이지네이션 · #15 좋아요 카운트 중복
