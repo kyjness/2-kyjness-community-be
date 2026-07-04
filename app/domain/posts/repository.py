@@ -348,31 +348,6 @@ class PostsModel:
         return list(rows)
 
     @classmethod
-    async def get_posts_count(
-        cls,
-        *,
-        db: AsyncSession,
-        search_q: str | None = None,
-        category_id: int | None = None,
-        current_user_id: UUID | None = None,
-    ) -> int:
-        stmt = select(func.count(Post.id)).where(
-            Post.deleted_at.is_(None), Post.is_blinded.is_(False)
-        )
-        if current_user_id is not None:
-            block_exists = exists(1).where(
-                UserBlock.blocker_id == current_user_id,
-                UserBlock.blocked_id == Post.user_id,
-            )
-            stmt = stmt.where(~block_exists)
-        stmt = _apply_post_list_search_filter(stmt, search_q=search_q)
-        if category_id is not None:
-            stmt = stmt.where(Post.category_id == category_id)
-        result = await db.execute(stmt)
-        row = result.scalar_one_or_none()
-        return row or 0
-
-    @classmethod
     async def get_trending_hashtags(
         cls,
         *,

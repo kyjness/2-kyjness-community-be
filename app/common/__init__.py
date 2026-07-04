@@ -6,6 +6,7 @@ from .responses import api_response, dump_api_response, get_request_id
 from .schemas import (
     ApiResponse,
     BaseSchema,
+    CursorPage,
     OptionalPublicId,
     PaginatedResponse,
     PublicId,
@@ -18,6 +19,7 @@ __all__ = [
     "ApiResponse",
     "api_response",
     "BaseSchema",
+    "CursorPage",
     "dump_api_response",
     "get_request_id",
     "DogGender",

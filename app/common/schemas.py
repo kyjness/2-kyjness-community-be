@@ -61,6 +61,13 @@ class PaginatedResponse(BaseSchema, Generic[T]):
     total: int = 0
 
 
+class CursorPage(BaseSchema, Generic[T]):
+    """커서(무한 스크롤) 페이지. total 없음 — 다음 페이지 존재 여부는 has_more로 표현한다."""
+
+    items: list[T] = Field(default_factory=list)
+    has_more: bool = False
+
+
 class RootData(BaseSchema):
     message: str = ""
     version: str = ""

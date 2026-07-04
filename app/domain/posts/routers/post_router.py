@@ -18,8 +18,8 @@ from app.api.dependencies import (
 from app.common import (
     ApiCode,
     ApiResponse,
+    CursorPage,
     OptionalPublicId,
-    PaginatedResponse,
     PublicId,
     api_response,
 )
@@ -50,7 +50,7 @@ async def create_post(
         raise
 
 
-@router.get("", status_code=200, response_model=ApiResponse[PaginatedResponse[PostResponse]])
+@router.get("", status_code=200, response_model=ApiResponse[CursorPage[PostResponse]])
 async def get_posts(
     request: Request,
     cursor: Annotated[
@@ -68,7 +68,7 @@ async def get_posts(
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
-    result, has_more, total = await PostService.get_posts(
+    result, has_more = await PostService.get_posts(
         size=size,
         db=db,
         q=q,
@@ -79,7 +79,7 @@ async def get_posts(
     return api_response(
         request,
         code=ApiCode.OK,
-        data=PaginatedResponse(items=result, has_more=has_more, total=total),
+        data=CursorPage(items=result, has_more=has_more),
     )
 
 

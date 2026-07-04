@@ -144,7 +144,7 @@ class PostService:
         category_id: int | None = None,
         current_user_id: UUID | None = None,
         cursor: UUID | None = None,
-    ) -> tuple[list[PostResponse], bool, int]:
+    ) -> tuple[list[PostResponse], bool]:
         search_q = validate_search_query(q)
         async with db.begin():
             if category_id is not None:
@@ -161,14 +161,8 @@ class PostService:
             )
             has_more = len(fetched) > size
             posts = fetched[:size]
-            total = await PostsModel.get_posts_count(
-                db=db,
-                search_q=search_q,
-                category_id=category_id,
-                current_user_id=current_user_id,
-            )
             result = [PostResponse.model_validate(p) for p in posts]
-        return result, has_more, total
+        return result, has_more
 
     @classmethod
     async def record_post_view(
