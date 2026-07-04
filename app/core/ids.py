@@ -1,7 +1,7 @@
 # 엔티티 PK: UUID v7(PostgreSQL native). 비엔티티 토큰·추적 ID는 ULID 문자열 유지(jti, request_id 등).
+# 공개 ID는 Base62(UUID 인코딩). UUID 문자열도 수용하되 레거시 ULID 공개 ID는 더 이상 받지 않는다.
 from __future__ import annotations
 
-import re
 from typing import cast
 from uuid import UUID
 
@@ -10,7 +10,6 @@ from uuid_extensions import uuid7
 
 _BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 _BASE62_INDEX: dict[str, int] = {c: i for i, c in enumerate(_BASE62)}
-_ULID_RE = re.compile(r"^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$")
 
 
 def new_uuid7() -> UUID:
@@ -19,10 +18,6 @@ def new_uuid7() -> UUID:
 
 def new_ulid_str() -> str:
     return str(ULID())
-
-
-def is_valid_ulid_str(value: str) -> bool:
-    return bool(value and _ULID_RE.fullmatch(value))
 
 
 def uuid_to_base62(u: UUID) -> str:
@@ -50,14 +45,8 @@ def base62_to_uuid(s: str) -> UUID:
     return UUID(int=n)
 
 
-def ulid_str_to_uuid(s: str) -> UUID:
-    if not is_valid_ulid_str(s):
-        raise ValueError("invalid_ulid")
-    return ULID.from_str(s).to_uuid()
-
-
 def jwt_sub_to_uuid(sub: str) -> UUID:
-    """JWT sub: Base62(신규) · UUID 문자열 · 레거시 ULID."""
+    """JWT sub: Base62(신규) · UUID 문자열."""
     raw = (sub or "").strip()
     if not raw:
         raise ValueError("empty_sub")
@@ -65,15 +54,11 @@ def jwt_sub_to_uuid(sub: str) -> UUID:
         return UUID(raw)
     except ValueError:
         pass
-    try:
-        return base62_to_uuid(raw)
-    except ValueError:
-        pass
-    return ulid_str_to_uuid(raw)
+    return base62_to_uuid(raw)
 
 
 def parse_public_id_value(v: object) -> UUID:
-    """Pydantic BeforeValidator: ORM UUID, UUID 문자열, Base62, 레거시 ULID."""
+    """Pydantic BeforeValidator: ORM UUID · UUID 문자열 · Base62."""
     if isinstance(v, UUID):
         return v
     if not isinstance(v, str):
@@ -85,11 +70,7 @@ def parse_public_id_value(v: object) -> UUID:
         return UUID(s)
     except ValueError:
         pass
-    try:
-        return base62_to_uuid(s)
-    except ValueError:
-        pass
-    return ulid_str_to_uuid(s)
+    return base62_to_uuid(s)
 
 
 def parse_optional_public_id_value(v: object) -> UUID | None:

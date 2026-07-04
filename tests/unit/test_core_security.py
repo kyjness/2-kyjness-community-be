@@ -4,8 +4,9 @@ from datetime import UTC, datetime, timedelta
 import jwt
 import pytest
 from app.core.config import settings
-from app.core.ids import is_valid_ulid_str, uuid_to_base62
+from app.core.ids import uuid_to_base62
 from app.core.security import create_access_token, hash_password, verify_password
+from ulid import ULID
 
 
 @pytest.mark.anyio
@@ -30,7 +31,8 @@ def test_create_access_token():
     assert decoded.get("type") == "access"
     assert "exp" in decoded
     jti = decoded.get("jti")
-    assert isinstance(jti, str) and is_valid_ulid_str(jti)
+    assert isinstance(jti, str)
+    ULID.from_str(jti)  # 유효한 ULID면 예외 없이 파싱된다
 
 
 def test_expired_jwt_token():
