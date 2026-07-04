@@ -23,9 +23,14 @@
   - [x] ADR 0008(POST 멱등성) 작성 · media 테스트 보강(멱등성 재생·409·정리 고아 방지·keyset 전진)
   - [x] 스토리지 전략 확정 — ADR 0010(S3 API 단일 경로·dev MinIO 패리티·local 폐기, 배선은 Ops)
   - [x] 마감: `/security-review`(취약점 0) · `/code-review`(정리 5건 → 헬퍼 추출·dead code 제거·설정 개명)
-- [ ] **posts** (핵심) ← **다음** — #2 view flush CAS · #4 ILIKE 이스케이프 · #10 COUNT · #11 대표견만 · #12 해시태그 왕복 · #17 redis 해시태그 · cursor(ADR 0002) · 조회수(ADR 0007) · 멱등성(ADR 0008)
-- [ ] **comments / likes** — #6 트리 페이지네이션 · #15 좋아요 카운트 중복
-- [ ] **dogs** — #11 대표견 로딩 정리
+- [x] **posts** (핵심) — #2 CAS·#4 ILIKE 이스케이프·#17 해시태그는 기적용 확인(#17은 `{v}`가 load-bearing)
+  - [x] #11 대표견만 로드 + 중복 eager-load 헬퍼 통합 · #12 해시태그 동기화 5→4왕복(upsert→조회)
+  - [x] #10 커서 목록 `total` 제거 — `CursorPage` 분리(ADR 0002 결정을 코드로 구현)
+  - [x] 조회수 write-behind 버퍼링 단위 테스트 보강(dedup·flush delta·CAS·재병합) + ADR 0007 작성
+  - [x] 마감: `/code-review`(정확성 1건 → flush 커밋후 drain 삭제 실패 이중집계 수정) · `/security-review`(취약점 0)
+  - [~] #11 심화(전용 `representative_dog` 뷰 관계로 `author.dogs` 부분 컬렉션 트랩 제거)는 **dogs 도메인으로 이연**
+- [ ] **comments / likes** ← **다음** — #6 트리 페이지네이션 · #15 좋아요 카운트 중복
+- [ ] **dogs** — #11 대표견 로딩 정리(전용 `representative_dog` 관계로 모델째 정리)
 - [ ] **chat / notifications** — #16 미읽음 스캔 · #19 방 중복조회 · 실시간(ADR 0009)
 - [ ] **reports / admin** — #5 신고 목록 페이지네이션
 - [ ] **정리(글로벌)** — #13 UserBlock 중복 인덱스 · #18 `_PG_UUID` 중복 · #20 `__future__` 일관성
@@ -51,5 +56,11 @@
 | ADR 0010 스토리지 전략 | `80fa9049` |
 | 백로그 docs/backlog.md 편입 | `d63c6ead` |
 | media 정리 헬퍼 추출·dead code·개명(리뷰 수정) | `2b77838d` |
+| posts 대표견만 로드·eager-load 헬퍼(#11) | `710c8d78` |
+| posts 해시태그 5→4왕복(#12) | `3c4482b6` |
+| posts 커서 목록 total 제거·CursorPage(#10) | `51b19c30` |
+| posts 조회수 버퍼링 단위 테스트 | `4fa970be` |
+| ADR 0007 조회수 write-behind | `4d73d07e` |
+| posts flush 커밋후 삭제실패 이중집계 수정(리뷰) | `26947d41` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.
