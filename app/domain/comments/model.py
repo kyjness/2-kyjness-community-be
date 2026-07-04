@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship
+from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, selectinload
 
 from app.core.ids import new_uuid7
 from app.db.base_class import Base, utc_now
@@ -95,6 +95,22 @@ class CommentLike(Base):
     user: Mapped[User] = relationship(User, foreign_keys=[user_id], lazy="raise_on_sql")
 
 
+def _comment_author_loads():
+    """댓글 작성자 공통 eager load. 작성자 강아지는 대표견 1마리만 로드한다.
+
+    응답은 author.representative_dog 하나만 쓰므로, 목록에서 소유자별 전체 강아지+이미지를
+    끌어오지 않도록 관계 로더에 is_representative 필터를 건다.
+    """
+    return (
+        joinedload(Comment.author).options(
+            joinedload(User.profile_image),
+            selectinload(User.dogs.and_(DogProfile.is_representative.is_(True))).joinedload(
+                DogProfile.profile_image
+            ),
+        ),
+    )
+
+
 class CommentsModel:
     @classmethod
     async def load_comment_author_permission_row(
@@ -158,16 +174,7 @@ class CommentsModel:
     async def get_comment_by_id(
         cls, comment_id: UUID, db: AsyncSession, include_deleted: bool = False
     ) -> Comment | None:
-        stmt = (
-            select(Comment)
-            .where(Comment.id == comment_id)
-            .options(
-                joinedload(Comment.author).joinedload(User.profile_image),
-                joinedload(Comment.author)
-                .selectinload(User.dogs)
-                .joinedload(DogProfile.profile_image),
-            )
-        )
+        stmt = select(Comment).where(Comment.id == comment_id).options(*_comment_author_loads())
         if not include_deleted:
             stmt = stmt.where(Comment.deleted_at.is_(None))
         result = await db.execute(stmt)
@@ -191,12 +198,7 @@ class CommentsModel:
                 Comment.is_blinded.is_(False),
                 or_(Comment.deleted_at.is_(None), Comment.parent_id.is_(None)),
             )
-            .options(
-                joinedload(Comment.author).joinedload(User.profile_image),
-                joinedload(Comment.author)
-                .selectinload(User.dogs)
-                .joinedload(DogProfile.profile_image),
-            )
+            .options(*_comment_author_loads())
             .order_by(Comment.parent_id.asc().nulls_first(), Comment.id.asc())
         )
         if current_user_id is not None:
