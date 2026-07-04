@@ -10,12 +10,14 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     delete,
     select,
+    text,
     update,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -33,6 +35,17 @@ _PG_UUID = PG_UUID(as_uuid=True)
 
 class DogProfile(Base):
     __tablename__ = "dog_profiles"
+    __table_args__ = (
+        # 소유자당 대표견 1마리 불변식을 DB로 승격. 명령형 set_representative뿐 아니라
+        # 어떤 경로로도 대표견이 2개가 될 수 없게 강제하고, User.representative_dog의
+        # uselist=False를 정당화한다.
+        Index(
+            "uq_dog_profiles_owner_representative",
+            "owner_id",
+            unique=True,
+            postgresql_where=text("is_representative"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
     owner_id: Mapped[UUID] = mapped_column(

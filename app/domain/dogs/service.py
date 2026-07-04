@@ -26,7 +26,13 @@ class DogService:
         items: Sequence[DogProfileUpsertItem | dict[str, object]],
         db: AsyncSession,
     ) -> None:
-        """강아지 목록 전체 교체(생성/수정/삭제). 대표 강아지 설정은 한 트랜잭션 내 원자적."""
+        """강아지 목록 전체 교체(생성/수정/삭제). 대표 강아지 설정은 한 트랜잭션 내 원자적.
+
+        create/update 행은 is_representative를 항상 False로 넣고, 대표 배정은 마지막
+        set_representative(전체 False→1개 True)에 일임한다. 부분 유니크 인덱스가 대표견 True를
+        한 트랜잭션 안에서도 소유자당 1개로 강제하므로, 인라인으로 True를 여러 행에 넣으면
+        statement 시점에 일시적 중복으로 거부된다.
+        """
         existing_ids = await DogProfilesModel.get_ids_by_owner_id(owner_id, db=db)
         update_ids: list[UUID] = []
         create_rows: list[dict[str, object]] = []
@@ -46,7 +52,7 @@ class DogService:
                         "gender": gender_value,
                         "birth_date": item.birth_date,
                         "profile_image_id": item.profile_image_id,
-                        "is_representative": item.is_representative,
+                        "is_representative": False,  # 대표 배정은 set_representative가 전담
                     }
                 )
                 if item.is_representative:
@@ -63,7 +69,7 @@ class DogService:
                         "birth_date": item.birth_date,
                         "profile_image_id": item.profile_image_id,
                         "touch_profile_image": touch_dog_image,
-                        "is_representative": item.is_representative,
+                        "is_representative": False,  # 대표 배정은 set_representative가 전담
                         "updated_at": utc_now(),
                     }
                 )
