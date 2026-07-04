@@ -7,7 +7,7 @@
 ## 맥락 (Context)
 
 인증된 **모든** 요청이 `get_current_user`에서 `users` 테이블을 조회한다(profile_image JOIN 포함,
-[analysis #7](../../analysis.md)). [운영 봉투](../00-operating-envelope-and-scope.md)상 조회가 폭주하면
+[analysis #7](../backlog.md)). [운영 봉투](../00-operating-envelope-and-scope.md)상 조회가 폭주하면
 `users`가 통째로 핫스팟이 된다. 흥미롭게도 `user:status` 캐시는 **이미 존재하는데 이 핫 경로에는
 연결돼 있지 않다** — 부채이자 바로 잡을 지점이다.
 
@@ -20,7 +20,7 @@
 2. **Fail-open** — 캐시 GET 실패(Redis 장애) 시 예외 없이 DB로 폴백. 캐시는 성능 계층일 뿐 진실의
    원천이 아니다.
 3. **명시적 무효화** — 상태 변경(정지·역할 변경) 시 캐시 DEL + refresh 토큰 revoke를 **함께**
-   수행([analysis #8](../../analysis.md))해 stale 권한을 끊는다.
+   수행([analysis #8](../backlog.md))해 stale 권한을 끊는다.
 4. **범용 캐시 추상화 배제** — 데코레이터형 범용 캐시 계층 대신, 얇은 `get-or-set + fail-open` 헬퍼만.
 
 ## 트레이드오프 (Consequences)

@@ -9,7 +9,7 @@ argument-hint: <ADR 주제 또는 제목> (예: Cursor 페이지네이션)
 - 운영 봉투·범위: @docs/00-operating-envelope-and-scope.md
 - 횡단 아키텍처 결정·ADR 목록: @docs/01-architecture.md
 - 관련 실제 코드를 열어 확인한다(주제에 해당하는 `app/domain/…` 또는 `app/core|infra|common`).
-- 버그·최적화 근거가 필요하면 @analysis.md 의 항목번호를 인용한다.
+- 버그·최적화 근거가 필요하면 @docs/backlog.md 의 항목번호를 인용한다.
 
 ## 절차
 1. **주제 매핑**: `$ARGUMENTS` 를 `01-architecture.md` 하단 **ADR 목록**의 항목에 맞춘다.

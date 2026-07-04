@@ -47,4 +47,4 @@
 | ADR 0008 멱등성 | `ecaf12c7` |
 | media 정리 keyset 전진(리뷰 수정) | `7fedfd9e` |
 
-> 백로그 번호(#n)는 [`../analysis.md`](../analysis.md) 기준.
+> 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.

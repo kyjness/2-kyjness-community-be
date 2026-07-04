@@ -14,7 +14,7 @@
    나오거나 건너뛰어진다.
 
 여기에 매 요청 `COUNT(*)`까지 겹친다 — 검색 시 `pg_trgm` 필터가 COUNT에도 걸려 비용이 크고
-([analysis #10](../../analysis.md)), 커서 방식에선 `total` 자체의 의미도 약하다.
+([analysis #10](../backlog.md)), 커서 방식에선 `total` 자체의 의미도 약하다.
 게다가 admin 신고 목록(#5)·댓글 트리(#6)는 **메모리에서 잘라내** total·items가 어긋나는 버그가 있다.
 
 ## 결정 (Decision)
