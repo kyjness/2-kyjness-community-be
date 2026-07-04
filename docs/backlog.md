@@ -208,6 +208,10 @@ joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_imag
 
 게시글 목록에서 작성자의 모든 강아지 프로필 + 이미지를 전체 로드한다. 대표견 1마리만 필요한데 소유자별 강아지 전체를 가져온다. `User.representative_dog` 프로퍼티가 있어도 이미 모든 강아지가 메모리에 올라온다.
 
+> **심화(감사 중 발견)**: 단순 과잉 로드에 더해, `dogs.and_(is_representative)` 필터 로드는 `User.dogs` **컬렉션 자체를 대표견 1마리로 truncate**해 세션에 캐시하는 **부분 컬렉션 트랩**이 있다 — 전체 `dogs`를 기대하는 프로필 경로가 조용히 누락된 데이터를 본다.
+>
+> **수정 방향**: 대표견을 `dogs`와 분리된 전용 `representative_dog` 뷰 관계로 로드(트랩 소멸)하고, 소유자당 대표견 1마리 불변식을 부분 유니크 인덱스로 DB 승격. → posts(#11)·comments(#11 twin)·dogs 도메인에서 구현. 근거: [ADR 0011](adr/0011-representative-dog-view-relationship.md).
+
 ---
 
 ### 12. `sync_post_hashtags` — 5회 왕복 쿼리

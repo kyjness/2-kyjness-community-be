@@ -28,7 +28,7 @@
   - [x] #10 커서 목록 `total` 제거 — `CursorPage` 분리(ADR 0002 결정을 코드로 구현)
   - [x] 조회수 write-behind 버퍼링 단위 테스트 보강(dedup·flush delta·CAS·재병합) + ADR 0007 작성
   - [x] 마감: `/code-review`(정확성 1건 → flush 커밋후 drain 삭제 실패 이중집계 수정) · `/security-review`(취약점 0)
-  - [~] #11 심화(전용 `representative_dog` 뷰 관계로 `author.dogs` 부분 컬렉션 트랩 제거)는 **dogs 도메인으로 이연**
+  - [x] #11 심화(전용 `representative_dog` 뷰 관계로 `author.dogs` 부분 컬렉션 트랩 제거)는 **dogs 도메인에서 완료**
 - [x] **comments / likes** — #11 twin 대표견만 로드 · #6 트리 페이지네이션 · #15 좋아요 카운터 중복
   - [x] #11 twin: 댓글 작성자 대표견만 로드(`_comment_author_loads`, posts와 동형)
   - [x] #6: 루트 keyset + 대댓글 부모별 배치 로드 + `CursorPage`(ADR 0002 결정을 코드로). 인메모리 슬라이스·500 cap·부정확 total 제거. 좋아요 keyset 드리프트 부정당 → 인기순(popular) 정렬 제거
@@ -37,7 +37,11 @@
   - [x] 테스트: 트리 조립 단위(`test_comment_tree`) + keyset·삭제 시맨틱·is_liked·무이중집계 통합(`test_comments`·`test_posts`)
   - [x] 마감: `/code-review`(정리 3건 → 가시성 술어 공용화·중복 정렬 제거·is_liked 관용구 통일) · `/security-review`(취약점 0)
   - [~] 대댓글 자체 페이지네이션(루트당 preview + 더보기)은 기능 확장이라 backlog #21로 이연
-- [ ] **dogs** — #11 대표견 로딩 정리(전용 `representative_dog` 관계로 모델째 정리)
+- [x] **dogs** — #11 대표견 로딩 정리(전용 `representative_dog` 관계로 모델째 정리)
+  - [x] #11 심화: 대표견을 `dogs`와 분리된 전용 `representative_dog` 뷰 관계(viewonly·uselist=False)로 로드해 부분 컬렉션 트랩(dogs 필터 로드가 컬렉션을 truncate) 제거. 프로퍼티→관계 단일 출처화, posts·comments 로더 전환
+  - [x] 단일 대표견 불변식을 부분 유니크 인덱스(`owner_id WHERE is_representative`)로 DB 승격 + 마이그레이션(dedup 후 생성). upsert 대표 배정을 `set_representative`로 정규화(인덱스 안전). 근거 [ADR 0011](adr/0011-representative-dog-view-relationship.md)
+  - [x] 테스트: 관계·인덱스 DDL·트랩 회귀 단위 + 프로필 dogs·대표견 공존·전환·인덱스 거부 통합
+  - [x] 마감: `/code-review`(정확성 0 · 정리 1건 → 미사용 단일-행 CRUD 제거) · `/security-review`(취약점 0)
 - [ ] **chat / notifications** — #16 미읽음 스캔 · #19 방 중복조회 · 실시간(ADR 0009)
 - [ ] **reports / admin** — #5 신고 목록 페이지네이션
 - [ ] **정리(글로벌)** — #13 UserBlock 중복 인덱스 · #18 `_PG_UUID` 중복 · #20 `__future__` 일관성
@@ -75,5 +79,10 @@
 | posts 목록 is_liked 계산 | `ad8ac277` |
 | comments 트리 테스트 보강 | `8d5d5208` |
 | comments 가시성 술어 공용화(리뷰) | `c777ae6e` |
+| comments/likes docs 반영 | `7b819295` |
+| dogs 대표견 전용 뷰 관계·트랩 제거(#11) | `b2ba3000` |
+| dogs 대표견 부분 유니크 인덱스·마이그레이션(#11) | `37f0b4db` |
+| dogs 대표견 테스트 보강 | `a232b7e6` |
+| dogs 미사용 단일-행 CRUD 제거(리뷰) | `d0a8bdbe` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.
