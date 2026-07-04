@@ -21,6 +21,8 @@
   - [x] signup/orphan 정리를 트랜잭션 밖 스토리지 I/O + 배치로 정렬(형제 sweep와 통일)
   - [x] 리뷰 지적 수정: 정리 배치를 keyset(id>last_id) 전진으로 → 실패 머리 starvation·중복 로그 제거
   - [x] ADR 0008(POST 멱등성) 작성 · media 테스트 보강(멱등성 재생·409·정리 고아 방지·keyset 전진)
+  - [x] 스토리지 전략 확정 — ADR 0010(S3 API 단일 경로·dev MinIO 패리티·local 폐기, 배선은 Ops)
+  - [x] 마감: `/security-review`(취약점 0) · `/code-review`(정리 5건 → 헬퍼 추출·dead code 제거·설정 개명)
 - [ ] **posts** (핵심) ← **다음** — #2 view flush CAS · #4 ILIKE 이스케이프 · #10 COUNT · #11 대표견만 · #12 해시태그 왕복 · #17 redis 해시태그 · cursor(ADR 0002) · 조회수(ADR 0007) · 멱등성(ADR 0008)
 - [ ] **comments / likes** — #6 트리 페이지네이션 · #15 좋아요 카운트 중복
 - [ ] **dogs** — #11 대표견 로딩 정리
@@ -46,5 +48,8 @@
 | media 멱등성·정리 테스트 | `f7edcd1b` |
 | ADR 0008 멱등성 | `ecaf12c7` |
 | media 정리 keyset 전진(리뷰 수정) | `7fedfd9e` |
+| ADR 0010 스토리지 전략 | `80fa9049` |
+| 백로그 docs/backlog.md 편입 | `d63c6ead` |
+| media 정리 헬퍼 추출·dead code·개명(리뷰 수정) | `2b77838d` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.
