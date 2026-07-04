@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from uuid import UUID
 
@@ -26,7 +27,7 @@ from app.domain.media.image_policy import (
     validate_image_content_type,
     validate_purpose,
 )
-from app.domain.media.model import MediaModel
+from app.domain.media.model import Image, MediaModel
 from app.domain.media.schema import (
     ConfirmSignupUploadRequest,
     ConfirmUploadRequest,
@@ -86,6 +87,45 @@ async def _try_acquire_job_lock(
         # 스케줄러 작업의 보수적 가용성: Redis 장애 시 락 없이 진행.
         logger.warning("job lock unavailable key=%s fallback_without_lock err=%s", lock_key, e)
         return True, None
+
+
+async def _keyset_cleanup(
+    db: AsyncSession,
+    *,
+    fetch: Callable[[UUID | None, int], Awaitable[list[Image]]],
+    on_delete_failed: Callable[[Image, Exception], None],
+) -> int:
+    """이미지 정리 공통 루프. keyset(id > last_id) 배치로 조회 → 트랜잭션 밖에서 스토리지 삭제 →
+    성공분만 짧은 트랜잭션으로 DB 제거. 반환 = 실제 삭제 수.
+
+    스토리지 삭제 실패분도 커서를 넘겨 이번 실행에선 건너뛰고 다음 실행에서 재시도한다(실패
+    이미지가 id 앞머리에 쌓여 뒤쪽 정상 행을 굶기는 것을 방지).
+    """
+    batch_size = settings.MEDIA_CLEANUP_BATCH_SIZE
+    total_deleted = 0
+    last_id: UUID | None = None
+    while True:
+        async with db.begin():
+            rows = await fetch(last_id, batch_size)
+        if not rows:
+            break
+        last_id = rows[-1].id
+
+        deletable_ids: list[UUID] = []
+        for img in rows:
+            try:
+                await asyncio.to_thread(storage_delete, img.file_key)
+                deletable_ids.append(img.id)
+            except Exception as e:
+                on_delete_failed(img, e)
+
+        if deletable_ids:
+            async with db.begin():
+                total_deleted += await MediaModel.delete_images_by_ids(deletable_ids, db=db)
+
+        if len(rows) < batch_size:
+            break
+    return total_deleted
 
 
 class MediaService:
@@ -341,49 +381,20 @@ class MediaService:
             return 0
         r = cast(Any, redis) if redis is not None else None
         try:
-            batch_size = settings.MEDIA_SWEEP_UNUSED_BATCH_SIZE
-            total_deleted = 0
-            last_id: UUID | None = None
+            async def _fetch(after_id: UUID | None, limit: int) -> list[Image]:
+                return await MediaModel.get_orphan_images_older_than(
+                    older_than_hours=24, db=db, limit=limit, after_id=after_id
+                )
 
-            while True:
-                # 1) 짧은 조회 트랜잭션: keyset(id > last_id)으로 배치 확보. 스토리지 삭제 실패분도
-                #    커서를 넘겨 이번 실행에선 건너뛰고 다음 실행에서 재시도한다(실패 머리에 막혀
-                #    뒤쪽 정상 행이 굶는 것을 방지).
-                async with db.begin():
-                    orphan_images = await MediaModel.get_orphan_images_older_than(
-                        older_than_hours=24,
-                        db=db,
-                        limit=batch_size,
-                        after_id=last_id,
-                    )
+            def _on_fail(img: Image, e: Exception) -> None:
+                logger.warning(
+                    "Sweep storage delete failed image_id=%s file_key=%s: %s",
+                    img.id,
+                    img.file_key,
+                    e,
+                )
 
-                if not orphan_images:
-                    break
-                last_id = orphan_images[-1].id
-
-                # 2) 스토리지 I/O는 DB 트랜잭션 밖에서 수행.
-                deletable_ids: list[UUID] = []
-                for img in orphan_images:
-                    try:
-                        await asyncio.to_thread(storage_delete, img.file_key)
-                        deletable_ids.append(img.id)
-                    except Exception as e:
-                        logger.warning(
-                            "Sweep storage delete failed image_id=%s file_key=%s: %s",
-                            img.id,
-                            img.file_key,
-                            e,
-                        )
-
-                # 3) 짧은 삭제 트랜잭션: 성공한 id만 DB에서 제거.
-                if deletable_ids:
-                    async with db.begin():
-                        total_deleted += await MediaModel.delete_images_by_ids(deletable_ids, db=db)
-
-                if len(orphan_images) < batch_size:
-                    break
-
-            return total_deleted
+            return await _keyset_cleanup(db, fetch=_fetch, on_delete_failed=_on_fail)
         finally:
             if lock_value and r is not None:
                 await _release_job_lock(
@@ -406,49 +417,25 @@ class MediaService:
             return 0, []
         r = cast(Any, redis) if redis is not None else None
         try:
-            batch_size = settings.MEDIA_SWEEP_UNUSED_BATCH_SIZE
             failed_file_keys: list[str] = []
-            total_deleted = 0
-            last_id: UUID | None = None
 
-            while True:
-                # 1) 짧은 조회 트랜잭션: keyset(id > last_id)으로 배치 확보. 스토리지 삭제 실패분도
-                #    커서를 넘겨 이번 실행에선 건너뛰고 다음 실행에서 재시도한다(실패 머리에 막혀
-                #    뒤쪽 정상 행이 굶는 것을 방지).
-                async with db.begin():
-                    rows = await MediaModel.get_expired_signup_images(
-                        db=db, limit=batch_size, after_id=last_id
-                    )
+            async def _fetch(after_id: UUID | None, limit: int) -> list[Image]:
+                return await MediaModel.get_expired_signup_images(
+                    db=db, limit=limit, after_id=after_id
+                )
 
-                if not rows:
-                    break
-                last_id = rows[-1].id
+            def _on_fail(img: Image, e: Exception) -> None:
+                logger.warning(
+                    "Signup image storage delete failed task_id=%s image_id=%s file_key=%s: %s",
+                    task_id,
+                    img.id,
+                    img.file_key,
+                    e,
+                    exc_info=True,
+                )
+                failed_file_keys.append(img.file_key)
 
-                # 2) 스토리지 I/O는 DB 트랜잭션 밖에서 수행. 삭제 성공분 id만 DB 제거 대상.
-                deletable_ids: list[UUID] = []
-                for img in rows:
-                    try:
-                        await asyncio.to_thread(storage_delete, img.file_key)
-                        deletable_ids.append(img.id)
-                    except Exception as e:
-                        logger.warning(
-                            "Signup image storage delete failed task_id=%s image_id=%s file_key=%s: %s",
-                            task_id,
-                            img.id,
-                            img.file_key,
-                            e,
-                            exc_info=True,
-                        )
-                        failed_file_keys.append(img.file_key)
-
-                # 3) 짧은 삭제 트랜잭션: 성공한 id만 DB에서 제거.
-                if deletable_ids:
-                    async with db.begin():
-                        total_deleted += await MediaModel.delete_images_by_ids(deletable_ids, db=db)
-
-                if len(rows) < batch_size:
-                    break
-
+            total_deleted = await _keyset_cleanup(db, fetch=_fetch, on_delete_failed=_on_fail)
             return total_deleted, failed_file_keys
         finally:
             if lock_value and r is not None:

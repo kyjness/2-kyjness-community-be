@@ -18,7 +18,7 @@ _CsvList = Annotated[list[str], NoDecode]
 # 하한 클램프(음수·과소값 방지). 기존 max(floor, ...) 동작 보존.
 _MIN_FLOORS: dict[str, int] = {
     "DB_INIT_MAX_ATTEMPTS": 1,
-    "MEDIA_SWEEP_UNUSED_BATCH_SIZE": 1,
+    "MEDIA_CLEANUP_BATCH_SIZE": 1,
     "CELERY_BROKER_VISIBILITY_TIMEOUT": 300,
     "CELERY_RESULT_EXPIRES_SECONDS": 60,
     "CELERY_TASK_SOFT_TIME_LIMIT": 60,
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
 
     # ----- 회원가입 임시 이미지 TTL 정리 -----
     SIGNUP_IMAGE_CLEANUP_INTERVAL: int = 3600
-    MEDIA_SWEEP_UNUSED_BATCH_SIZE: int = 200
+    MEDIA_CLEANUP_BATCH_SIZE: int = 200  # 이미지 정리(sweep·signup) 공통 배치 크기
 
     # ----- Redis (비우면 연결 시도 안 함, rate limit 등 Fail-open) -----
     REDIS_URL: str = ""

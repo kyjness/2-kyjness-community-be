@@ -128,7 +128,7 @@ async def test_cleanup_advances_past_failing_head(
 ):
     """id 앞머리의 스토리지 실패 이미지가 뒤쪽 정상 이미지를 굶기지 않는다(keyset 전진)."""
     # 배치 1로 좁혀, '실패 머리 → 정상 꼬리'를 서로 다른 배치로 강제.
-    monkeypatch.setattr(settings, "MEDIA_SWEEP_UNUSED_BATCH_SIZE", 1)
+    monkeypatch.setattr(settings, "MEDIA_CLEANUP_BATCH_SIZE", 1)
     old = utc_now() - timedelta(days=1)
     # 명시적 id로 순서 고정: head(작은 id)=실패, tail(큰 id)=성공.
     head = Image(

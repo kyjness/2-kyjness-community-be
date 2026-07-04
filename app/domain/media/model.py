@@ -183,22 +183,6 @@ class MediaModel:
         return list(result.scalars().all())
 
     @classmethod
-    async def delete_orphan_images(cls, *, db: AsyncSession) -> int:
-        """업로더 없음 + 어떤 FK도 참조하지 않는 이미지 행 삭제. 스케줄러/관리용."""
-        users_t = table("users", column("profile_image_id", _PG_UUID))
-        dogs_t = table("dog_profiles", column("profile_image_id", _PG_UUID))
-        post_images_t = table("post_images", column("image_id", _PG_UUID))
-        referenced = (
-            exists().where(users_t.c.profile_image_id == Image.id)
-            | exists().where(dogs_t.c.profile_image_id == Image.id)
-            | exists().where(post_images_t.c.image_id == Image.id)
-        )
-        r = await db.execute(
-            delete(Image).where(Image.uploader_id.is_(None)).where(~referenced).returning(Image.id)
-        )
-        return len(list(r.scalars().all()))
-
-    @classmethod
     async def delete_image_if_owned(
         cls,
         image_id: UUID,
