@@ -12,12 +12,12 @@
 ## Construction 체크리스트 (재건 순서)
 
 - [x] **기반층** — 설정 pydantic-settings + 프로덕션 가드 · 식별자 레거시 제거 · 구조화 로그(JSON/console)
-- [ ] **auth / users** ← **다음**
-  - [ ] #9 bcrypt 이중 실행 (pepper 빈값)
-  - [ ] #3 회원가입 TOCTOU (중복 IntegrityError 처리)
-  - [ ] #7 인증 캐싱 적용 (ADR 0004; pyright `auth.py:128` 동반 해소)
-  - [ ] #8 정지 시 토큰 즉시 무효화
-- [ ] **media** — #1 스토리지 삭제 실패 시 고아 방지 · 업로드 멱등성(ADR 0008)
+- [x] **auth / users** — 감사 결과 P0/P1은 이전 하드닝으로 기적용, 마무리만
+  - [x] #3 TOCTOU · #8 정지 토큰 무효화 · #9 bcrypt — 기적용 확인
+  - [x] #7 인증 캐싱 — status 캐시 fast-fail 확정(ACTIVE는 PK+JOIN 유지; ADR 0004 근거), `auth.py:128` 타이핑 해소
+  - [x] 테스트 보강 — #9 단위 · #8 통합
+  - ⏳ 마감: `/code-review` + `/security-review` (사용자 실행 권장)
+- [ ] **media** ← **다음** — #1 스토리지 삭제 실패 시 고아 방지 · 업로드 멱등성(ADR 0008)
 - [ ] **posts** (핵심) — #2 view flush CAS · #4 ILIKE 이스케이프 · #10 COUNT · #11 대표견만 · #12 해시태그 왕복 · #17 redis 해시태그 · cursor(ADR 0002) · 조회수(ADR 0007) · 멱등성(ADR 0008)
 - [ ] **comments / likes** — #6 트리 페이지네이션 · #15 좋아요 카운트 중복
 - [ ] **dogs** — #11 대표견 로딩 정리
@@ -36,5 +36,7 @@
 | 설정 pydantic-settings | `919d0cbd` |
 | 식별자 레거시 제거 | `99e72306` |
 | 구조화 로그 | `2dd828e9` |
+| auth 캐시 타이핑 정리 | `77ebdeae` |
+| auth bcrypt·정지 테스트 | `ca952cde` |
 
 > 백로그 번호(#n)는 [`../analysis.md`](../analysis.md) 기준.
