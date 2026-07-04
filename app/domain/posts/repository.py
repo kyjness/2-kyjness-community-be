@@ -121,6 +121,25 @@ def _apply_post_list_search_filter(stmt, *, search_q: str | None):
     return stmt.where(and_(*(_token_match_clause(token) for token in tokens)))
 
 
+def _post_author_and_content_loads():
+    """목록·상세 공통 eager load. 작성자 강아지는 대표견 1마리만 로드한다.
+
+    응답은 author.representative_dog 하나만 쓰므로, 목록(핫스팟)에서 소유자별 전체
+    강아지+이미지를 끌어오지 않도록 관계 로더에 is_representative 필터를 건다.
+    """
+    return (
+        joinedload(Post.user).options(
+            joinedload(User.profile_image),
+            selectinload(
+                User.dogs.and_(DogProfile.is_representative.is_(True))
+            ).joinedload(DogProfile.profile_image),
+        ),
+        joinedload(Post.category),
+        selectinload(Post.hashtags),
+        selectinload(Post.post_images).joinedload(PostImage.image),
+    )
+
+
 class PostsModel:
     MAX_POST_IMAGES = 5
 
@@ -237,15 +256,7 @@ class PostsModel:
                 Post.deleted_at.is_(None),
                 Post.is_blinded.is_(False),
             )
-            .options(
-                joinedload(Post.user).options(
-                    joinedload(User.profile_image),
-                    selectinload(User.dogs).joinedload(DogProfile.profile_image),
-                ),
-                joinedload(Post.category),
-                selectinload(Post.hashtags),
-                selectinload(Post.post_images).joinedload(PostImage.image),
-            )
+            .options(*_post_author_and_content_loads())
         )
         if current_user_id is not None:
             block_exists = exists(1).where(
@@ -275,15 +286,7 @@ class PostsModel:
                 Post.deleted_at.is_(None),
                 Post.is_blinded.is_(False),
             )
-            .options(
-                joinedload(Post.user).options(
-                    joinedload(User.profile_image),
-                    selectinload(User.dogs).joinedload(DogProfile.profile_image),
-                ),
-                joinedload(Post.category),
-                selectinload(Post.hashtags),
-                selectinload(Post.post_images).joinedload(PostImage.image),
-            )
+            .options(*_post_author_and_content_loads())
         )
         block_exists = exists(1).where(
             UserBlock.blocker_id == user_id,
@@ -328,13 +331,7 @@ class PostsModel:
         stmt = (
             select(Post)
             .where(Post.deleted_at.is_(None), Post.is_blinded.is_(False))
-            .options(
-                joinedload(Post.user).joinedload(User.profile_image),
-                joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_image),
-                joinedload(Post.category),
-                selectinload(Post.hashtags),
-                selectinload(Post.post_images).joinedload(PostImage.image),
-            )
+            .options(*_post_author_and_content_loads())
         )
         if current_user_id is not None:
             block_exists = exists(1).where(
@@ -646,13 +643,7 @@ class PostsModel:
             select(Post)
             .where(Post.deleted_at.is_(None))
             .where(Post.report_count > 0)
-            .options(
-                joinedload(Post.user).joinedload(User.profile_image),
-                joinedload(Post.user).selectinload(User.dogs).joinedload(DogProfile.profile_image),
-                joinedload(Post.category),
-                selectinload(Post.hashtags),
-                selectinload(Post.post_images).joinedload(PostImage.image),
-            )
+            .options(*_post_author_and_content_loads())
             .order_by(Post.report_count.desc(), Post.created_at.desc())
         )
         count_stmt = (
