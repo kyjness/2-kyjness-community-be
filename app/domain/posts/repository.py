@@ -184,24 +184,21 @@ class PostsModel:
         if not hashtag_names:
             return
 
-        result = await db.execute(
-            select(Hashtag.id, Hashtag.name).where(Hashtag.name.in_(hashtag_names))
+        # 전체 이름을 멱등 upsert 후 id를 한 번에 조회한다. ON CONFLICT DO NOTHING의
+        # RETURNING은 충돌(기존)분을 돌려주지 않으므로, 재조회 대신 upsert→SELECT 순으로
+        # 두면 동시 삽입분까지 committed 상태로 모두 잡혀 태그 누락이 없다(5→4왕복).
+        await db.execute(
+            pg_insert(Hashtag)
+            .values([{"name": n} for n in hashtag_names])
+            .on_conflict_do_nothing(index_elements=[Hashtag.name])
         )
-        existing_by_name = {row[1]: row[0] for row in result.all()}
-        missing = set(hashtag_names) - set(existing_by_name.keys())
-
-        if missing:
+        rows = (
             await db.execute(
-                pg_insert(Hashtag)
-                .values([{"name": n} for n in missing])
-                .on_conflict_do_nothing(index_elements=[Hashtag.name])
+                select(Hashtag.id, Hashtag.name).where(Hashtag.name.in_(hashtag_names))
             )
-
-        result2 = await db.execute(
-            select(Hashtag.id, Hashtag.name).where(Hashtag.name.in_(hashtag_names))
-        )
-        existing_by_name = {row[1]: row[0] for row in result2.all()}
-        hashtag_ids = [existing_by_name[n] for n in hashtag_names if n in existing_by_name]
+        ).all()
+        id_by_name = {name: hid for hid, name in rows}
+        hashtag_ids = [id_by_name[n] for n in hashtag_names if n in id_by_name]
 
         if hashtag_ids:
             await db.execute(
