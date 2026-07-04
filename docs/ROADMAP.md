@@ -29,7 +29,14 @@
   - [x] 조회수 write-behind 버퍼링 단위 테스트 보강(dedup·flush delta·CAS·재병합) + ADR 0007 작성
   - [x] 마감: `/code-review`(정확성 1건 → flush 커밋후 drain 삭제 실패 이중집계 수정) · `/security-review`(취약점 0)
   - [~] #11 심화(전용 `representative_dog` 뷰 관계로 `author.dogs` 부분 컬렉션 트랩 제거)는 **dogs 도메인으로 이연**
-- [ ] **comments / likes** ← **다음** — #6 트리 페이지네이션 · #15 좋아요 카운트 중복
+- [x] **comments / likes** — #11 twin 대표견만 로드 · #6 트리 페이지네이션 · #15 좋아요 카운터 중복
+  - [x] #11 twin: 댓글 작성자 대표견만 로드(`_comment_author_loads`, posts와 동형)
+  - [x] #6: 루트 keyset + 대댓글 부모별 배치 로드 + `CursorPage`(ADR 0002 결정을 코드로). 인메모리 슬라이스·500 cap·부정확 total 제거. 좋아요 keyset 드리프트 부정당 → 인기순(popular) 정렬 제거
+  - [x] #15: 좋아요 카운터를 `CommentsModel`로 일원화(`CommentLikesModel` 중복 제거, posts 패턴 정합)
+  - [x] 별건: 게시글 목록 `is_liked` 항상 False 버그 수정(배치 조회)
+  - [x] 테스트: 트리 조립 단위(`test_comment_tree`) + keyset·삭제 시맨틱·is_liked·무이중집계 통합(`test_comments`·`test_posts`)
+  - [x] 마감: `/code-review`(정리 3건 → 가시성 술어 공용화·중복 정렬 제거·is_liked 관용구 통일) · `/security-review`(취약점 0)
+  - [~] 대댓글 자체 페이지네이션(루트당 preview + 더보기)은 기능 확장이라 backlog #21로 이연
 - [ ] **dogs** — #11 대표견 로딩 정리(전용 `representative_dog` 관계로 모델째 정리)
 - [ ] **chat / notifications** — #16 미읽음 스캔 · #19 방 중복조회 · 실시간(ADR 0009)
 - [ ] **reports / admin** — #5 신고 목록 페이지네이션
@@ -62,5 +69,11 @@
 | posts 조회수 버퍼링 단위 테스트 | `4fa970be` |
 | ADR 0007 조회수 write-behind | `4d73d07e` |
 | posts flush 커밋후 삭제실패 이중집계 수정(리뷰) | `26947d41` |
+| comments 대표견만 로드(#11 twin) | `8b4827cb` |
+| comments 트리 루트 keyset+대댓글 배치·CursorPage(#6) | `ca8816ed` |
+| 좋아요 카운터 중복 제거(#15) | `5cd35f57` |
+| posts 목록 is_liked 계산 | `ad8ac277` |
+| comments 트리 테스트 보강 | `8d5d5208` |
+| comments 가시성 술어 공용화(리뷰) | `c777ae6e` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.

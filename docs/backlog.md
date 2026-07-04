@@ -327,6 +327,16 @@ res = await db.execute(stmt)
 
 ---
 
+### 21. 댓글 대댓글 배치 로드에 상한 없음 (대댓글 페이지네이션 부재)
+
+**파일**: `app/domain/comments/model.py` (`get_replies_for_roots`)
+
+#6 수정으로 루트는 keyset 페이지네이션되지만, 한 페이지의 루트들에 달린 대댓글은 `parent_id IN (root_ids)` 배치 1쿼리로 **전부** 로드한다(부모별 상한 없음). 인기글의 한 루트에 대댓글이 수천 건 달리면 한 응답이 그만큼의 행 + 작성자 eager load를 끌어온다. 옛 코드는 오히려 500 cap으로 대댓글을 무음 절단했으므로 정확성은 개선됐지만, 운영 봉투(인기 스레드)에선 상한이 필요하다.
+
+**수정**: 루트당 대댓글 preview(top-N) + 별도 "대댓글 더보기" keyset 엔드포인트로 분리. 기능 확장이라 #6과 별개 단위로 다룬다.
+
+---
+
 ## 요약표
 
 | 우선순위 | # | 항목 | 파일 |
@@ -351,3 +361,4 @@ res = await db.execute(stmt)
 | **P3** | 18 | `_PG_UUID` 중복 정의 | `users/model.py`, `comments/model.py`, `posts/model.py` |
 | **P3** | 19 | `get_room_peer_info` 채팅방 중복 조회 | `app/domain/chat/service.py` |
 | **P3** | 20 | `from __future__ import annotations` 불일치 | 전역 |
+| **P2** | 21 | 대댓글 배치 로드 상한 없음(대댓글 페이지네이션 부재) | `app/domain/comments/model.py` |

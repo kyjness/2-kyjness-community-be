@@ -3,6 +3,8 @@
 - **상태**: 채택됨 (Accepted)
 - **관련 코드**: `app/domain/posts/repository.py`(`get_all_posts`),
   `app/domain/posts/services/post_service.py`(`get_posts`),
+  `app/domain/comments/model.py`(`get_root_comments` 루트 keyset·`get_replies_for_roots` 부모별 배치),
+  `app/domain/comments/service.py`(`get_comments`),
   `app/common/schemas.py`(`CursorPage` — total 없는 커서 전용, offset+total용 `PaginatedResponse`와 분리)
 
 ## 맥락 (Context)
@@ -53,3 +55,6 @@
 
 - **전체 `total` 실시간 정확 카운트**: 커서 방식에 불필요·고비용. 필요한 화면만 근사/별도 카운트.
 - **임의 페이지 번호 점프**: 커뮤니티 피드 UX(무한 스크롤)엔 불필요.
+- **대댓글 자체의 페이지네이션**: 루트는 keyset로 페이지네이션하되, 한 페이지 루트들의 대댓글은
+  부모별 배치로 전부 로드한다(2단 트리 전제). 루트당 대댓글 preview + "더보기" 분리는 기능 확장이라
+  이번 범위 밖([backlog #21](../backlog.md)).
