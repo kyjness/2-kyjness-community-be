@@ -2,7 +2,8 @@
 
 - **상태**: 채택됨 (Accepted)
 - **관련 코드**: `app/domain/posts/repository.py`(`get_all_posts`),
-  `app/domain/posts/services/post_service.py`, `app/common/schemas.py`(`PaginatedResponse`)
+  `app/domain/posts/services/post_service.py`(`get_posts`),
+  `app/common/schemas.py`(`CursorPage` — total 없는 커서 전용, offset+total용 `PaginatedResponse`와 분리)
 
 ## 맥락 (Context)
 
