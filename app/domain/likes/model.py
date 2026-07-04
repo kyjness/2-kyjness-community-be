@@ -37,6 +37,19 @@ class PostLikesModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
+    async def get_liked_post_ids_for_user(
+        cls, user_id: UUID, post_ids: list[UUID], db: AsyncSession
+    ) -> set[UUID]:
+        if not post_ids:
+            return set()
+        stmt = select(PostLike.post_id).where(
+            PostLike.user_id == user_id,
+            PostLike.post_id.in_(post_ids),
+        )
+        result = await db.execute(stmt)
+        return {r[0] for r in result.all()}
+
+    @classmethod
     async def create(cls, post_id: UUID, user_id: UUID, *, db: AsyncSession) -> bool:
         stmt = (
             pg_insert(PostLike)

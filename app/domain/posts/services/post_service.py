@@ -17,6 +17,7 @@ from app.common.exceptions import (
 )
 from app.core.config import settings
 from app.core.ids import new_ulid_str, parse_public_id_value
+from app.domain.likes.model import PostLikesModel
 from app.domain.media.model import MediaModel
 from app.domain.posts.schemas import PostCreateRequest, PostResponse, PostUpdateRequest
 
@@ -161,7 +162,17 @@ class PostService:
             )
             has_more = len(fetched) > size
             posts = fetched[:size]
-            result = [PostResponse.model_validate(p) for p in posts]
+            liked_ids: set[UUID] = set()
+            if current_user_id is not None and posts:
+                liked_ids = await PostLikesModel.get_liked_post_ids_for_user(
+                    current_user_id, [p.id for p in posts], db=db
+                )
+            result = [
+                PostResponse.model_validate(p).model_copy(update={"is_liked": True})
+                if p.id in liked_ids
+                else PostResponse.model_validate(p)
+                for p in posts
+            ]
         return result, has_more
 
     @classmethod
