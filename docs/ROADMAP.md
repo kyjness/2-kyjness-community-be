@@ -17,8 +17,11 @@
   - [x] #7 인증 캐싱 — status 캐시 fast-fail 확정(ACTIVE는 PK+JOIN 유지; ADR 0004 근거), `auth.py:128` 타이핑 해소
   - [x] 테스트 보강 — #9 단위 · #8 통합
   - [x] 마감: `/security-review`(취약점 0) · `/code-review`(회귀 1건 발견→수정: `.env` 전용 `VIEW_CACHE_TTL_SECONDS`를 Settings 필드로 승격)
-- [ ] **media** ← **다음** — #1 스토리지 삭제 실패 시 고아 방지 · 업로드 멱등성(ADR 0008)
-- [ ] **posts** (핵심) — #2 view flush CAS · #4 ILIKE 이스케이프 · #10 COUNT · #11 대표견만 · #12 해시태그 왕복 · #17 redis 해시태그 · cursor(ADR 0002) · 조회수(ADR 0007) · 멱등성(ADR 0008)
+- [x] **media** — #1 고아 방지·업로드 멱등성 기적용 확인
+  - [x] signup/orphan 정리를 트랜잭션 밖 스토리지 I/O + 배치로 정렬(형제 sweep와 통일)
+  - [x] 리뷰 지적 수정: 정리 배치를 keyset(id>last_id) 전진으로 → 실패 머리 starvation·중복 로그 제거
+  - [x] ADR 0008(POST 멱등성) 작성 · media 테스트 보강(멱등성 재생·409·정리 고아 방지·keyset 전진)
+- [ ] **posts** (핵심) ← **다음** — #2 view flush CAS · #4 ILIKE 이스케이프 · #10 COUNT · #11 대표견만 · #12 해시태그 왕복 · #17 redis 해시태그 · cursor(ADR 0002) · 조회수(ADR 0007) · 멱등성(ADR 0008)
 - [ ] **comments / likes** — #6 트리 페이지네이션 · #15 좋아요 카운트 중복
 - [ ] **dogs** — #11 대표견 로딩 정리
 - [ ] **chat / notifications** — #16 미읽음 스캔 · #19 방 중복조회 · 실시간(ADR 0009)
@@ -38,5 +41,9 @@
 | 구조화 로그 | `2dd828e9` |
 | auth 캐시 타이핑 정리 | `77ebdeae` |
 | auth bcrypt·정지 테스트 | `ca952cde` |
+| media signup 정리 트랜잭션 위생 | `b2579690` |
+| media 멱등성·정리 테스트 | `f7edcd1b` |
+| ADR 0008 멱등성 | `ecaf12c7` |
+| media 정리 keyset 전진(리뷰 수정) | `7fedfd9e` |
 
 > 백로그 번호(#n)는 [`../analysis.md`](../analysis.md) 기준.
