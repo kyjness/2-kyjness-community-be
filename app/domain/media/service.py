@@ -343,18 +343,23 @@ class MediaService:
         try:
             batch_size = settings.MEDIA_SWEEP_UNUSED_BATCH_SIZE
             total_deleted = 0
+            last_id: UUID | None = None
 
             while True:
-                # 1) 짧은 조회 트랜잭션: 배치 단위로 orphan 확보(대량 시 긴 락·단일 DELETE 완화).
+                # 1) 짧은 조회 트랜잭션: keyset(id > last_id)으로 배치 확보. 스토리지 삭제 실패분도
+                #    커서를 넘겨 이번 실행에선 건너뛰고 다음 실행에서 재시도한다(실패 머리에 막혀
+                #    뒤쪽 정상 행이 굶는 것을 방지).
                 async with db.begin():
                     orphan_images = await MediaModel.get_orphan_images_older_than(
                         older_than_hours=24,
                         db=db,
                         limit=batch_size,
+                        after_id=last_id,
                     )
 
                 if not orphan_images:
                     break
+                last_id = orphan_images[-1].id
 
                 # 2) 스토리지 I/O는 DB 트랜잭션 밖에서 수행.
                 deletable_ids: list[UUID] = []
@@ -370,18 +375,10 @@ class MediaService:
                             e,
                         )
 
-                if not deletable_ids:
-                    logger.warning(
-                        "sweep_unused_images: batch had %s row(s) but no storage delete succeeded; "
-                        "stopping this run to avoid a tight loop",
-                        len(orphan_images),
-                    )
-                    break
-
                 # 3) 짧은 삭제 트랜잭션: 성공한 id만 DB에서 제거.
-                async with db.begin():
-                    n = await MediaModel.delete_images_by_ids(deletable_ids, db=db)
-                    total_deleted += n
+                if deletable_ids:
+                    async with db.begin():
+                        total_deleted += await MediaModel.delete_images_by_ids(deletable_ids, db=db)
 
                 if len(orphan_images) < batch_size:
                     break
@@ -412,14 +409,20 @@ class MediaService:
             batch_size = settings.MEDIA_SWEEP_UNUSED_BATCH_SIZE
             failed_file_keys: list[str] = []
             total_deleted = 0
+            last_id: UUID | None = None
 
             while True:
-                # 1) 짧은 조회 트랜잭션: 배치 단위로 만료 signup 이미지 확보.
+                # 1) 짧은 조회 트랜잭션: keyset(id > last_id)으로 배치 확보. 스토리지 삭제 실패분도
+                #    커서를 넘겨 이번 실행에선 건너뛰고 다음 실행에서 재시도한다(실패 머리에 막혀
+                #    뒤쪽 정상 행이 굶는 것을 방지).
                 async with db.begin():
-                    rows = await MediaModel.get_expired_signup_images(db=db, limit=batch_size)
+                    rows = await MediaModel.get_expired_signup_images(
+                        db=db, limit=batch_size, after_id=last_id
+                    )
 
                 if not rows:
                     break
+                last_id = rows[-1].id
 
                 # 2) 스토리지 I/O는 DB 트랜잭션 밖에서 수행. 삭제 성공분 id만 DB 제거 대상.
                 deletable_ids: list[UUID] = []
@@ -438,18 +441,10 @@ class MediaService:
                         )
                         failed_file_keys.append(img.file_key)
 
-                if not deletable_ids:
-                    logger.warning(
-                        "cleanup_expired_signup_images task_id=%s: batch had %s row(s) but no "
-                        "storage delete succeeded; stopping this run to avoid a tight loop",
-                        task_id,
-                        len(rows),
-                    )
-                    break
-
                 # 3) 짧은 삭제 트랜잭션: 성공한 id만 DB에서 제거.
-                async with db.begin():
-                    total_deleted += await MediaModel.delete_images_by_ids(deletable_ids, db=db)
+                if deletable_ids:
+                    async with db.begin():
+                        total_deleted += await MediaModel.delete_images_by_ids(deletable_ids, db=db)
 
                 if len(rows) < batch_size:
                     break

@@ -126,7 +126,7 @@ class MediaModel:
 
     @classmethod
     async def get_expired_signup_images(
-        cls, db: AsyncSession, *, limit: int | None = None
+        cls, db: AsyncSession, *, limit: int | None = None, after_id: UUID | None = None
     ) -> list[Image]:
         cutoff = utc_now() - timedelta(seconds=settings.SIGNUP_IMAGE_TOKEN_TTL_SECONDS)
         stmt = (
@@ -137,6 +137,8 @@ class MediaModel:
             )
             .order_by(Image.id.asc())
         )
+        if after_id is not None:
+            stmt = stmt.where(Image.id > after_id)
         if limit is not None:
             stmt = stmt.limit(limit)
         result = await db.execute(stmt)
@@ -149,6 +151,7 @@ class MediaModel:
         older_than_hours: int,
         db: AsyncSession,
         limit: int | None = None,
+        after_id: UUID | None = None,
     ) -> list[Image]:
         cutoff = utc_now() - timedelta(hours=older_than_hours)
         users_t = table("users", column("profile_image_id", _PG_UUID))
@@ -172,6 +175,8 @@ class MediaModel:
             )
             .order_by(Image.id.asc())
         )
+        if after_id is not None:
+            stmt = stmt.where(Image.id > after_id)
         if limit is not None:
             stmt = stmt.limit(limit)
         result = await db.execute(stmt)

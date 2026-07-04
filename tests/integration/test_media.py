@@ -4,6 +4,7 @@ from datetime import timedelta
 import pytest
 from app.api.dependencies.client import _idempotency_fingerprint, _lock_redis_key
 from app.common.codes import ApiCode
+from app.core.config import settings
 from app.core.ids import parse_public_id_value
 from app.db.base_class import utc_now
 from app.domain.media.model import Image
@@ -120,3 +121,46 @@ async def test_cleanup_keeps_records_when_storage_delete_fails(
     ).scalars().all()
     # 삭제 실패분만 남고, 성공분은 제거됨.
     assert set(remaining) == {"cleanup-fail"}
+
+
+async def test_cleanup_advances_past_failing_head(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """id 앞머리의 스토리지 실패 이미지가 뒤쪽 정상 이미지를 굶기지 않는다(keyset 전진)."""
+    # 배치 1로 좁혀, '실패 머리 → 정상 꼬리'를 서로 다른 배치로 강제.
+    monkeypatch.setattr(settings, "MEDIA_SWEEP_UNUSED_BATCH_SIZE", 1)
+    old = utc_now() - timedelta(days=1)
+    # 명시적 id로 순서 고정: head(작은 id)=실패, tail(큰 id)=성공.
+    head = Image(
+        id=uuid.UUID(int=1), file_key="head-fail", file_url="u", content_type="image/png",
+        size=1, uploader_id=None, created_at=old,
+    )
+    tail = Image(
+        id=uuid.UUID(int=2), file_key="tail-ok", file_url="u", content_type="image/png",
+        size=1, uploader_id=None, created_at=old,
+    )
+    db_session.add_all([head, tail])
+    await db_session.commit()
+
+    def fake_storage_delete(file_key: str) -> None:
+        if file_key == "head-fail":
+            raise RuntimeError("storage down")
+
+    monkeypatch.setattr("app.domain.media.service.storage_delete", fake_storage_delete)
+
+    from app.domain.media.service import MediaService
+
+    deleted, failed = await MediaService.cleanup_expired_signup_images(
+        db_session, task_id="test", redis=None
+    )
+
+    assert deleted >= 1
+    assert "head-fail" in failed
+
+    remaining = (
+        await db_session.execute(
+            select(Image.file_key).where(Image.file_key.in_(["head-fail", "tail-ok"]))
+        )
+    ).scalars().all()
+    # 실패한 머리는 남고, 커서가 그 뒤로 전진해 꼬리(정상)는 삭제됨.
+    assert set(remaining) == {"head-fail"}
