@@ -105,15 +105,14 @@ class CommentLike(Base):
 def _comment_author_loads():
     """댓글 작성자 공통 eager load. 작성자 강아지는 대표견 1마리만 로드한다.
 
-    응답은 author.representative_dog 하나만 쓰므로, 목록에서 소유자별 전체 강아지+이미지를
-    끌어오지 않도록 관계 로더에 is_representative 필터를 건다.
+    응답은 author.representative_dog 하나만 쓰므로, 대표견 전용 뷰 관계로 로드한다.
+    dogs를 .and_() 필터로 로드하면 컬렉션이 잘려 세션에 캐시되는 트랩이 있어 dogs는
+    건드리지 않는다(posts 로더와 동형).
     """
     return (
         joinedload(Comment.author).options(
             joinedload(User.profile_image),
-            selectinload(User.dogs.and_(DogProfile.is_representative.is_(True))).joinedload(
-                DogProfile.profile_image
-            ),
+            selectinload(User.representative_dog).joinedload(DogProfile.profile_image),
         ),
     )
 

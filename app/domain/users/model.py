@@ -91,6 +91,18 @@ class User(Base):
         order_by="DogProfile.id",
         lazy="raise_on_sql",
     )
+    # 대표견 전용 뷰 관계. dogs를 .and_() 필터로 로드하면 컬렉션 자체가 대표견 1마리로
+    # 잘려 세션에 캐시되는 트랩이 있어, 대표견은 dogs를 건드리지 않는 별도 관계로 로드한다.
+    # viewonly라 영속·overlaps 검사에서 제외되고, '소유자당 대표견 1마리'는 부분 유니크
+    # 인덱스(uq_dog_profiles_owner_representative)가 보장하므로 uselist=False가 정당하다.
+    representative_dog: Mapped[DogProfile | None] = relationship(
+        "DogProfile",
+        primaryjoin="and_(DogProfile.owner_id == User.id, DogProfile.is_representative == True)",
+        foreign_keys=[DogProfile.owner_id],
+        uselist=False,
+        viewonly=True,
+        lazy="raise_on_sql",
+    )
 
     @property
     def profile_image_url(self) -> str | None:
@@ -102,13 +114,6 @@ class User(Base):
     def is_active(self) -> bool:
         # 하위호환: 레거시 코드에서 user.is_active를 계속 사용할 수 있게 유지
         return UserStatus.is_active_value(self.status)
-
-    @property
-    def representative_dog(self) -> DogProfile | None:
-        for d in self.dogs or []:
-            if getattr(d, "is_representative", False):
-                return d
-        return None
 
 
 class UserBlock(Base):
@@ -195,6 +200,7 @@ class UsersModel:
             .options(
                 joinedload(User.profile_image),
                 selectinload(User.dogs).joinedload(DogProfile.profile_image),
+                selectinload(User.representative_dog).joinedload(DogProfile.profile_image),
             )
         )
         result = await db.execute(stmt)
