@@ -1,0 +1,28 @@
+# 아키텍처 의사결정 기록 (ADR)
+
+PuppyTalk 백엔드의 주요 설계 결정을 기록한다. 각 ADR은
+*"어떤 문제를 어떤 전제 위에서, 왜 이렇게 풀었고, 무엇을 포기했는가"*를 남긴다.
+
+모든 ADR은 [`../00-operating-envelope-and-scope.md`](../00-operating-envelope-and-scope.md)의
+**운영 봉투**를 공유한다 — 복잡도는 그 봉투 안에서만 정당화된다.
+횡단 결정의 종합은 [`../01-architecture.md`](../01-architecture.md) 참조.
+
+## 목록
+
+| # | 제목 | 성격 | 상태 |
+|---|------|------|------|
+| [0001](0001-identifier-strategy.md) | 식별자 전략 — UUIDv7·Base62·ULID | 횡단 | 채택됨 |
+| [0002](0002-cursor-pagination.md) | Cursor 페이지네이션 — keyset · `total` 제거 | 횡단 | 채택됨 |
+| [0003](0003-distributed-rate-limit.md) | 분산 Rate Limit — Redis Lua + smart fail-open | 횡단 | 채택됨 |
+| [0004](0004-cache-strategy.md) | 캐시 전략 — 읽기 폭주 경로 · fail-open | 횡단 | 채택됨 |
+| [0005](0005-resilience-no-circuit-breaker.md) | 복원력 — fail-open 표준 & CB 미채택 | 횡단 | 채택됨 |
+| [0006](0006-observability.md) | 관측성 — 구조화 로그 + 얇은 메트릭 | 횡단 | 채택됨 |
+| 0007 | 조회수 집계 — Redis 버퍼링 + 비동기 Flush | 도메인(posts) | 예정 |
+| 0008 | POST 멱등성 — Idempotency-Key + 결과 캐시 | 도메인(posts·media) | 예정 |
+| 0009 | 실시간 전달 — WebSocket·SSE × Redis Pub/Sub | 도메인(chat·notifications) | 예정 |
+
+> 0007~0009는 해당 도메인을 재건하는 **Construction** 단계에서 작성한다(코드 근거가 선명해질 때).
+
+## 형식
+각 ADR: **맥락(문제) → 결정 → 트레이드오프 → 고려한 대안 → 일부러 하지 않은 것.**
+마지막 "안 한 것"이 *정당화된 복잡도*의 핵심 전시물이다.
