@@ -125,14 +125,21 @@ class MediaModel:
         return len(list(result.scalars().all()))
 
     @classmethod
-    async def get_expired_signup_images(cls, db: AsyncSession) -> list[Image]:
+    async def get_expired_signup_images(
+        cls, db: AsyncSession, *, limit: int | None = None
+    ) -> list[Image]:
         cutoff = utc_now() - timedelta(seconds=settings.SIGNUP_IMAGE_TOKEN_TTL_SECONDS)
-        result = await db.execute(
-            select(Image).where(
+        stmt = (
+            select(Image)
+            .where(
                 Image.uploader_id.is_(None),
                 Image.created_at < cutoff,
             )
+            .order_by(Image.id.asc())
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await db.execute(stmt)
         return list(result.scalars().all())
 
     @classmethod

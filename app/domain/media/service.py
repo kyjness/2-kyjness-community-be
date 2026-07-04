@@ -409,14 +409,24 @@ class MediaService:
             return 0, []
         r = cast(Any, redis) if redis is not None else None
         try:
+            batch_size = settings.MEDIA_SWEEP_UNUSED_BATCH_SIZE
             failed_file_keys: list[str] = []
-            async with db.begin():
-                rows = await MediaModel.get_expired_signup_images(db=db)
+            total_deleted = 0
+
+            while True:
+                # 1) 짧은 조회 트랜잭션: 배치 단위로 만료 signup 이미지 확보.
+                async with db.begin():
+                    rows = await MediaModel.get_expired_signup_images(db=db, limit=batch_size)
+
                 if not rows:
-                    return 0, []
+                    break
+
+                # 2) 스토리지 I/O는 DB 트랜잭션 밖에서 수행. 삭제 성공분 id만 DB 제거 대상.
+                deletable_ids: list[UUID] = []
                 for img in rows:
                     try:
                         await asyncio.to_thread(storage_delete, img.file_key)
+                        deletable_ids.append(img.id)
                     except Exception as e:
                         logger.warning(
                             "Signup image storage delete failed task_id=%s image_id=%s file_key=%s: %s",
@@ -427,9 +437,24 @@ class MediaService:
                             exc_info=True,
                         )
                         failed_file_keys.append(img.file_key)
-                        continue
-                    await MediaModel.delete_image_record(img, db=db)
-            return len(rows), failed_file_keys
+
+                if not deletable_ids:
+                    logger.warning(
+                        "cleanup_expired_signup_images task_id=%s: batch had %s row(s) but no "
+                        "storage delete succeeded; stopping this run to avoid a tight loop",
+                        task_id,
+                        len(rows),
+                    )
+                    break
+
+                # 3) 짧은 삭제 트랜잭션: 성공한 id만 DB에서 제거.
+                async with db.begin():
+                    total_deleted += await MediaModel.delete_images_by_ids(deletable_ids, db=db)
+
+                if len(rows) < batch_size:
+                    break
+
+            return total_deleted, failed_file_keys
         finally:
             if lock_value and r is not None:
                 await _release_job_lock(
