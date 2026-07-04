@@ -118,6 +118,29 @@ def _comment_author_loads():
     )
 
 
+def _author_not_blocked(author_col, current_user_id: UUID | None):
+    """current_user가 차단한 작성자를 제외하는 조건(대상 없으면 None)."""
+    if current_user_id is None:
+        return None
+    return ~exists(1).where(
+        UserBlock.blocker_id == current_user_id,
+        UserBlock.blocked_id == author_col,
+    )
+
+
+def _reply_visible_conditions(reply, current_user_id: UUID | None) -> list:
+    """표시 가능한 대댓글 조건: 미삭제·미블라인드·(차단 작성자 제외).
+
+    루트의 'EXISTS 대댓글이 있으면 삭제 루트를 placeholder로 유지' 판정과
+    get_replies_for_roots가 이 술어를 공유해, 삭제 루트 placeholder 시맨틱이 어긋나지 않게 한다.
+    """
+    conds = [reply.deleted_at.is_(None), reply.is_blinded.is_(False)]
+    not_blocked = _author_not_blocked(reply.author_id, current_user_id)
+    if not_blocked is not None:
+        conds.append(not_blocked)
+    return conds
+
+
 class CommentsModel:
     @classmethod
     async def load_comment_author_permission_row(
@@ -205,35 +228,22 @@ class CommentsModel:
         부모별로 배치 로드한다.
         """
         reply = aliased(Comment)
-        reply_visible = [
-            reply.parent_id == Comment.id,
-            reply.deleted_at.is_(None),
-            reply.is_blinded.is_(False),
-        ]
-        if current_user_id is not None:
-            reply_visible.append(
-                ~exists(1).where(
-                    UserBlock.blocker_id == current_user_id,
-                    UserBlock.blocked_id == reply.author_id,
-                )
-            )
+        reply_exists = exists(1).where(
+            reply.parent_id == Comment.id, *_reply_visible_conditions(reply, current_user_id)
+        )
         stmt = (
             select(Comment)
             .where(
                 Comment.post_id == post_id,
                 Comment.parent_id.is_(None),
                 Comment.is_blinded.is_(False),
-                or_(Comment.deleted_at.is_(None), exists(1).where(*reply_visible)),
+                or_(Comment.deleted_at.is_(None), reply_exists),
             )
             .options(*_comment_author_loads())
         )
-        if current_user_id is not None:
-            stmt = stmt.where(
-                ~exists(1).where(
-                    UserBlock.blocker_id == current_user_id,
-                    UserBlock.blocked_id == Comment.author_id,
-                )
-            )
+        root_not_blocked = _author_not_blocked(Comment.author_id, current_user_id)
+        if root_not_blocked is not None:
+            stmt = stmt.where(root_not_blocked)
         if sort == "oldest":
             if cursor is not None:
                 stmt = stmt.where(Comment.id > cursor)
@@ -254,26 +264,20 @@ class CommentsModel:
         db: AsyncSession,
         current_user_id: UUID | None = None,
     ) -> list[Comment]:
-        """주어진 루트들의 대댓글을 한 번에 배치 로드한다(부모별 하드리밋 없음)."""
+        """주어진 루트들의 대댓글을 한 번에 배치 로드한다(부모별 하드리밋 없음).
+
+        정렬은 _build_comment_tree가 부모별로 다시 하므로 여기선 SQL ORDER BY를 두지 않는다.
+        """
         if not root_ids:
             return []
         stmt = (
             select(Comment)
             .where(
                 Comment.parent_id.in_(root_ids),
-                Comment.is_blinded.is_(False),
-                Comment.deleted_at.is_(None),
+                *_reply_visible_conditions(Comment, current_user_id),
             )
             .options(*_comment_author_loads())
-            .order_by(Comment.id.asc())
         )
-        if current_user_id is not None:
-            stmt = stmt.where(
-                ~exists(1).where(
-                    UserBlock.blocker_id == current_user_id,
-                    UserBlock.blocked_id == Comment.author_id,
-                )
-            )
         result = await db.execute(stmt)
         return list(result.unique().scalars().all())
 

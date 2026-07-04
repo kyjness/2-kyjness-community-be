@@ -168,9 +168,7 @@ class PostService:
                     current_user_id, [p.id for p in posts], db=db
                 )
             result = [
-                PostResponse.model_validate(p).model_copy(update={"is_liked": True})
-                if p.id in liked_ids
-                else PostResponse.model_validate(p)
+                PostResponse.model_validate(p).model_copy(update={"is_liked": p.id in liked_ids})
                 for p in posts
             ]
         return result, has_more
