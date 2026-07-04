@@ -125,7 +125,7 @@ async def get_current_user(
     cached_status: str | None = None
     if redis_client is not None:
         try:
-            cached_raw = await redis_client.get(_user_status_cache_key(user_id))
+            cached_raw = await cast(Any, redis_client).get(_user_status_cache_key(user_id))
             cached_status = _redis_bulk_to_str(cached_raw)
         except Exception as e:
             logger.warning("user status cache GET fail-open user_id=%s err=%s", user_id, e)
