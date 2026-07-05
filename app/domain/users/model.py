@@ -14,7 +14,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
     delete,
     select,
     text,
@@ -131,9 +130,7 @@ class User(Base):
 
 class UserBlock(Base):
     __tablename__ = "user_blocks"
-    __table_args__ = (
-        UniqueConstraint("blocker_id", "blocked_id", name="uq_user_blocks_blocker_blocked"),
-    )
+    # 복합 PK(blocker_id, blocked_id)가 유니크를 보장하므로 별도 UniqueConstraint는 두지 않는다.
 
     blocker_id: Mapped[UUID] = mapped_column(
         _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
