@@ -99,10 +99,6 @@ class ChatService:
         return row
 
     @classmethod
-    def _is_room_member(cls, room: ChatRoom, user_id: UUID) -> bool:
-        return user_id == room.user1_id or user_id == room.user2_id
-
-    @classmethod
     async def send_dm_from_ws(
         cls,
         db: AsyncSession,
@@ -175,9 +171,12 @@ class ChatService:
         limit: int,
     ) -> ChatMessagesPageData:
         async with db.begin():
-            rres = await db.execute(select(ChatRoom).where(ChatRoom.id == room_id).limit(1))
-            room = rres.scalar_one_or_none()
-            if room is None or not cls._is_room_member(room, user_id):
+            # 메시지 조회 앞의 authz 가드. 전체 엔티티 대신 멤버 판정에 필요한 두 컬럼만 로드한다.
+            rres = await db.execute(
+                select(ChatRoom.user1_id, ChatRoom.user2_id).where(ChatRoom.id == room_id).limit(1)
+            )
+            room = rres.one_or_none()
+            if room is None or user_id not in (room.user1_id, room.user2_id):
                 raise ForbiddenException(message="이 채팅방에 접근할 수 없습니다.")
             stmt = select(ChatMessage).where(ChatMessage.room_id == room_id)
             if cursor_message_id is not None:
@@ -355,9 +354,12 @@ class ChatService:
     ) -> ChatRoomMarkedReadData:
         """내 기준 미읽음(상대가 보낸 메시지)을 읽음으로 일괄 표시."""
         async with db.begin():
-            rres = await db.execute(select(ChatRoom).where(ChatRoom.id == room_id).limit(1))
-            room = rres.scalar_one_or_none()
-            if room is None or not cls._is_room_member(room, user_id):
+            # UPDATE 앞의 authz 가드. 전체 엔티티 대신 멤버 판정에 필요한 두 컬럼만 로드한다.
+            rres = await db.execute(
+                select(ChatRoom.user1_id, ChatRoom.user2_id).where(ChatRoom.id == room_id).limit(1)
+            )
+            room = rres.one_or_none()
+            if room is None or user_id not in (room.user1_id, room.user2_id):
                 raise ForbiddenException(message="이 채팅방에 접근할 수 없습니다.")
             await db.execute(
                 update(ChatMessage)
@@ -394,11 +396,8 @@ class ChatService:
         peer_dog_img = aliased(Image)
 
         async with db.begin():
-            rres = await db.execute(select(ChatRoom).where(ChatRoom.id == room_id).limit(1))
-            room = rres.scalar_one_or_none()
-            if room is None or not cls._is_room_member(room, user_id):
-                raise ForbiddenException(message="이 채팅방에 접근할 수 없습니다.")
-
+            # 멤버십 가드를 projection의 WHERE에 접어넣어 같은 방을 두 번 조회하지 않는다(#19).
+            # 비멤버·부재 방이면 행이 없으므로 None → Forbidden.
             stmt = (
                 select(
                     ChatRoom.id.label("room_id"),
@@ -411,7 +410,10 @@ class ChatService:
                     peer_dog.gender.label("peer_dog_gender"),
                     peer_dog.birth_date.label("peer_dog_birth_date"),
                 )
-                .where(ChatRoom.id == room_id)
+                .where(
+                    ChatRoom.id == room_id,
+                    or_(ChatRoom.user1_id == user_id, ChatRoom.user2_id == user_id),
+                )
                 .join(peer, peer.id == peer_id_expr)
                 .outerjoin(peer_img, peer_img.id == peer.profile_image_id)
                 .outerjoin(
@@ -422,7 +424,9 @@ class ChatService:
                 .limit(1)
             )
             res = await db.execute(stmt)
-            row = res.one()
+            row = res.one_or_none()
+            if row is None:
+                raise ForbiddenException(message="이 채팅방에 접근할 수 없습니다.")
 
         return ChatRoomPeerInfoData(
             room_id=row.room_id,
