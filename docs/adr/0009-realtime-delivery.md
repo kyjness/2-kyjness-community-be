@@ -1,0 +1,88 @@
+# ADR 0009 — 실시간 전달: WebSocket(chat)·SSE(notifications) × Redis Pub/Sub
+
+- **상태**: 채택됨 (Accepted)
+- **관련 코드**:
+  `app/api/v1/chat/ws.py`(WebSocket `/ws/chat`),
+  `app/domain/chat/manager.py`(워커-로컬 `ConnectionManager`),
+  `app/domain/chat/pubsub.py`(단일 채널 fanout·워커 구독 리스너),
+  `app/domain/chat/service.py`(`send_dm_from_ws`·`_fanout_dm`),
+  `app/domain/notifications/router.py`(SSE `/notifications/stream`),
+  `app/domain/notifications/service.py`(`publish_after_commit`·`sse_subscribe`),
+  `app/worker/jobs/notification_delivery.py`(Celery 오프로드 재전달),
+  `app/infra/redis.py`·`app/main.py`(풀 커넥션·lifespan 리스너 배선)
+
+## 맥락 (Context)
+
+[운영 봉투](../00-operating-envelope-and-scope.md)는 **멀티 인스턴스 · 무중단 재배포**를 전제한다.
+그런데 실시간 연결(채팅 소켓·알림 스트림)은 본질적으로 **특정 워커 프로세스에 붙는다** — LB 뒤 N개
+인스턴스 중 하나의 메모리에 소켓이 산다. 이벤트의 발생지(상대 유저의 액션을 처리한 요청, 혹은 Celery
+워커)는 **다른 워커**일 수 있다. 단일 프로세스라면 인메모리 연결 맵으로 끝나지만, 멀티 인스턴스에서는
+"발생지 워커 → 수신자 소켓을 가진 워커"로 이벤트를 넘길 **프로세스 간 fanout**이 필요하다.
+
+또한 채팅과 알림은 **전송 방향이 다르다**. 채팅은 클라이언트가 메시지를 **보내고 받는**(양방향)
+반면, 알림은 서버가 이벤트를 **밀어주기만**(단방향, 클라는 수신만) 한다. 한 전송 방식으로 억지로
+통일하면 한쪽이 과하거나 부족해진다.
+
+## 결정 (Decision)
+
+**채팅은 WebSocket, 알림은 SSE로 전달하고, 두 경로 모두 프로세스 간 fanout을 Redis Pub/Sub로
+해결한다.** 실시간은 **at-most-once 최선 전달**이며, 지속적 진실은 항상 DB다.
+
+1. **전송 선택 = 방향성에 맞춤**
+   - **채팅 → WebSocket**(`/ws/chat`). 클라가 소켓으로 메시지를 송신(`send_dm_from_ws`)하므로
+     양방향 전이중이 필요. 인증은 `?token=` Access JWT(jti 블랙리스트 확인).
+   - **알림 → SSE**(`/notifications/stream`). 서버→클라 단방향이라 SSE로 충분 — HTTP 위에서 동작,
+     `EventSource` 자동 재연결, 프록시 친화적, 업그레이드 핸드셰이크 불필요. 25초 `: ping` 하트비트로
+     유휴 연결 유지.
+
+2. **멀티 인스턴스 fanout = Redis Pub/Sub**
+   - **채팅**: 단일 채널 `puppytalk:channel:chat:dm` + envelope `{target_user_id, payload}`.
+     워커마다 **전용 Redis 연결로 구독 리스너 1개**(`run_chat_subscribe_listener`, lifespan 기동)를
+     띄우고, 수신 envelope의 `target_user_id`가 로컬에 붙어 있으면 그 소켓으로 push.
+   - **알림**: **수신자별 채널** `notif:user:{uuid}`. SSE 스트림이 열릴 때 그 유저 채널만 구독
+     (`sse_subscribe`)하고, `publish_after_commit`이 트랜잭션 커밋 후 해당 채널로 publish.
+   - 두 경로 모두 **요청 I/O용 풀 커넥션(`app.state.redis`)과 Pub/Sub 전용 소켓을 분리**한다 —
+     구독 루프는 오래 블록되므로 풀을 점유하면 안 된다.
+
+3. **fail-open 복원력** ([ADR 0005](0005-resilience-no-circuit-breaker.md) 정합)
+   - Redis가 없거나(`None`) publish/subscribe가 실패해도 **DB·인앱 데이터는 유지**된다. 채팅 fanout은
+     Redis 장애 시 **로컬 워커 전달만** 시도(`_fanout_dm`). 알림 publish 실패는 삼켜지고 수신자는
+     `GET /notifications`로 동기화한다. 실시간 전달 실패가 **쓰기 트랜잭션을 절대 되돌리지 않는다**.
+
+4. **알림 재전달 오프로드 = Celery**
+   - `POST /notifications/{id}/dispatch`가 `deliver_notification_push`(high_priority 큐)로 재전달을
+     오프로딩. 멱등키(`celery:notif:delivered:{key}` `SET NX`)로 중복 push를 차단한다.
+
+## 트레이드오프 (Consequences)
+
+**얻은 것**
+- 멀티 인스턴스·무중단에서 실시간 전달 성립 — 소켓이 어느 워커에 붙든 이벤트가 도달.
+- 전송 방식이 방향성과 일치 — 채팅은 양방향, 알림은 경량 단방향.
+- 실시간 장애가 데이터 정합을 깨지 않음(DB가 진실, 클라 재동기 경로 존재).
+
+**치른 비용**
+- **at-most-once**: Pub/Sub는 fire-and-forget이라 수신자가 오프라인이거나 워커가 publish 순간
+  재시작 중이면 그 실시간 이벤트는 유실된다 — DB가 진실이고 클라가 GET으로 재동기하므로 수용.
+- **채팅 단일 채널의 워커별 필터링**: 모든 워커가 모든 DM envelope를 수신해 `target_user_id`로
+  거른다(워커 수 × 메시지 수). 운영 봉투 내에서는 수용하되, 초고fanout 시 채널 샤딩이 탈출구다.
+- **전송 이원화**: WebSocket·SSE 두 경로를 유지·테스트해야 한다.
+
+## 고려한 대안 (Alternatives)
+
+| 대안 | 기각 사유 |
+|------|-----------|
+| Sticky session(LB가 유저를 워커에 고정, Redis 없이 인메모리) | 무중단 재배포·스케일아웃에서 깨짐. 워커 사망 시 전달 소실, 다기기 크로스-워커 불가 |
+| 알림도 WebSocket | 단방향 이벤트에 양방향 전이중은 과함. SSE 자동 재연결·HTTP 친화성 이점 상실 |
+| 채팅도 SSE | 채팅은 클라 송신이 필요 — SSE는 서버→클라 단방향이라 별도 POST 채널을 덧대야 함 |
+| 외부 브로커(Kafka·RabbitMQ)로 fanout | 지속성·순서 보장은 at-most-once 실시간에 불필요. 운영 봉투에서 브로커 운영비 정당화 안 됨(지속성은 DB+Celery가 담당) |
+| 클라이언트 폴링 | 지연·부하. 채팅/알림 실시간성은 제품 요구 |
+
+## 일부러 하지 않은 것 (Non-goals)
+
+- **전달 보장(ack·replay·오프라인 큐)**: 실시간은 at-most-once로 두고 지속성은 DB에 위임한다.
+  재접속 시 GET 목록으로 재동기 — 실시간 계층에 durable queue를 얹지 않는다.
+- **WS/SSE 공용 추상화 강제**: 전송 시맨틱(양방향 vs 단방향)·채널 전략(단일+envelope vs 유저별)이
+  달라, 억지 통합 대신 각 경로를 그 특성에 맞게 둔다("쓸 데·안 쓸 데 구분").
+- **sse-starlette 도입**: `data:`/`: ping` 프레이밍을 직접 다뤄 의존성 1개를 줄인다.
+- **Redis Cluster 슬롯 최적화**: 채팅은 단일 채널이라 크로스-슬롯 이슈가 없고, 알림 유저별 채널도
+  현 단일 노드 전제로 충분. 클러스터 도입은 별도 결정으로 미룬다.

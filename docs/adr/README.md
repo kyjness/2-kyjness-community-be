@@ -19,11 +19,11 @@ PuppyTalk 백엔드의 주요 설계 결정을 기록한다. 각 ADR은
 | [0006](0006-observability.md) | 관측성 — 구조화 로그 + 얇은 메트릭 | 횡단 | 채택됨 |
 | [0007](0007-view-count-buffering.md) | 조회수 집계 — Redis 버퍼링 + 비동기 Flush | 도메인(posts) | 채택됨 |
 | [0008](0008-idempotency-keys.md) | POST 멱등성 — Idempotency-Key + 결과 캐시 | 도메인(posts·media) | 채택됨 |
-| 0009 | 실시간 전달 — WebSocket·SSE × Redis Pub/Sub | 도메인(chat·notifications) | 예정 |
+| [0009](0009-realtime-delivery.md) | 실시간 전달 — WebSocket·SSE × Redis Pub/Sub | 도메인(chat·notifications) | 채택됨 |
 | [0010](0010-storage-backend-strategy.md) | 스토리지 백엔드 — S3 API 단일 경로 + dev MinIO 패리티 | 도메인(media)·Ops | 채택됨 |
 | [0011](0011-representative-dog-view-relationship.md) | 대표견 — 전용 뷰 관계 + 부분 유니크 인덱스 | 도메인(dogs·posts·comments) | 채택됨 |
 
-> 0009는 해당 도메인(chat·notifications)을 재건하는 **Construction** 단계에서 작성한다.
+> 0009는 chat·notifications 재건 단계에서 기구현된 실시간 설계를 소급 근거화했다.
 
 ## 형식
 각 ADR: **맥락(문제) → 결정 → 트레이드오프 → 고려한 대안 → 일부러 하지 않은 것.**
