@@ -1,0 +1,23 @@
+# 빌드 컨텍스트 축소·캐시 안정화. README.md는 builder가 COPY하므로 제외하지 않는다.
+.git
+.github
+.venv
+tests
+docs
+scripts
+upload
+typings
+
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+.env
+.env.*
+.audit-requirements.txt
+
+*.md
+!README.md
