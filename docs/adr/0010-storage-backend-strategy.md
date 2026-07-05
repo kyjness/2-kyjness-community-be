@@ -1,6 +1,6 @@
 # ADR 0010 — 스토리지 백엔드 전략: S3 API 단일 경로 + dev MinIO 패리티
 
-- **상태**: 채택됨 (Accepted) · 코드 반영은 Ops 단계
+- **상태**: 채택됨 (Accepted) · **구현 완료(Transition/Ops)** — 아래 구현 노트
 - **관련 코드**: `app/infra/storage.py`(`STORAGE_BACKEND` 분기 · presigned 계열
   `issue_presigned_post`/`promote_pending_object`/`require_s3_direct_upload`),
   `app/domain/media/service.py`, `app/domain/media/router.py`
@@ -65,3 +65,16 @@
 - **CDN·이미지 리사이즈/트랜스코딩 파이프라인**: 봉투 밖(전송 최적화·미디어 가공은 이번 범위 아님).
 - **경로 ②(직접 multipart) 즉시 제거**: 서버 수신 업로드의 단순 경로로 당분간 병행. 엔드포인트
   일원화 여부는 별도 판단(이 ADR 범위 밖).
+
+## 구현 노트 (Transition/Ops)
+
+- **local 백엔드 제거**: `_local_save`/`_local_delete`·`require_s3_direct_upload`·
+  `STORAGE_BACKEND` 분기·config 필드·`/upload` 정적 mount를 모두 걷어내 S3 단일 경로로.
+  prod 설정 검증에 S3 자격 필수 조건 추가.
+- **숨어 있던 S3 전용 버그 정정**: `_get_s3_client`가 `endpoint_url`만 세팅하고 addressing style을
+  안 줘서, MinIO는 virtual-hosted(`bucket.host`) DNS 미해석으로 put/presign/copy가 깨졌다. ADR이
+  예측한 "S3에서만 드러나는 버그"의 실제 사례 — `S3_ENDPOINT_URL`이 있으면 path-style을 적용해 정정.
+- **dev/CI = MinIO 자동 검증**: `tests/integration/test_storage_minio.py`가 presign 발급 → 실제
+  업로드 → head → promote(copy+delete)와 put/get/delete를 MinIO에 태운다. `S3_ENDPOINT_URL` 없으면
+  skip(로컬), CI는 공식 minio 컨테이너 + 버킷 생성으로 실행. presigned 주 업로드 경로가 비로소 자동
+  검증된다.

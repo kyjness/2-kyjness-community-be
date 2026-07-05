@@ -66,7 +66,10 @@
   - [x] 헬스 분리: `/livez`(의존성 무관 liveness) + `/readyz`(DB=hard→503, Redis=soft→report만). `/v1/health`는 ALB 하위호환 유지
   - [x] `/metrics`: `prometheus-client`로 RED(`http_requests_total`·`http_request_duration_seconds`·`http_requests_in_progress`). 라벨 `path`는 라우트 템플릿으로 카디널리티 제한, probe·`/metrics` 기록 제외
   - [x] ADR 0006 구현 노트로 구체화(Redis readiness=soft), 단위 테스트(외부 PG/Redis 불필요) 보강
-- [ ] 스토리지 — docker-compose+CI에 MinIO 배선 → 통합테스트 MinIO 대상 전환 → **local 디스크 백엔드 제거**([ADR 0010](adr/0010-storage-backend-strategy.md))
+- [x] 스토리지 — S3 단일 경로 + dev/CI MinIO 파리티 ([ADR 0010](adr/0010-storage-backend-strategy.md) 구현)
+  - [x] local 디스크 백엔드·`STORAGE_BACKEND` 분기·`/upload` mount 제거. prod 검증에 S3 자격 필수 추가
+  - [x] MinIO 호환: `S3_ENDPOINT_URL` 있으면 boto3 path-style — virtual-hosted DNS 미해석으로 깨지던 S3 전용 버그 정정(ADR이 예측한 사례)
+  - [x] `test_storage_minio`가 presign→업로드→promote·put/get/delete를 MinIO에 태워 검증(로컬 skip, CI는 공식 minio 컨테이너+버킷). CI test 잡에 S3_* env 배선
 - [x] 배포 — Docker · CI/CD (ECS는 infra repo에서 maintain+document)
   - [x] 멀티스테이지 `Dockerfile`(uv `--frozen --no-dev --no-install-project`·비루트·HEALTHCHECK `/livez`·gunicorn+uvicorn worker) + `.dockerignore`. 로컬 build·app 임포트·비루트 검증
   - [x] GitHub Actions: quality(poe lint/format/type/vulture) · test(postgres:15 서비스, unit+integration) · security(pip-audit informational) · docker(quality·test 통과 시 build, main push면 GHCR push)
@@ -124,5 +127,7 @@
 | 멀티스테이지 Dockerfile + .dockerignore | `97ded4f7` |
 | CI quality 게이트 green화(pyright 오탐·포맷) | `fd059c43` |
 | GitHub Actions CI(quality·test·security·docker→GHCR) | `02c7170e` |
+| local 스토리지 백엔드 제거·S3 단일 경로·path-style(ADR 0010) | `00c3bccb` |
+| MinIO 파리티 통합 테스트 + CI 배선(ADR 0010) | `44fcd7f0` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.

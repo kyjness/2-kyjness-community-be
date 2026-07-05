@@ -23,7 +23,7 @@
 | **마이그레이션** | Alembic |
 | **캐시·메시징** | Redis |
 | **Celery 백그라운드 작업(선택)** | 알림 `dispatch` 등 큐 오프로딩. FastAPI `async/await`와 별개 (`CELERY_ENABLED`, `app/worker/`, `uv run poe celery-worker`) |
-| **스토리지** | 로컬 파일, AWS S3 (boto3, `run_in_threadpool`로 동기 I/O 오프로딩) |
+| **스토리지** | S3 단일 경로 — AWS S3 / dev·CI는 MinIO (boto3, `run_in_threadpool`로 동기 I/O 오프로딩) |
 | **검증** | Pydantic v2 |
 | **식별자** | PostgreSQL `uuid`, UUID v7, Base62(공개 ID), ULID(`jti`·요청 ID 등) |
 | **인증** | JWT (PyJWT), bcrypt |
@@ -57,12 +57,12 @@
 │   │   ├── comments/                       # 댓글 CRUD·페이지네이션
 │   │   ├── dogs/                           # 강아지 프로필
 │   │   ├── likes/                          # 게시글·댓글 좋아요
-│   │   ├── media/                          # 이미지 업로드(로컬/S3), image_policy, Redis Upload Token, sweeper
+│   │   ├── media/                          # 이미지 업로드(S3/MinIO), image_policy, Redis Upload Token, sweeper
 │   │   ├── notifications/                  # 알림 영속(PostgreSQL)·Redis Pub/Sub·SSE 스트림(/v1/notifications/*)
 │   │   ├── posts/                          # 게시글: routers/·services/·repository·schemas, 카테고리·해시태그·트렌드
 │   │   ├── reports/                        # 신고 접수(POST/COMMENT)·누적 Insert·자동 블라인드
 │   │   └── users/                          # 프로필·비밀번호·탈퇴·차단 목록/토글
-│   ├── infra/                              # Redis(Refresh·RateLimit·채팅·캐시), storage(로컬/S3)
+│   ├── infra/                              # Redis(Refresh·RateLimit·채팅·캐시), storage(S3/MinIO)
 │   └── worker/                             # Celery 워커 태스크(선택). 알림 delivery·dispatch 재시도 등
 ├── tests/                                  # unit/(DB 불필요), integration/(PostgreSQL·pg_trgm)
 ├── docs/                                   # 아키텍처·API 코드·인프라 설계 문서
@@ -305,7 +305,9 @@ uv run pytest tests/integration/test_auth.py::test_login_and_refresh_token -v
 
 ```bash
 docker build -t puppytalk-be .
-# 실행은 DB·Redis가 필요합니다. 인프라 레포의 docker-compose로 전체 스택을 함께 띄우세요.
+# 실행은 DB·Redis·S3(호환) 스토리지가 필요합니다. 스토리지는 S3 단일 경로라 dev/CI는
+# MinIO(S3_ENDPOINT_URL 지정), prod는 실제 S3를 씁니다([ADR 0010](docs/adr/0010-storage-backend-strategy.md)).
+# 인프라 레포의 docker-compose로 전체 스택을 함께 띄우세요.
 # (2-kyjness-community-infra/docker-compose.local.yml — db·redis·minio·nginx 포함)
 ```
 
@@ -317,7 +319,7 @@ uvicorn.workers.UvicornWorker -b 0.0.0.0:8000` 형태로 override합니다(compo
 | 잡 | 내용 |
 |----|------|
 | **quality** | `poe lint-check`·`format-check`·`typecheck`·`vulture-check` |
-| **test** | `postgres:15` 서비스로 `pytest` unit+integration (통합은 `ASGITransport`라 Redis/MinIO 불필요) |
+| **test** | `postgres:15` 서비스 + `minio` 컨테이너(스토리지 파리티)로 `pytest` unit+integration. 대부분 통합은 `ASGITransport`라 Redis 없이 돌고, `test_storage_minio`만 MinIO 대상 실행 |
 | **security** | `pip-audit` (informational — 이미지 게이트를 막지 않음) |
 | **docker** | quality·test 통과 시 이미지 build. `main` push면 **GHCR**(`ghcr.io/<owner>/puppytalk-be`)에 push |
 
@@ -334,16 +336,6 @@ uvicorn.workers.UvicornWorker -b 0.0.0.0:8000` 형태로 override합니다(compo
 ### 기능
 
 - **데이터 무결성(페이로드 계약)**: 메시지 큐·외부 브로커를 붙일 때도 Redis 캐시와 같이 Pydantic V2 **`TypeAdapter` / `validate_json`(또는 동등한 스키마 검증)**으로 메시지 형태를 고정하는 패턴을 권장. (현재 코드베이스는 Redis 캐시·멱등성 응답에 적용.)
-
-
-### AI
-
-- **RAG 기반 '우리 아이 건강 척척박사'**  
-  커뮤니티 지식 베이스와 LLM을 결합한 실시간 스트리밍(StreamingResponse) 챗봇 구축. Vercel AI SDK를 활용한 인터랙티브한 UI와 Context Window 최적화를 통한 답변 정확도 향상.
-
-- **지능형 피드**: 사용자 행동 로그 및 클릭 기반의 무한 스크롤 추천 피드 구현.  
-  - **데이터 최적화**: 추천·복합 쿼리 증가 시 전송 효율을 위해 GraphQL을 부분 도입하여, 추천 피드와 도메인 데이터를 조합해 제공하는 하이브리드 아키텍처 검토.  
-  - **동네 친구 제안**: 위치 정보(Distance Badge)와 견종 유사도를 결합한 맞춤형 친구 추천 서비스.
 
 ### 인프라
 
