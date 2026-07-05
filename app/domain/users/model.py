@@ -149,6 +149,16 @@ class UserBlock(Base):
 
 class Report(Base):
     __tablename__ = "reports"
+    __table_args__ = (
+        # 관리자 신고 집계·delete_by_target는 모두 WHERE target_type AND target_id (AND deleted_at
+        # IS NULL)로 조회한다. 모든 read 경로가 미삭제만 보므로 부분 인덱스로 살아있는 신고만 커버.
+        Index(
+            "ix_reports_target",
+            "target_type",
+            "target_id",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
     reporter_id: Mapped[UUID] = mapped_column(
