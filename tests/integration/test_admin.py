@@ -1,7 +1,11 @@
 import pytest
 from app.core.config import settings
+from app.db.base_class import utc_now
+from app.domain.comments.model import Comment
+from app.domain.posts.model import Post
+from app.domain.users.model import Report, User
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.asyncio
@@ -15,6 +19,17 @@ def _auth_header(login_json: dict) -> dict[str, str]:
     token = token_data.get("accessToken") or token_data.get("access_token")
     assert token, "accessToken 없음"
     return {"Authorization": f"Bearer {token}"}
+
+
+async def _admin_headers(client: AsyncClient, db: AsyncSession, email: str, nickname: str) -> dict:
+    await client.post(
+        "/v1/auth/signup", json={"email": email, "password": _TEST_PW, "nickname": nickname}
+    )
+    await db.execute(text("UPDATE users SET role = 'ADMIN' WHERE email = :email"), {"email": email})
+    await db.commit()
+    res = await client.post("/v1/auth/login", json={"email": email, "password": _TEST_PW})
+    assert res.status_code == 200, res.text
+    return _auth_header(res.json())
 
 
 async def test_admin_access_denied_for_normal_user(client: AsyncClient, db_session: AsyncSession):
@@ -96,3 +111,102 @@ async def test_suspend_revokes_refresh_token(client: AsyncClient, db_session: As
     client.cookies.clear()
     after = await client.post("/v1/auth/refresh", cookies={cookie_name: refresh_cookie})
     assert after.status_code == 401
+
+
+async def test_reported_feed_interleaves_and_paginates(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """신고된 게시글·댓글이 report_count DESC 단일 피드로 interleave되고, 페이지 경계가 정확하다(#5).
+
+    공유 DB(테스트 간 정리 없음) 오염과 무관하도록 큰 report_count로 피드 상단을 점유시켜
+    상대 순서·페이지 경계·중복 없음을 검증한다.
+    """
+    headers = await _admin_headers(client, db_session, "feed-admin@example.com", "피드관리자")
+
+    # 콘텐츠 작성자 준비 → id 확보
+    await client.post(
+        "/v1/auth/signup",
+        json={"email": "feed-author@example.com", "password": _TEST_PW, "nickname": "피드작성자"},
+    )
+    author_id = (
+        await db_session.execute(select(User.id).where(User.email == "feed-author@example.com"))
+    ).scalar_one()
+
+    now = utc_now()
+    host = Post(
+        user_id=author_id,
+        title="피드 호스트 글",
+        content="본문",
+        report_count=0,
+        created_at=now,
+        updated_at=now,
+    )
+    p_high = Post(
+        user_id=author_id,
+        title="많이 신고된 글",
+        content="P본문",
+        report_count=9001,
+        created_at=now,
+        updated_at=now,
+    )
+    p_low = Post(
+        user_id=author_id,
+        title="적게 신고된 글",
+        content="P본문2",
+        report_count=8998,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add_all([host, p_high, p_low])
+    await db_session.flush()  # host.id 확정(댓글 FK)
+    c_high = Comment(
+        post_id=host.id,
+        author_id=author_id,
+        content="많이 신고된 댓글",
+        report_count=9000,
+        created_at=now,
+        updated_at=now,
+    )
+    c_mid = Comment(
+        post_id=host.id,
+        author_id=author_id,
+        content="중간 댓글",
+        report_count=8999,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add_all([c_high, c_mid])
+    await db_session.flush()
+    # 집계(last_reported_at·reasons) 경로도 태운다.
+    for tt, tid in (("POST", p_high.id), ("COMMENT", c_high.id)):
+        db_session.add(
+            Report(
+                reporter_id=author_id, target_type=tt, target_id=tid, reason="스팸", created_at=now
+            )
+        )
+    await db_session.commit()
+
+    # 상단 4건 = 내가 심은 것, report_count DESC로 interleave: POST, COMMENT, COMMENT, POST
+    res = await client.get("/v1/admin/reported-posts?page=1&size=4", headers=headers)
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]
+    top = data["items"][:4]
+    assert [i["reportCount"] for i in top] == [9001, 9000, 8999, 8998]
+    assert [i["targetType"] for i in top] == ["POST", "COMMENT", "COMMENT", "POST"]
+    assert data["total"] >= 4
+    # 댓글 항목은 호스트 글 제목을 단다.
+    assert top[1]["title"] == "피드 호스트 글"
+
+    # 페이지 경계: size=2 두 페이지가 겹치지 않고 순서가 이어진다(500 cap·인메모리 슬라이스 회귀 방지).
+    r1 = (await client.get("/v1/admin/reported-posts?page=1&size=2", headers=headers)).json()[
+        "data"
+    ]
+    r2 = (await client.get("/v1/admin/reported-posts?page=2&size=2", headers=headers)).json()[
+        "data"
+    ]
+    ids1 = [i["id"] for i in r1["items"]]
+    ids2 = [i["id"] for i in r2["items"]]
+    assert [i["reportCount"] for i in r1["items"]] == [9001, 9000]
+    assert [i["reportCount"] for i in r2["items"]] == [8999, 8998]
+    assert set(ids1).isdisjoint(ids2)
+    assert r1["hasMore"] is True
