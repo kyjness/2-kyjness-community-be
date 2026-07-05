@@ -1,16 +1,12 @@
-# 로컬/S3 파일 스토리지. STORAGE_BACKEND에 따라 분기.
+# S3 파일 스토리지(단일 경로). dev/CI는 S3 호환 MinIO(엔드포인트만 다름), prod는 실제 S3.
 
 import re
-from pathlib import Path
 from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.ids import new_ulid_str
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-UPLOAD_DIR = PROJECT_ROOT / "upload"
 
 _s3_client = None
 
@@ -49,9 +45,10 @@ def _get_s3_client():
         or not settings.AWS_SECRET_ACCESS_KEY
     ):
         raise ValueError(
-            "S3_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY must be set when STORAGE_BACKEND=s3"
+            "S3_BUCKET_NAME, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY must be set for storage"
         )
     import boto3
+    from botocore.config import Config
 
     kwargs: dict = {
         "region_name": settings.AWS_REGION,
@@ -59,43 +56,31 @@ def _get_s3_client():
         "aws_secret_access_key": settings.AWS_SECRET_ACCESS_KEY,
     }
     if settings.S3_ENDPOINT_URL:
+        # 커스텀 엔드포인트(MinIO 등)는 path-style이라야 버킷을 호스트가 아닌 경로로 접근한다
+        # (virtual-hosted 'bucket.host'는 DNS 미해석). 실제 S3는 무해.
         kwargs["endpoint_url"] = settings.S3_ENDPOINT_URL
+        kwargs["config"] = Config(s3={"addressing_style": "path"})
     _s3_client = boto3.client("s3", **kwargs)
     return _s3_client
 
 
 def storage_save(key: str, content: bytes, content_type: str) -> str:
-    if settings.STORAGE_BACKEND == "s3":
-        return _s3_save(key, content, content_type)
-    return _local_save(key, content, content_type)
+    return _s3_save(key, content, content_type)
 
 
 def storage_delete(key: str) -> None:
-    if settings.STORAGE_BACKEND == "s3":
-        _s3_delete(key)
-    else:
-        _local_delete(key)
-
-
-def _be_base_url() -> str:
-    raw = (settings.BE_API_URL or "").strip()
-    if "," in raw:
-        raw = raw.split(",")[0].strip()
-    return raw or "http://127.0.0.1:8000"
+    _s3_delete(key)
 
 
 def build_url(key: str) -> str:
-    if settings.STORAGE_BACKEND == "s3":
-        path_under_media = _strip_redundant_media_prefixes(key)
-        if settings.S3_PUBLIC_BASE_URL:
-            base = settings.S3_PUBLIC_BASE_URL.rstrip("/")
-            return f"{base}/{path_under_media}"
-        return (
-            f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/"
-            f"{_s3_object_key(key)}"
-        )
-    base = _be_base_url().rstrip("/")
-    return f"{base}/upload/{key}"
+    path_under_media = _strip_redundant_media_prefixes(key)
+    if settings.S3_PUBLIC_BASE_URL:
+        base = settings.S3_PUBLIC_BASE_URL.rstrip("/")
+        return f"{base}/{path_under_media}"
+    return (
+        f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/"
+        f"{_s3_object_key(key)}"
+    )
 
 
 def _s3_save(key: str, content: bytes, content_type: str) -> str:
@@ -116,19 +101,12 @@ def _s3_delete(key: str) -> None:
     client.delete_object(Bucket=settings.S3_BUCKET_NAME, Key=_s3_object_key(key))
 
 
-def require_s3_direct_upload() -> None:
-    """Presigned POST·확정 API는 S3 백엔드에서만 사용."""
-    if settings.STORAGE_BACKEND != "s3":
-        raise ValueError("Direct S3 upload requires STORAGE_BACKEND=s3")
-
-
 def is_valid_pending_file_key(file_key: str) -> bool:
     k = (file_key or "").strip().lstrip("/")
     return bool(_PENDING_KEY_RE.fullmatch(k))
 
 
 def _generate_presigned_post_sync(file_key: str, content_type: str) -> dict[str, Any]:
-    require_s3_direct_upload()
     client = _get_s3_client()
     s3_key = _s3_object_key(file_key)
     return client.generate_presigned_post(
@@ -154,7 +132,6 @@ async def issue_presigned_post(
 
 
 def _head_pending_object_sync(file_key: str) -> dict[str, Any]:
-    require_s3_direct_upload()
     if not is_valid_pending_file_key(file_key):
         raise ValueError("invalid pending file_key")
     client = _get_s3_client()
@@ -163,7 +140,6 @@ def _head_pending_object_sync(file_key: str) -> dict[str, Any]:
 
 def _promote_pending_object_sync(pending_key: str, dest_purpose: str) -> tuple[str, int, str]:
     """pending/ 객체를 영구 purpose 경로로 copy 후 삭제."""
-    require_s3_direct_upload()
     if not is_valid_pending_file_key(pending_key):
         raise ValueError("invalid pending file_key")
     if dest_purpose not in ("signup", "profile", "post"):
@@ -210,16 +186,3 @@ async def head_pending_object(file_key: str) -> dict[str, Any]:
 
 async def promote_pending_object(pending_key: str, dest_purpose: str) -> tuple[str, int, str]:
     return await run_in_threadpool(_promote_pending_object_sync, pending_key, dest_purpose)
-
-
-def _local_save(key: str, content: bytes, content_type: str) -> str:
-    filepath = UPLOAD_DIR / key
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    filepath.write_bytes(content)
-    return build_url(key)
-
-
-def _local_delete(key: str) -> None:
-    filepath = UPLOAD_DIR / key
-    if filepath.exists():
-        filepath.unlink(missing_ok=True)

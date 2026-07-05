@@ -33,10 +33,6 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
 
-# STORAGE_BACKEND=local(기본)일 때 app.main이 임포트 시점에 mkdir/mount하므로, 비루트 유저가
-# 쓸 수 있는 디렉터리를 미리 만든다(로컬 백엔드는 스토리지 단위에서 S3/MinIO로 대체 예정).
-RUN mkdir -p /app/upload && chown -R app:app /app/upload
-
 USER app
 
 EXPOSE 8000

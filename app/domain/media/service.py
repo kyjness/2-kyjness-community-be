@@ -40,7 +40,6 @@ from app.infra.storage import (
     is_valid_pending_file_key,
     issue_presigned_post,
     promote_pending_object,
-    require_s3_direct_upload,
     storage_delete,
 )
 
@@ -129,17 +128,7 @@ async def _keyset_cleanup(
 
 class MediaService:
     @classmethod
-    def _ensure_s3_direct_upload(cls) -> None:
-        try:
-            require_s3_direct_upload()
-        except ValueError as e:
-            raise InvalidRequestException(
-                message="Direct S3 upload is only available when STORAGE_BACKEND=s3."
-            ) from e
-
-    @classmethod
     async def issue_presigned_upload(cls, body: PresignUploadRequest) -> PresignUploadResponse:
-        cls._ensure_s3_direct_upload()
         content_type = validate_image_content_type(body.content_type)
         safe_name = sanitize_presign_filename(body.filename, content_type)
         upload_id = new_uuid7()

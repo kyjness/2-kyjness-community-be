@@ -3,14 +3,12 @@ import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from mangum import Mangum
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -156,11 +154,6 @@ app.add_middleware(ProxyHeadersMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
 register_exception_handlers(app)
-
-if settings.STORAGE_BACKEND == "local":
-    upload_dir = Path(__file__).resolve().parent.parent / "upload"
-    upload_dir.mkdir(exist_ok=True)
-    app.mount("/upload", StaticFiles(directory=str(upload_dir)), name="upload")
 
 
 @app.get("/")

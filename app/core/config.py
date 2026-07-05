@@ -127,8 +127,7 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 20971520
     ALLOWED_IMAGE_TYPES: _CsvList = ["image/jpeg", "image/png"]
 
-    # ----- 스토리지 (local | s3) -----
-    STORAGE_BACKEND: str = "local"
+    # ----- 스토리지 (S3 단일 경로. dev/CI는 MinIO=S3_ENDPOINT_URL 지정, prod는 실제 S3) -----
     S3_BUCKET_NAME: str = ""
     S3_ENDPOINT_URL: str = ""
     AWS_REGION: str = "ap-northeast-2"
@@ -225,6 +224,15 @@ def validate_settings_for_environment() -> None:
         errors.append("DB_PASSWORD가 비어 있으면 안 됩니다.")
     if any(("localhost" in o or "127.0.0.1" in o) for o in settings.CORS_ORIGINS):
         errors.append("CORS_ORIGINS에 localhost/127.0.0.1을 두면 안 됩니다.")
+    # local 디스크 백엔드 폐기(ADR 0010) → prod는 S3 자격이 반드시 있어야 업로드가 동작한다.
+    if not (
+        settings.S3_BUCKET_NAME.strip()
+        and settings.AWS_ACCESS_KEY_ID.strip()
+        and settings.AWS_SECRET_ACCESS_KEY.strip()
+    ):
+        errors.append(
+            "S3_BUCKET_NAME·AWS_ACCESS_KEY_ID·AWS_SECRET_ACCESS_KEY가 모두 설정돼야 합니다."
+        )
 
     if errors:
         raise ValueError(
