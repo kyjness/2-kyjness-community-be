@@ -22,8 +22,10 @@ PuppyTalk 백엔드의 주요 설계 결정을 기록한다. 각 ADR은
 | [0009](0009-realtime-delivery.md) | 실시간 전달 — WebSocket·SSE × Redis Pub/Sub | 도메인(chat·notifications) | 채택됨 |
 | [0010](0010-storage-backend-strategy.md) | 스토리지 백엔드 — S3 API 단일 경로 + dev MinIO 패리티 | 도메인(media)·Ops | 채택됨 |
 | [0011](0011-representative-dog-view-relationship.md) | 대표견 — 전용 뷰 관계 + 부분 유니크 인덱스 | 도메인(dogs·posts·comments) | 채택됨 |
+| [0012](0012-admin-report-feed-pagination.md) | 관리자 신고 피드 — DB-side UNION ALL + offset 유지 | 도메인(admin) | 채택됨 |
 
 > 0009는 chat·notifications 재건 단계에서 기구현된 실시간 설계를 소급 근거화했다.
+> 0012는 [0002](0002-cursor-pagination.md)의 cursor 표준에 대한 *의도적 예외*(admin 저트래픽·변동 정렬·total 필요)를 근거화한다.
 
 ## 형식
 각 ADR: **맥락(문제) → 결정 → 트레이드오프 → 고려한 대안 → 일부러 하지 않은 것.**

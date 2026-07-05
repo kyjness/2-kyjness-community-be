@@ -29,8 +29,10 @@
 2. **`has_more`** — `size+1`건을 가져와 초과분 존재로 판정, 초과분은 잘라 `next_cursor` 산출.
 3. **응답 계약** — `{items, has_more, next_cursor}`. **`total` 제거.** total이 실제 필요한 화면
    (관리자 통계 등)만 별도 count 옵션/엔드포인트로 분리.
-4. **인메모리 페이지네이션 제거** — admin·댓글을 DB keyset로. 댓글 트리는 "루트는 keyset,
-   대댓글은 부모별 로드"로 하드리밋(#6) 제거.
+4. **인메모리 페이지네이션 제거** — 댓글 트리는 "루트는 keyset, 대댓글은 부모별 로드"로
+   하드리밋(#6) 제거. admin 신고 목록(#5)도 인메모리 슬라이스는 제거하되, 저트래픽·변동 정렬·
+   `total` 필요라는 다른 전제 때문에 **cursor가 아닌 DB-side UNION ALL + offset**을 채택한다
+   ([ADR 0012](0012-admin-report-feed-pagination.md)).
 
 ## 트레이드오프 (Consequences)
 
