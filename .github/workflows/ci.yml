@@ -48,10 +48,33 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      # 통합 테스트는 ASGITransport(lifespan 미실행)라 Redis/MinIO 불필요 — Postgres만 있으면 된다.
+      # DB 스키마는 conftest가 create_all + pg_trgm으로 세운다(alembic 아님).
       TEST_DB_URL: postgresql+psycopg://postgres:postgres@localhost:5432/puppytalk_test
+      # 스토리지 통합 테스트(test_storage_minio)는 이 env가 있으면 MinIO 대상으로 실행된다(ADR 0010).
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_BUCKET_NAME: puppytalk
+      S3_PUBLIC_BASE_URL: http://localhost:9000/puppytalk
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: ap-northeast-2
     steps:
       - uses: actions/checkout@v4
+      # 공식 minio 이미지는 `server /data` 인자가 필요해 GH service로 못 띄우므로 docker run으로 기동.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/ready && break
+            sleep 1
+          done
+      - name: Create bucket
+        run: aws --endpoint-url http://localhost:9000 s3 mb s3://puppytalk || true
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin
+          AWS_DEFAULT_REGION: ap-northeast-2
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
