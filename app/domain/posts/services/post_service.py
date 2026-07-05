@@ -15,6 +15,7 @@ from app.common.exceptions import (
 )
 from app.core.config import settings
 from app.core.ids import new_ulid_str, parse_public_id_value
+from app.core.metrics import VIEW_BUFFER_FLUSHED_VIEWS
 from app.domain.likes.model import PostLikesModel
 from app.domain.media.model import MediaModel
 from app.domain.posts.schemas import PostCreateRequest, PostResponse, PostUpdateRequest
@@ -264,6 +265,7 @@ class PostService:
                 return
             from app.db.session import get_connection
 
+            flushed_views = 0
             try:
                 async with get_connection() as db:
                     async with db.begin():
@@ -278,10 +280,13 @@ class PostService:
                                 await PostsModel.increment_view_count_delta(
                                     parse_public_id_value(pk), delta, db=db
                                 )
+                                flushed_views += delta
             except Exception:
                 # DB 트랜잭션이 롤백된 경우에만 재병합해야 이중 집계가 없다.
                 await cls._merge_drain_into_buffer(redis_client, drain_key, VIEW_BUFFER_KEY)
                 raise
+            # 커밋 성공분만 계측(롤백 시 위에서 raise되어 여기 안 옴).
+            VIEW_BUFFER_FLUSHED_VIEWS.inc(flushed_views)
             # 커밋 성공 후에는 delta가 이미 durable하므로 drain 삭제 실패는 재병합하면 안 된다
             # (재병합 시 커밋분을 다시 더해 이중 집계). best-effort 삭제 — 실패해도 유실 없음.
             try:

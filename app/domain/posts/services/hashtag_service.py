@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.metrics import CACHE_EVENTS
 from app.domain.posts.schemas import TrendingHashtagResponse
 
 from ..repository import PostsModel
@@ -50,7 +51,9 @@ class HashtagService:
             cached = await redis_client.get(cls.CACHE_TRENDING_HASHTAGS_KEY)
             decoded = _decode_cached(cached)
             if decoded is not None:
+                CACHE_EVENTS.labels(cache="trending_hashtags", result="hit").inc()
                 return decoded
+            CACHE_EVENTS.labels(cache="trending_hashtags", result="miss").inc()
         except Exception as e:
             log.warning("trending_hashtags redis cache read failed (fallback to DB): %s", e)
             async with db.begin():

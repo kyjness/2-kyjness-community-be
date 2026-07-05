@@ -11,6 +11,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.common import ApiCode
 from app.core.config import settings
+from app.core.metrics import RATE_LIMIT_REJECTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,8 @@ class RateLimitMiddleware:
                 allowed = True
 
         if not allowed:
+            # key 접두사가 곧 한도 종류(login·signup_upload·global).
+            RATE_LIMIT_REJECTIONS.labels(limit=key.split(":", 1)[0]).inc()
             await _send_429(send, scope, code, retry_after_seconds)
             return
 

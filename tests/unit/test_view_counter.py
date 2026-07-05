@@ -147,12 +147,15 @@ async def test_flush_applies_deltas_and_releases_lock(monkeypatch):
         return True
 
     _patch_db(monkeypatch, on_delta)
+    flushed_before = ps.VIEW_BUFFER_FLUSHED_VIEWS._value.get()
     await ps.PostService.flush_view_counts_to_db(r)
 
     assert recorded == {p1: 2, p2: 1}
     assert await ps._get_buffer_pending(r, p1) == 0  # 버퍼 비워짐
     assert await ps._get_buffer_pending(r, p2) == 0
     assert ps.VIEW_FLUSH_LOCK_KEY not in r.kv  # 자기 락 해제됨
+    # 커밋된 view 합(p1 2 + p2 1)이 메트릭에 반영됐다.
+    assert ps.VIEW_BUFFER_FLUSHED_VIEWS._value.get() - flushed_before == 3
 
 
 async def test_flush_noop_when_lock_held():
