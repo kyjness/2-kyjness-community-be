@@ -60,6 +60,13 @@ class ChatMessage(Base):
             "room_id",
             text("created_at DESC"),
         ),
+        # 미읽음 카운트(#16)는 방별 미읽음 소수 행만 필요하다. 부분 인덱스로 읽음 메시지를
+        # 인덱스에서 배제해 방 전체 스캔 대신 미읽음만 도는 인덱스 스캔이 되게 한다.
+        Index(
+            "ix_chat_messages_unread",
+            "room_id",
+            postgresql_where=text("is_read = false"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)

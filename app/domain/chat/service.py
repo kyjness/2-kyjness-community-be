@@ -238,17 +238,29 @@ class ChatService:
             else_=ChatRoom.user1_id,
         ).label("peer_id")
 
-        last_msg_ranked = select(
-            ChatMessage.room_id.label("room_id"),
-            ChatMessage.content.label("last_content"),
-            ChatMessage.created_at.label("last_created_at"),
-            func.row_number()
-            .over(
-                partition_by=ChatMessage.room_id,
-                order_by=(ChatMessage.created_at.desc(), ChatMessage.id.desc()),
+        # 두 서브쿼리(최근메시지 윈도우·미읽음 집계)를 호출자 방으로 한정한다.
+        # 스코프가 없으면 전체 chat_messages를 스캔·집계해 메시지 누적에 비례해 비용이 커진다(#16).
+        my_room_ids = (
+            select(ChatRoom.id)
+            .where(or_(ChatRoom.user1_id == user_id, ChatRoom.user2_id == user_id))
+            .scalar_subquery()
+        )
+
+        last_msg_ranked = (
+            select(
+                ChatMessage.room_id.label("room_id"),
+                ChatMessage.content.label("last_content"),
+                ChatMessage.created_at.label("last_created_at"),
+                func.row_number()
+                .over(
+                    partition_by=ChatMessage.room_id,
+                    order_by=(ChatMessage.created_at.desc(), ChatMessage.id.desc()),
+                )
+                .label("rn"),
             )
-            .label("rn"),
-        ).subquery()
+            .where(ChatMessage.room_id.in_(my_room_ids))
+            .subquery()
+        )
         last_msg = (
             select(
                 last_msg_ranked.c.room_id,
@@ -265,6 +277,7 @@ class ChatService:
                 func.count(ChatMessage.id).label("unread_count"),
             )
             .where(
+                ChatMessage.room_id.in_(my_room_ids),
                 ChatMessage.is_read.is_(False),
                 ChatMessage.sender_id != user_id,
             )
