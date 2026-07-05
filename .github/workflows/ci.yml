@@ -53,7 +53,7 @@ jobs:
       # 스토리지 통합 테스트(test_storage_minio)는 이 env가 있으면 MinIO 대상으로 실행된다(ADR 0010).
       S3_ENDPOINT_URL: http://localhost:9000
       S3_BUCKET_NAME: puppytalk
-      S3_PUBLIC_BASE_URL: http://localhost:9000/puppytalk
+      S3_PUBLIC_BASE_URL: http://localhost:9000/puppytalk/media  # 객체가 media/ 아래 저장되므로 /media로 끝
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_REGION: ap-northeast-2

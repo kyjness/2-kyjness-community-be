@@ -39,7 +39,9 @@ def test_storage_save_and_delete_roundtrip():
     # 경로 ②(직접 multipart)가 쓰는 put_object → 저장·삭제가 MinIO에서 동작하는지.
     key = f"post/{new_uuid7()}.png"
     url = storage.storage_save(key, _PNG, "image/png")
-    assert settings.S3_BUCKET_NAME in url or url.startswith(settings.S3_PUBLIC_BASE_URL or "http")
+    # 공개 URL 경로는 실제 저장 키(media/ 프리픽스 포함)로 끝나야 리졸브된다 — 베이스가 /media를
+    # 빠뜨리면(예: .../puppytalk) URL이 media/ 없이 나와 404. 이 불변식으로 회귀를 막는다.
+    assert url.endswith(storage._s3_object_key(key)), url
     assert _get_object(key) == _PNG
 
     storage.storage_delete(key)
