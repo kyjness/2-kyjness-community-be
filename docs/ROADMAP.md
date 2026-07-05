@@ -42,7 +42,13 @@
   - [x] 단일 대표견 불변식을 부분 유니크 인덱스(`owner_id WHERE is_representative`)로 DB 승격 + 마이그레이션(dedup 후 생성). upsert 대표 배정을 `set_representative`로 정규화(인덱스 안전). 근거 [ADR 0011](adr/0011-representative-dog-view-relationship.md)
   - [x] 테스트: 관계·인덱스 DDL·트랩 회귀 단위 + 프로필 dogs·대표견 공존·전환·인덱스 거부 통합
   - [x] 마감: `/code-review`(정확성 0 · 정리 1건 → 미사용 단일-행 CRUD 제거) · `/security-review`(취약점 0)
-- [ ] **chat / notifications** — #16 미읽음 스캔 · #19 방 중복조회 · 실시간(ADR 0009)
+- [x] **chat / notifications** — #16 미읽음 스캔 · #19 방 중복조회 · 실시간(ADR 0009)
+  - [x] #16: `list_recent_rooms`의 `unread`·`last_msg` 서브쿼리를 `room_id IN (내 방)`으로 스코프(전역 테이블 스캔 제거) + 미읽음 부분 인덱스(`ix_chat_messages_unread ... WHERE is_read IS false`). 마이그레이션 009
+  - [x] #19: `get_room_peer_info` 방 이중 조회를 멤버십 접은 단일 쿼리로 병합. `list_room_messages`·`mark_room_read` 가드는 403 시맨틱 유지하며 2컬럼만 로드. `_is_room_member` 인라인화 제거
+  - [x] 별건(감사): `notifications` 목록을 offset+`count(*)` → comments 동형 id keyset `CursorPage`로 정합화(ADR 0002). 인덱스 드리프트(004 `created_at` ↔ ORM) 해소, `(user_id, id DESC)`+미읽음 부분 인덱스. 마이그레이션 010
+  - [x] **ADR 0009 실시간 전달** — 기구현된 WebSocket(chat)·SSE(notifications)×Redis Pub/Sub·fail-open·Celery 오프로드 설계를 소급 근거화
+  - [x] 테스트: chat 미읽음 집계·멤버십 가드, notifications keyset·total 부재·전체읽음(무커버리지 해소)
+  - [x] 마감: `/code-review`(정확성 2건 → 부분 인덱스 술어 정합·id keyset 전환) · `/security-review`(취약점 0)
 - [ ] **reports / admin** — #5 신고 목록 페이지네이션
 - [ ] **정리(글로벌)** — #13 UserBlock 중복 인덱스 · #18 `_PG_UUID` 중복 · #20 `__future__` 일관성
 
@@ -84,5 +90,11 @@
 | dogs 대표견 부분 유니크 인덱스·마이그레이션(#11) | `37f0b4db` |
 | dogs 대표견 테스트 보강 | `a232b7e6` |
 | dogs 미사용 단일-행 CRUD 제거(리뷰) | `d0a8bdbe` |
+| chat 미읽음·최근메시지 스캔 방 스코프(#16) | `a3080e33` |
+| chat get_room_peer_info 이중조회 병합(#19) | `065ab645` |
+| notifications keyset CursorPage·인덱스(ADR 0002) | `97489a93` |
+| ADR 0009 실시간 전달 근거화 | `b8052887` |
+| chat/notifications 테스트 보강 | `f6661b31` |
+| chat/notif 리뷰 반영(인덱스 술어·id keyset) | `d3a4a05e` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.

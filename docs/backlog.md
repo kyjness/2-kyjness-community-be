@@ -289,6 +289,8 @@ unread = (
 
 `WHERE ChatMessage.room_id IN (user's rooms)` 조건 없이 전체 `chat_messages` 테이블을 스캔해 GROUP BY한다. 메시지가 쌓일수록 성능이 저하된다.
 
+> **수정 완료(chat 도메인)**: `unread`·`last_msg` 두 서브쿼리를 `room_id IN (내 방)` 세미조인으로 한정하고, 미읽음 부분 인덱스 `ix_chat_messages_unread(room_id) WHERE is_read IS false`를 추가(술어를 쿼리의 `.is_(False)`와 동형으로 맞춰 플래너 매칭 보장). 실시간 전달 설계는 [ADR 0009](adr/0009-realtime-delivery.md).
+
 ---
 
 ## P3 — 낮은 심각도 (코드 품질, 마이너)
@@ -322,6 +324,8 @@ res = await db.execute(stmt)
 ```
 
 같은 `room_id`로 두 번 쿼리한다. 멤버 권한 확인과 데이터 조회를 단일 쿼리로 합칠 수 있다.
+
+> **수정 완료(chat 도메인)**: 멤버십을 projection `WHERE`에 접어넣고(`or_(user1==me, user2==me)`) `one_or_none()→None→403`으로 1쿼리화. `list_room_messages`·`mark_room_read`의 가드는 서로 다른 연산 앞의 authz 단계라 403 시맨틱상 유지하되 전체 엔티티 대신 두 컬럼만 로드하도록 좁힘. 별건: 감사 중 `notifications` 목록이 offset+`count(*)`로 ADR 0002를 벗어나 있어 comments와 동형 id keyset(CursorPage)으로 정합화하고 인덱스 드리프트(004↔ORM)를 해소.
 
 ---
 
