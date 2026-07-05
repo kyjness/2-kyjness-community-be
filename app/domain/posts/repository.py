@@ -431,6 +431,14 @@ class PostsModel:
         return list(result.scalars().unique().all())
 
     @classmethod
+    async def get_blocked_author_ids(cls, blocker_id: UUID, *, db: AsyncSession) -> set[UUID]:
+        """blocker가 차단한 유저 id 집합. 캐시된 트렌딩 풀에 차단 필터를 요청별로 오버레이할 때 사용."""
+        rows = await db.execute(
+            select(UserBlock.blocked_id).where(UserBlock.blocker_id == blocker_id)
+        )
+        return set(rows.scalars().all())
+
+    @classmethod
     async def update_post(
         cls,
         post_id: UUID,

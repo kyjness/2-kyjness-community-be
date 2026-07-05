@@ -115,7 +115,8 @@ Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
 | 인증 | `/v1/auth/*` | `domain/auth` | JWT Access/Refresh. Refresh는 **HttpOnly 쿠키 + Redis RTR**, 동시 refresh는 **Lua CAS**로 1건만 성공. 로그아웃은 Access `jti` 블랙리스트. bcrypt는 스레드 오프로딩 + pepper ([0003](docs/adr/0003-distributed-rate-limit.md)) |
 | 게시글 | `/v1/posts/*` | `domain/posts` | **커서** 무한 스크롤([0002](docs/adr/0002-cursor-pagination.md)), `q` 검색은 검증 후 **pg_trgm GIN** ILIKE(와일드카드 이스케이프), 해시태그 연동, 생성은 **멱등**([0008](docs/adr/0008-idempotency-keys.md)) |
 | 조회수 | `POST /v1/posts/{id}/view` | `domain/posts` + Redis | `SET NX EX` 중복 방지 → Redis 버퍼 누적 → 백그라운드 **flush(분산락 CAS)** ([0007](docs/adr/0007-view-count-buffering.md)) |
-| 인기 해시태그 | `GET /v1/posts/trending-hashtags` | `domain/posts` | 빈도 집계 + Redis `TypeAdapter` 캐시(TTL·락), fail-open DB 폴백 ([0004](docs/adr/0004-cache-strategy.md)) |
+| 인기 게시글 | `GET /v1/posts/trending` | `domain/posts` | time-decay 랭킹 + 3단 fallback. **차단 무관 랭킹 풀을 캐시**하고 차단은 요청별 오버레이(사용자별 캐시 폭발 회피) ([0004](docs/adr/0004-cache-strategy.md)) |
+| 인기 해시태그 | `GET /v1/posts/trending-hashtags` | `domain/posts` | 빈도 집계 + Redis `TypeAdapter` 캐시(TTL·락), fail-open DB 폴백. 캐시 로직은 `infra/cache.py` 공용 헬퍼 ([0004](docs/adr/0004-cache-strategy.md)) |
 | 댓글 | `/v1/comments/*` | `domain/comments` | 루트 **keyset** + 대댓글 배치 로드로 트리 조립(인메모리 슬라이스·하드리밋 제거) |
 | 좋아요 | `/v1/likes/*` | `domain/likes` | `ON CONFLICT ... RETURNING` 멱등, `like_count` 동기화, `post_is_visible` 경량 EXISTS |
 | 유저 | `/v1/users/*` | `domain/users` | 프로필·비밀번호·탈퇴·차단 목록/토글 |
@@ -140,15 +141,8 @@ Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
   hit/miss·조회수 flush).
 - **로그** — prod=구조화 JSON(stdout), dev=console. `request_id` 상관. 수집(stdout→CloudWatch)은 ECS 몫.
 - **컨테이너** — 멀티스테이지 `Dockerfile`, `uv sync --frozen --no-dev`, 비루트 유저, `HEALTHCHECK`=`/livez`.
-- **CI/CD** (`.github/workflows/ci.yml`):
-
-  | 잡 | 내용 |
-  |----|------|
-  | quality | `poe lint-check`·`format-check`·`typecheck`·`vulture-check` |
-  | test | `postgres:15` + `minio` 컨테이너로 `pytest` unit+integration (Redis 필요 테스트는 skip, 스토리지는 MinIO 대상 실행) |
-  | security | `pip-audit` (informational — 이미지 게이트를 막지 않음) |
-  | docker | quality·test 통과 시 build, `main` push면 **GHCR** push |
-
+- **CI/CD** (`.github/workflows/ci.yml`) — quality(lint·format·type·vulture) · test(`postgres:15`+`minio`로
+  unit+integration) · security(`pip-audit`) · docker(통과 시 build, `main` push면 **GHCR** push)를 병렬 잡으로.
   실제 배포 대상(ECS)·인프라(ALB·RDS·ElastiCache·CloudWatch)는 인프라 레포(Terraform)에서 관리합니다.
 
 ---

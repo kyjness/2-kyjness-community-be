@@ -2,7 +2,9 @@
 
 - **상태**: 채택됨 (Accepted)
 - **관련 코드**: `app/domain/auth/service.py`(`user:status` 캐시),
-  `app/api/dependencies/auth.py`(`get_current_user`)
+  `app/api/dependencies/auth.py`(`get_current_user`),
+  `app/infra/cache.py`(얇은 get-or-set 헬퍼),
+  `app/domain/posts/services/hashtag_service.py`·`trending_post_service.py`(트렌딩 읽기 폭주 캐시)
 
 ## 맥락 (Context)
 
@@ -45,3 +47,17 @@
 
 - **범용/데코레이터 캐시 프레임워크**: 캐시가 필요한 지점이 소수라 얇은 헬퍼로 충분. 추상화 자체가 부채.
 - **전면 write-through 캐싱**: 대부분 조회는 DB로 충분히 빠르다. 캐시는 *증명된 핫 경로*에만.
+
+## 구현 노트 — 트렌딩 읽기 폭주 캐시
+
+결정 1·4를 인증 상태 밖의 대표 읽기 폭주 경로(트렌딩)로 확장하되, **같은 원칙**을 지킨다.
+
+- **얇은 공용 헬퍼(`app/infra/cache.py::get_or_compute_json`).** get→miss 시 **분산 락**으로 단일
+  워커만 재계산(thundering herd 방지)하고 나머지는 짧게 대기 후 채워진 값을 읽는다. 락 해제는 값
+  비교 **CAS**(남의 락 미삭제), Redis 부재·오류는 전부 **fail-open**으로 loader(DB) 직조회.
+  `TypeAdapter`로 직렬화 계약을 고정하고 스키마 불일치는 캐시 미스로 처리. 데코레이터가 아닌 명시적
+  호출이라 결정 4("범용 추상화 배제")를 지킨다. 해시태그·트렌딩 게시글이 이 하나를 공유한다.
+- **트렌딩 게시글 — 사용자 독립 랭킹만 캐시.** 랭킹 산정(time-decay + 3단 fallback)은 무겁지만
+  **차단 무관**이라 `(창·카테고리)` 키로 풀을 캐시하고(사용자별 키 폭발 회피, TTL 300s), 유저별
+  **차단 필터는 요청마다 오버레이**한다. 풀은 `limit`의 headroom 배수(30)만큼 담아 차단 저자가
+  상위에 있어도 `limit`을 채운다. `is_liked`는 응답에 없어 사용자 상태가 캐시에 섞이지 않는다.
