@@ -1,5 +1,4 @@
 # 알림 오프로딩 Job: DB 조회·멱등·Redis Pub/Sub(SSE) 재전달. Celery 태스크는 tasks/ 에서 호출.
-from __future__ import annotations
 
 import json
 import logging

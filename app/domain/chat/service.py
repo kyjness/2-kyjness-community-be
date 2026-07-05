@@ -1,5 +1,4 @@
 # 1:1 DM 비즈니스 로직. 방 upsert·메시지 저장·Redis 팬아웃·커서 목록.
-from __future__ import annotations
 
 import json
 import logging

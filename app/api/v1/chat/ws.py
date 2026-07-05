@@ -1,5 +1,4 @@
 # 1:1 DM WebSocket. ?token= Access JWT, 메시지는 ChatService·Redis 팬아웃.
-from __future__ import annotations
 
 import json
 import logging

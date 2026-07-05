@@ -1,5 +1,4 @@
 # 미디어 비즈니스 로직. 순수 데이터 반환·커스텀 예외. HTTP·ApiResponse 없음. Full-Async.
-from __future__ import annotations
 
 import asyncio
 import logging
@@ -381,6 +380,7 @@ class MediaService:
             return 0
         r = cast(Any, redis) if redis is not None else None
         try:
+
             async def _fetch(after_id: UUID | None, limit: int) -> list[Image]:
                 return await MediaModel.get_orphan_images_older_than(
                     older_than_hours=24, db=db, limit=limit, after_id=after_id

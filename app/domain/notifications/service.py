@@ -1,5 +1,4 @@
 # 알림 애플리케이션 서비스: PostgreSQL 영속화, 커밋 이후 Redis Pub/Sub, SSE 구독 스트림.
-from __future__ import annotations
 
 import asyncio
 import json

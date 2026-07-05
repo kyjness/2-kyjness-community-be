@@ -1,5 +1,4 @@
 # 로컬/S3 파일 스토리지. STORAGE_BACKEND에 따라 분기.
-from __future__ import annotations
 
 import re
 from pathlib import Path

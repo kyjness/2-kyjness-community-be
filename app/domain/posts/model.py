@@ -1,5 +1,4 @@
 # 게시글·post_images ORM 정의. 쿼리/트랜잭션 로직은 repository.py.
-from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID
@@ -43,7 +42,9 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    posts: Mapped[list[Post]] = relationship("Post", back_populates="category", lazy="raise_on_sql")
+    posts: Mapped[list["Post"]] = relationship(
+        "Post", back_populates="category", lazy="raise_on_sql"
+    )
 
 
 class Hashtag(Base):
@@ -62,7 +63,7 @@ class Hashtag(Base):
         ),
     )
 
-    posts: Mapped[list[Post]] = relationship(
+    posts: Mapped[list["Post"]] = relationship(
         "Post",
         secondary=post_hashtags,
         back_populates="hashtags",
@@ -121,7 +122,7 @@ class Post(Base):
     category: Mapped[Category | None] = relationship(
         "Category", back_populates="posts", foreign_keys=[category_id], lazy="raise_on_sql"
     )
-    post_images: Mapped[list[PostImage]] = relationship(
+    post_images: Mapped[list["PostImage"]] = relationship(
         "PostImage",
         back_populates="post",
         order_by="PostImage.id",

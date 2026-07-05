@@ -1,5 +1,4 @@
 # 강아지 프로필 비즈니스 로직. 순수 데이터/커스텀 예외. Full-Async.
-from __future__ import annotations
 
 from collections.abc import Sequence
 from uuid import UUID

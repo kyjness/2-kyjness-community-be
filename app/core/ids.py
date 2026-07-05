@@ -1,6 +1,5 @@
 # 엔티티 PK: UUID v7(PostgreSQL native). 비엔티티 토큰·추적 ID는 ULID 문자열 유지(jti, request_id 등).
 # 공개 ID는 Base62(UUID 인코딩). UUID 문자열도 수용하되 레거시 ULID 공개 ID는 더 이상 받지 않는다.
-from __future__ import annotations
 
 from typing import cast
 from uuid import UUID

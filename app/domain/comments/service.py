@@ -1,5 +1,4 @@
 # 댓글 비즈니스 로직. Full-Async. 생성/삭제 시 게시글 comment_count 조정은 서비스에서 조율.
-from __future__ import annotations
 
 from uuid import UUID
 

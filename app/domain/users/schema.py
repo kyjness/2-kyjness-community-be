@@ -1,5 +1,4 @@
 # 사용자 요청/응답 DTO. 닉네임·비밀번호 검증은 상단 헬퍼 + Annotated로 응집.
-from __future__ import annotations
 
 import re
 from typing import Annotated, Any
@@ -118,7 +117,7 @@ class UserAvailabilityQuery(BaseSchema):
         return v
 
     @model_validator(mode="after")
-    def at_least_one(self) -> UserAvailabilityQuery:
+    def at_least_one(self) -> "UserAvailabilityQuery":
         if not (self.email or self.nickname):
             raise ValueError(ApiCode.INVALID_REQUEST.name)
         return self
@@ -138,7 +137,7 @@ class UpdateUserRequest(BaseSchema):
     )
 
     @model_validator(mode="after")
-    def at_least_one(self) -> UpdateUserRequest:
+    def at_least_one(self) -> "UpdateUserRequest":
         has_nickname = self.nickname is not None
         has_profile_image_field = "profile_image_id" in self.model_fields_set
         has_dogs = self.dogs is not None

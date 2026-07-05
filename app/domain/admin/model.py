@@ -1,5 +1,4 @@
 # 관리자 신고 triage 피드 조회. 신고된 게시글·댓글을 DB-side UNION ALL로 합쳐 정렬·페이지한다.
-from __future__ import annotations
 
 from uuid import UUID
 

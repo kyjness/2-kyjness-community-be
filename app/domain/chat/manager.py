@@ -1,5 +1,4 @@
 # 워커 로컬 WebSocket 세션. 유저당 다중 소켓(탭·기기). 분산 전달은 Redis → 본 모듈 send.
-from __future__ import annotations
 
 import asyncio
 import logging

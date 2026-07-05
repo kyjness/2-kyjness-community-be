@@ -1,5 +1,4 @@
 # 사용자 비즈니스 로직. 순수 데이터 반환·커스텀 예외. 프로필 이미지는 users.profile_image_id만 갱신(고아 정리는 Media sweeper). Full-Async.
-from __future__ import annotations
 
 from uuid import UUID
 

@@ -1,5 +1,4 @@
 # 1:1 채팅방·메시지 ORM. user1_id < user2_id 정규화 + 복합 유니크로 동시 생성 레이스 방지.
-from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID

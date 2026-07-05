@@ -1,5 +1,4 @@
 # 알림 API 스키마. BaseSchema로 camelCase 직렬화.
-from __future__ import annotations
 
 from datetime import datetime
 

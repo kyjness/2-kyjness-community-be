@@ -1,5 +1,4 @@
 # Celery 앱: Redis broker + result backend, 큐 라우팅, 워커 프로세스 DB 풀 초기화.
-from __future__ import annotations
 
 from celery import Celery
 from celery.signals import worker_process_init, worker_process_shutdown

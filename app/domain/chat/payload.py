@@ -1,5 +1,4 @@
 # WS Raw JSON → Pydantic 검증. TypeAdapter 단일 인스턴스로 스키마 재사용.
-from __future__ import annotations
 
 import logging
 from typing import Any

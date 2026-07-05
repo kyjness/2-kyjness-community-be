@@ -1,5 +1,4 @@
 # 알림 REST + SSE. 목록/읽음은 ApiResponse, 스트림은 text/event-stream.
-from __future__ import annotations
 
 from typing import Annotated, cast
 

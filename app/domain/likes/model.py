@@ -1,6 +1,5 @@
 # Likes 도메인 모델. 게시글 좋아요(PostLike) 테이블 및 CRUD. AsyncSession.
 # comment_likes·CommentLikesModel은 comments 도메인에 유지(순환 참조 방지).
-from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID

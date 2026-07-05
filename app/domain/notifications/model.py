@@ -1,5 +1,4 @@
 # 알림 영속 모델. 수신자·종류·관련 엔티티·읽음 시각. CUD는 단일 트랜잭션 내에서 호출.
-from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Any, cast

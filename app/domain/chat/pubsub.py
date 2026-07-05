@@ -1,5 +1,4 @@
 # DM 채팅 분산 브로드캐스트: 단일 Pub/Sub 채널 + envelope에 수신자 UUID. 워커마다 구독 루프 1개.
-from __future__ import annotations
 
 import asyncio
 import json

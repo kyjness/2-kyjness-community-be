@@ -1,5 +1,4 @@
 # 1:1 DM REST: 방별 메시지 커서 페이지네이션.
-from __future__ import annotations
 
 from typing import Annotated
 

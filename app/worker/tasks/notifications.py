@@ -1,5 +1,4 @@
 # 알림 Celery 태스크(동기 시그니처 → async_bridge).
-from __future__ import annotations
 
 import logging
 

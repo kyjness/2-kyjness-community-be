@@ -1,6 +1,5 @@
 # Likes 도메인 서비스. Full-Async. IntegrityError(23505) 시 AlreadyLikedException으로 변환.
 # 하나의 요청당 하나의 async with db.begin()으로 묶어 Race Condition 방지.
-from __future__ import annotations
 
 from uuid import UUID
 

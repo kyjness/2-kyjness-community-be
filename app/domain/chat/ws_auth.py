@@ -1,5 +1,4 @@
 # WebSocket 쿼리 ?token= Access JWT 검증. HTTP Depends와 동일한 sub·jti 블랙리스트 규칙.
-from __future__ import annotations
 
 import logging
 from typing import Any, cast

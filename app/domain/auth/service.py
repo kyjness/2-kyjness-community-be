@@ -1,6 +1,5 @@
 # 인증 비즈니스 로직. 순수 데이터 반환·커스텀 예외. Redis 연동 캡슐화. Full-Async.
 # Redis 기반 Refresh Token 저장 + Access Token 블랙리스트(로그아웃). Full-Async.
-from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime

@@ -1,5 +1,4 @@
 # 신고 테이블 접근. Report ORM은 app.users.model에 정의됨.
-from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime

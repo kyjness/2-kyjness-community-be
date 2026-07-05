@@ -1,5 +1,4 @@
 # 채팅 WS·REST DTO. 수신(send)·송신(broadcast) 분리, 공개 ID는 PublicId(Base62).
-from __future__ import annotations
 
 from datetime import date as DateType
 from typing import Literal

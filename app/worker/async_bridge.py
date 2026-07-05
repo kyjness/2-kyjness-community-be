@@ -1,5 +1,4 @@
 # Celery(sync) 워커 ↔ FastAPI(async) SQLAlchemy 브릿지. 프로세스당 단일 이벤트 루프 유지.
-from __future__ import annotations
 
 import asyncio
 import logging

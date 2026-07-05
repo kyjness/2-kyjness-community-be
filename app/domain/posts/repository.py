@@ -1,5 +1,4 @@
 # 게시글·post_images 데이터 접근. ORM은 .model 참조.
-from __future__ import annotations
 
 from datetime import timedelta
 from uuid import UUID
