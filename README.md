@@ -1,11 +1,59 @@
 # PuppyTalk Backend
 
-**PuppyTalk**는 반려견을 키우는 사람들을 위한 커뮤니티 서비스의 백엔드로, **FastAPI** 기반 **REST API**와 **WebSocket(DM)**·**SSE(알림)** 를 제공하는 서버입니다. 
+반려견 커뮤니티 서비스의 백엔드. **FastAPI(Full-Async)** 기반 REST API에 **WebSocket(DM)**·
+**SSE(알림)** 를 더한 서버입니다.
+
+이 저장소의 초점은 기능의 개수가 아니라 **"현실적 트래픽을 가정한 운영 등급 백엔드 설계"** 입니다.
+초당 수백~수천 조회의 핫스팟, 멀티 인스턴스(3~10대), 무중단 배포를 **의도적으로 전제**하고,
+그 전제로 정당화되는 복잡도만 남겼습니다. **정당화되지 않는 과잉은 의식적으로 걷어냈고**, 그 판단
+근거를 전부 [ADR](docs/adr/)로 남겼습니다. → *"쓸 데와 안 쓸 데를 구분했다"* 가 핵심입니다.
 
 **관련 링크**
 
-- **프론트엔드**: [PuppyTalk Frontend](https://github.com/kyjness/2-kyjness-community-fe)
-- **인프라·배포**: [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra)
+- 프론트엔드: [PuppyTalk Frontend](https://github.com/kyjness/2-kyjness-community-fe)
+- 인프라·배포: [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra) (Terraform·ECS)
+
+---
+
+## 설계 논지 — 정당화된 복잡도
+
+모든 설계 결정은 아래 **운영 봉투(Operating Envelope)** 위에서만 정당화됩니다. 봉투 밖은 과잉으로
+판정해 채택하지 않았습니다. 전문은 [`docs/00-operating-envelope-and-scope.md`](docs/00-operating-envelope-and-scope.md).
+
+| 축 | 전제 | 설계 함의 |
+|----|------|----------|
+| 핫스팟 | 인기글 1건에 **초당 수백~수천 조회** | 조회 경로 최적화 1순위 → 버퍼링·캐시 |
+| 쓰기 | 신규 write는 초당 수십 | 강정합성 write는 정직하게 트랜잭션으로 |
+| 서버 | 멀티 인스턴스 **3~10대** | 상태는 인스턴스 밖(Redis/DB), 로컬 상태 금지 |
+| 배포 | 무중단 롤링 / 블루-그린 | 마이그레이션 하위호환, graceful shutdown, 헬스 분리 |
+| 가용성 | **99.9%** | 외부 I/O는 fallback 우선(가용성 > 순간 정합성) |
+
+**상한(넘으면 과잉으로 판정 — 일부러 하지 않은 것):** 멀티리전 · 금융권 강정합성 · 99.99%+ ·
+초당 수만 건 *신규 write* · exactly-once 배송 · **AI 기능**(이번 범위에서 완전히 배제).
+
+### 핵심 설계 결정 (ADR)
+
+각 ADR은 *맥락 → 결정 → 트레이드오프 → 고려한 대안 → **일부러 하지 않은 것*** 순으로 남겼습니다.
+마지막 "안 한 것"이 정당화된 복잡도의 핵심 전시물입니다.
+
+| # | 결정 | 무엇을 안 했나 |
+|---|------|----------------|
+| [0001](docs/adr/0001-identifier-strategy.md) | 식별자 3분할 — 내부 PK `UUIDv7` / 공개 ID `Base62` / `ULID`(jti·request_id) | 순차 정수 PK 노출(열거·IDOR 표면) |
+| [0002](docs/adr/0002-cursor-pagination.md) | 목록 = **keyset 커서**, `total` 제거 | offset 페이지네이션(deep-offset 스캔 비용) |
+| [0003](docs/adr/0003-distributed-rate-limit.md) | 분산 Rate Limit — Redis **Lua fixed-window** + smart fail-open | 인스턴스 로컬 카운터(멀티 인스턴스에서 무의미) |
+| [0004](docs/adr/0004-cache-strategy.md) | 캐시는 **읽기 폭주 경로만**, fail-open | 전방위 캐시(무효화 복잡도 대비 이득 없음) |
+| [0005](docs/adr/0005-resilience-no-circuit-breaker.md) | 복원력 표준 = **fail-open** | Circuit Breaker(이 규모엔 상태 관리 부담이 과잉) |
+| [0006](docs/adr/0006-observability.md) | 구조화 로그 + 얇은 **RED 메트릭** + 헬스 분리 | 분산 트레이싱 백엔드(request_id 상관으로 충분) |
+| [0007](docs/adr/0007-view-count-buffering.md) | 조회수 = Redis **버퍼링 + 비동기 flush + 분산락(CAS)** | 매 조회 DB write(핫스팟 폭발) |
+| [0008](docs/adr/0008-idempotency-keys.md) | POST 멱등성 — `X-Idempotency-Key` + 결과 캐시 | 중복 제출 방치 / 클라이언트 책임 전가 |
+| [0009](docs/adr/0009-realtime-delivery.md) | 실시간 = WebSocket·SSE × **Redis Pub/Sub** fan-out, fail-open | 인스턴스 고정(sticky) 커넥션, 브로커 상시 의존 |
+| [0010](docs/adr/0010-storage-backend-strategy.md) | 스토리지 = **S3 API 단일 경로** + dev/CI는 MinIO 패리티 | 로컬 디스크 백엔드(코드 분기·prod 불일치) |
+| [0011](docs/adr/0011-representative-dog-view-relationship.md) | 대표견 = 전용 **뷰 관계** + 부분 유니크 인덱스 | 컬렉션 필터 로드(부분 컬렉션 트랩) |
+| [0012](docs/adr/0012-admin-report-feed-pagination.md) | 관리자 신고 피드 = DB-side **UNION ALL** + offset·total 유지 | 커서 강제(0002의 *의도적 예외* — 저트래픽·변동 정렬·total 필요) |
+
+> 횡단 관심사 종합은 [`docs/01-architecture.md`](docs/01-architecture.md), 리팩토링 진행·완료
+> 이력은 [`docs/ROADMAP.md`](docs/ROADMAP.md), 버그·최적화 백로그와 각 항목 근거는
+> [`docs/backlog.md`](docs/backlog.md)에 있습니다.
 
 ---
 
@@ -13,348 +61,169 @@
 
 | 구분 | 기술 |
 |------|------|
-| **언어** | Python 3.11+ |
-| **패키지 관리** | uv |
-| **프레임워크** | FastAPI, Starlette |
-| **실시간** | WebSocket |
-| **서버** | Uvicorn, Gunicorn |
-| **DB** | PostgreSQL, psycopg3 (async) |
-| **ORM** | SQLAlchemy 2.x |
-| **마이그레이션** | Alembic |
-| **캐시·메시징** | Redis |
-| **Celery 백그라운드 작업(선택)** | 알림 `dispatch` 등 큐 오프로딩. FastAPI `async/await`와 별개 (`CELERY_ENABLED`, `app/worker/`, `uv run poe celery-worker`) |
-| **스토리지** | S3 단일 경로 — AWS S3 / dev·CI는 MinIO (boto3, `run_in_threadpool`로 동기 I/O 오프로딩) |
-| **검증** | Pydantic v2 |
-| **식별자** | PostgreSQL `uuid`, UUID v7, Base62(공개 ID), ULID(`jti`·요청 ID 등) |
-| **인증** | JWT (PyJWT), bcrypt |
-| **서버리스(선택)** | Mangum (AWS Lambda ASGI 어댑터) |
+| 언어 / 패키지 | Python 3.11+ · uv |
+| 프레임워크 | FastAPI · Starlette · Pydantic v2 |
+| 서버 | Uvicorn (dev) · Gunicorn + Uvicorn worker (prod) |
+| DB / ORM | PostgreSQL · psycopg3(async) · SQLAlchemy 2.x · Alembic |
+| 캐시·메시징 | Redis (asyncio) |
+| 비동기 작업(선택) | Celery — 알림 dispatch 등 큐 오프로딩 (`CELERY_ENABLED`) |
+| 스토리지 | S3 단일 경로 — 실서비스 AWS S3 / dev·CI는 MinIO (boto3, `run_in_threadpool`) |
+| 인증 | JWT(PyJWT) · bcrypt(+ pepper) |
+| 실시간 | WebSocket(DM) · SSE(알림) × Redis Pub/Sub |
+| 관측성 | Prometheus 메트릭 · 구조화 JSON 로그 · `/livez`·`/readyz` |
+| 컨테이너·CI | Docker(멀티스테이지) · GitHub Actions · GHCR |
 
 ---
 
-## 폴더 구조
+## 아키텍처 · 폴더 구조
 
-**app/** 단일 패키지 아래에 공용 레이어(api·common·core·db·infra)와 **domain/** 기능 도메인이 계층화되어 있습니다. 대부분의 도메인은 **router → service → model → schema** 순으로 요청이 흐르며, `posts` 등 일부는 **repository**·하위 **routers/**·**services/**·**schemas/** 로 세분화합니다.
-
-**Import 규칙**: 도메인 코드는 `from app.domain.posts.repository import PostsModel`처럼 **`app.domain.<영역>`** 경로만 사용합니다. (`app.posts` 등 축약 별칭은 사용하지 않음.)
+`app/` 단일 패키지 아래에 공용 레이어(`api`·`common`·`core`·`db`·`infra`)와 기능 도메인(`domain/`)이
+계층화돼 있습니다. 도메인은 **router → service → \[repository →] model → schema** 로 요청이 흐릅니다.
+도메인 import는 항상 `app.domain.<영역>` 경로만 사용합니다.
 
 ```
-2-kyjness-community-be/
-├── app/                                    # 백엔드 패키지 루트
-│   ├── __init__.py                         # 패키지 루트(별칭 주입 없음)
-│   ├── main.py                             # FastAPI 앱, lifespan(설정 검증·조회수 flush·채팅 Redis 구독), 미들웨어·라우터
-│   ├── api/                                # HTTP·WS 라우터 조립
-│   │   ├── v1/                             # /v1 prefix: v1_router, 도메인 라우터 include + chat REST·WS
-│   │   │   └── chat/                       # DM: rest.py(/v1/chat/*), ws.py(/v1/ws/chat)
-│   │   └── dependencies/                   # 인증, DB 세션(get_master_db/get_slave_db), 권한, 쿼리 파싱
-│   ├── common/                             # API 코드·Enum·ApiResponse·validators·exceptions·로깅
-│   ├── core/                               # config, ids, security, exception_handlers, cleanup, openapi_camel 등
-│   │   └── middleware/                     # RequestId, ProxyHeaders, RateLimit, GZip, AccessLog, SecurityHeaders
-│   ├── db/                                 # SQLAlchemy Base·엔진·세션·model_registry
-│   ├── domain/                             # 기능별 도메인 (router → service [→ repository] → model → schema)
-│   │   ├── admin/                          # 관리자: 신고된 게시글·댓글 통합 목록, 블라인드/신고 무시/삭제, 유저 정지·해제
-│   │   ├── auth/                           # 회원가입·로그인·로그아웃·리프레시
-│   │   ├── chat/                           # 1:1 DM: 방·메시지, WebSocket·Redis Pub/Sub
-│   │   ├── comments/                       # 댓글 CRUD·페이지네이션
-│   │   ├── dogs/                           # 강아지 프로필
-│   │   ├── likes/                          # 게시글·댓글 좋아요
-│   │   ├── media/                          # 이미지 업로드(S3/MinIO), image_policy, Redis Upload Token, sweeper
-│   │   ├── notifications/                  # 알림 영속(PostgreSQL)·Redis Pub/Sub·SSE 스트림(/v1/notifications/*)
-│   │   ├── posts/                          # 게시글: routers/·services/·repository·schemas, 카테고리·해시태그·트렌드
-│   │   ├── reports/                        # 신고 접수(POST/COMMENT)·누적 Insert·자동 블라인드
-│   │   └── users/                          # 프로필·비밀번호·탈퇴·차단 목록/토글
-│   ├── infra/                              # Redis(Refresh·RateLimit·채팅·캐시), storage(S3/MinIO)
-│   └── worker/                             # Celery 워커 태스크(선택). 알림 delivery·dispatch 재시도 등
-├── tests/                                  # unit/(DB 불필요), integration/(PostgreSQL·pg_trgm)
-├── docs/                                   # 아키텍처·API 코드·인프라 설계 문서
-├── migrations/                             # Alembic env.py, versions(리비전)
-│   ├── env.py                              # Alembic 실행 환경(경로/엔진/metadata) 구성, offline/online 모드
-│   └── versions/                           # 001~007 등 (baseline, categories, chat DM, notifications, pg_trgm 검색 …)
-├── scripts/                                # pip-audit용 requirements export 등
-├── .github/workflows/                      # CI/CD (deploy.yml 등)
-├── Jenkinsfile                             # Jenkins 파이프라인
-├── mkdocs.yml                              # MkDocs Material 설정
-├── alembic.ini                             # Alembic 설정 (script_location=migrations)
-├── pyproject.toml                          # PEP 621 의존성·optional-dev·Poe 태스크
-└── Dockerfile                              # uv 멀티스테이지 빌드·Gunicorn+Uvicorn
+app/
+├── main.py            # FastAPI 앱, lifespan(설정 검증·조회수 flush·채팅 Redis 구독), 미들웨어·라우터
+│                      # 헬스/관측성 엔드포인트: /v1/health · /livez · /readyz · /metrics
+├── api/
+│   ├── v1/            # /v1 prefix — 도메인 라우터 include + chat REST·WS
+│   └── dependencies/  # 인증, DB 세션(get_master_db/get_slave_db), 권한, 쿼리 파싱
+├── common/            # ApiResponse·ApiCode·Enum·validators·exceptions·로깅
+├── core/
+│   ├── config.py      # 설정 + 환경별 프로덕션 가드
+│   ├── metrics.py     # 도메인 메트릭(rate-limit 429·캐시 hit/miss·조회수 flush)
+│   └── middleware/    # RequestId · ProxyHeaders · RateLimit · GZip · AccessLog · Metrics · SecurityHeaders
+├── db/                # SQLAlchemy Base·엔진·세션 (PG_UUID 등 공용 타입)
+├── domain/            # admin · auth · chat · comments · dogs · likes · media
+│                      # · notifications · posts · reports · users
+├── infra/             # Redis(refresh·rate limit·채팅·캐시), storage(S3/MinIO)
+└── worker/            # Celery 태스크(선택)
+
+docs/                  # 00(봉투)·01(아키텍처)·adr/·ROADMAP·backlog
+migrations/            # Alembic env.py + versions/
+tests/                 # unit/(DB 불필요) · integration/(PostgreSQL + pg_trgm)
+Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
+.github/workflows/ci.yml
 ```
 
 ---
 
-## API 문서
+## 기능 맵
 
-FastAPI는 API 프리픽스가 `/v1`이므로, **문서·OpenAPI JSON도 `/v1` 뒤에 붙는 경로**입니다. 로컬과 AWS에 배포한 환경 모두 동일한 패턴입니다.
+| 기능 | 대표 엔드포인트 | 구현 위치 | 핵심 포인트 |
+|------|----------------|-----------|-------------|
+| 인증 | `/v1/auth/*` | `domain/auth` | JWT Access/Refresh. Refresh는 **HttpOnly 쿠키 + Redis RTR**, 동시 refresh는 **Lua CAS**로 1건만 성공. 로그아웃은 Access `jti` 블랙리스트. bcrypt는 스레드 오프로딩 + pepper ([0003](docs/adr/0003-distributed-rate-limit.md)) |
+| 게시글 | `/v1/posts/*` | `domain/posts` | **커서** 무한 스크롤([0002](docs/adr/0002-cursor-pagination.md)), `q` 검색은 검증 후 **pg_trgm GIN** ILIKE(와일드카드 이스케이프), 해시태그 연동, 생성은 **멱등**([0008](docs/adr/0008-idempotency-keys.md)) |
+| 조회수 | `POST /v1/posts/{id}/view` | `domain/posts` + Redis | `SET NX EX` 중복 방지 → Redis 버퍼 누적 → 백그라운드 **flush(분산락 CAS)** ([0007](docs/adr/0007-view-count-buffering.md)) |
+| 인기 해시태그 | `GET /v1/posts/trending-hashtags` | `domain/posts` | 빈도 집계 + Redis `TypeAdapter` 캐시(TTL·락), fail-open DB 폴백 ([0004](docs/adr/0004-cache-strategy.md)) |
+| 댓글 | `/v1/comments/*` | `domain/comments` | 루트 **keyset** + 대댓글 배치 로드로 트리 조립(인메모리 슬라이스·하드리밋 제거) |
+| 좋아요 | `/v1/likes/*` | `domain/likes` | `ON CONFLICT ... RETURNING` 멱등, `like_count` 동기화, `post_is_visible` 경량 EXISTS |
+| 유저 | `/v1/users/*` | `domain/users` | 프로필·비밀번호·탈퇴·차단 목록/토글 |
+| 강아지 | `/v1/dogs/*` | `domain/dogs` | 대표견은 전용 뷰 관계 + 부분 유니크 인덱스로 1마리 불변식 보장 ([0011](docs/adr/0011-representative-dog-view-relationship.md)) |
+| 채팅(DM) | REST `/v1/chat/*` · WS `/v1/ws/chat` | `domain/chat` | WebSocket + **Redis Pub/Sub fan-out**(멀티 인스턴스), 짧은 트랜잭션으로 커넥션 풀 보호 ([0009](docs/adr/0009-realtime-delivery.md)) |
+| 알림 | SSE `/v1/notifications/stream` | `domain/notifications` | 커밋 후 Redis 채널 발행 → **SSE** 스트림. Redis 미구성 시 스트림 503, DB 기록은 유지 |
+| 이미지 업로드 | `/v1/media/*` | `domain/media` + `infra/storage` | 선업로드 → 본문/가입 연결. 가입 전은 **1회성 Upload Token**, 멱등 지원, 고아 이미지 sweeper ([0010](docs/adr/0010-storage-backend-strategy.md)) |
+| 신고·모더레이션 | `/v1/reports/*` · `/v1/admin/*` | `domain/reports`·`domain/admin` | 신고는 항상 Insert 누적(감사), 임계 초과 자동 블라인드. 관리자 신고 피드는 DB-side **UNION ALL** ([0012](docs/adr/0012-admin-report-feed-pagination.md)) |
 
-| 환경 | Swagger UI (요청 테스트) | ReDoc (읽기용) | OpenAPI JSON |
-|------|-------------------------|----------------|--------------|
-| **로컬** | http://localhost:8000/v1/docs | http://localhost:8000/v1/redoc | http://localhost:8000/v1/openapi.json |
-| **프로덕션 (AWS)** | https://api.puppytalk.shop/v1/docs | https://api.puppytalk.shop/v1/redoc | https://api.puppytalk.shop/v1/openapi.json |
-
-배포 서버 루트 예시: [https://api.puppytalk.shop/v1/](https://api.puppytalk.shop/v1/) — 응답 `data.docs`에도 `/v1/docs` 안내가 포함됩니다.
-
----
-
-## 기능 정리
-
-이 섹션은 “무슨 기능을, 어떤 방식으로 구현했는지”를 **엔드포인트·도메인 코드 위치·핵심 구현 포인트** 기준으로 정리했습니다. (상세는 `app/domain/*` 및 `docs/` 아키텍처 문서 — [architecture.md](docs/architecture.md) 허브에서 주제별 문서로 연결)
-
-| 기능 | 대표 엔드포인트 | 구현 위치(도메인/라우터) | 구현 방식(핵심 포인트) |
-|------|------------------|--------------------------|------------------------|
-| **인증(회원가입/로그인/로그아웃/리프레시)** | `/v1/auth/*` | `app/domain/auth/`, `app/api/v1/*` | **JWT Access/Refresh**를 사용하고, Refresh는 **HttpOnly 쿠키 + Redis 기반 RTR**로 회전합니다. 동시 `/auth/refresh`는 Redis **Lua CAS**로 1건만 성공하도록 원자성을 확보했고, 로그아웃은 Access의 **`jti`를 Redis 블랙리스트**에 등록해 TTL 동안 즉시 무효화했습니다. 비밀번호 해시는 bcrypt를 **`asyncio.to_thread`**로 오프로딩했고, 신규/변경 시 **`PASSWORD_PEPPER`**를 적용해 보안 강도를 보강했습니다. |
-| **게시글(피드/검색/상세/작성·수정·삭제)** | `/v1/posts/*` | `app/domain/posts/` | 피드는 **커서(공개 ID)·`size`·`has_more`** 무한 스크롤. `q` 검색은 `repository.validate_search_query`(한글·숫자 **2자 이상**, 영문 **3자 이상**, `#태그` 정확 매칭) 후 **pg_trgm GIN** ILIKE. `category_id` 필터, 작성 시 **해시태그** 연동. 생성은 **`X-Idempotency-Key`** 멱등. 조회수는 `POST /v1/posts/{id}/view` 분리. |
-| **인기 게시글** | `GET /v1/posts/trending` | `app/domain/posts/services/trending_post_service.py` | 최근 N시간 좋아요·시간 가중 트렌드. sparse 시 기간·전체 like-order **fallback**. (Redis 캐시는 TODO) |
-| **인기 해시태그** | `GET /v1/posts/trending-hashtags` | `app/domain/posts/services/hashtag_service.py` | 최근 사용 빈도 집계. Redis **`TypeAdapter` 캐시**(TTL·락) 후 DB 폴백. 라우터 등록 순서상 **정적 경로가 `/{post_id}` 보다 먼저** include (`posts/router.py`). |
-| **유저(프로필·비밀번호·탈퇴·차단)** | `/v1/users/*` | `app/domain/users/` | 프로필·비밀번호 변경·탈퇴. **`GET /me/blocks`**(차단 목록), **`POST /{target_user_id}/block`**(차단/해제 토글). |
-| **댓글(CRUD/페이지네이션)** | `/v1/comments/*` | `app/domain/comments/` | 댓글 목록은 페이지네이션·트리 정렬. 게시글 존재 확인은 `PostsModel.post_is_visible`(경량 `EXISTS`, 차단 반영). |
-| **좋아요(게시글/댓글)** | `/v1/likes/*` (POST/DELETE) | `app/domain/likes/` | ON CONFLICT + RETURNING **멱등성**, `like_count` 동기화. 게시글 존재 확인은 `post_is_visible`(전체 `get_post_by_id` 로드 없음). |
-| **신고/관리자 모더레이션** | `/v1/reports/*`, `/v1/admin/*` | `app/domain/reports/`, `app/domain/admin/` | 신고는 **항상 Insert 누적**(동일 유저 재신고 허용)으로 감사 가능성을 남겼고, “신고 무시” 시에만 `reports` soft delete 및 `report_count`를 초기화하도록 분기했습니다. 관리자는 신고된 게시글/댓글의 통합 목록·블라인드·유저 정지/해제를 제공합니다. |
-| **채팅(DM, 1:1)** | REST: `/v1/chat/*` / WS: `/v1/ws/chat?token=...` | `app/domain/chat/`, `app/api/v1/chat/` | 실시간은 **WebSocket**으로 처리하고, 다중 인스턴스 확장을 위해 **Redis Pub/Sub Fan-out**으로 메시지를 전달합니다. DB 영속은 마이그레이션 **`006_chat_dm_tables`** 기준 테이블로 관리하며, 메시지 처리 시 DB 세션은 **짧은 트랜잭션**으로 유지해 Connection Pool 고갈 리스크를 줄였습니다. |
-| **알림(실시간 + 목록/읽음)** | SSE: `/v1/notifications/stream`<br/>목록: `/v1/notifications`<br/>읽음: `/v1/notifications/read` | `app/domain/notifications/` | 이벤트 발생 시 `notifications` 행을 **트랜잭션 커밋 후** Redis 채널(`notif:user:{userId}`)로 발행합니다. 스트림은 **SSE(text/event-stream)** 로 제공하며, Redis 미구성 시 스트림은 503으로 제한하되 **DB 기록은 유지**하도록 설계했습니다. |
-| **이미지 업로드(로컬/S3) + 임시 업로드 토큰** | `/v1/media/*` | `app/domain/media/`, `app/infra/storage.py` | “미리 업로드 → 본문/가입 연결”. 가입 전은 **Redis Upload Token(단회성·TTL)**. **`X-Idempotency-Key`** 멱등 지원. `image_policy.py`로 검증·리사이즈. 동기 스토리지 I/O는 **`asyncio.to_thread`**·S3 presigned 등은 **`run_in_threadpool`**. 고아 이미지는 sweeper로 정리. |
-| **조회수(중복 방지 + Flush)** | `POST /v1/posts/{id}/view` | `app/domain/posts/` + Redis | 클라이언트 식별자 기준 Redis **`SET NX EX`** 로 중복 증가 방지 후 Writer DB·응답에 반영. 버퍼는 lifespan 백그라운드 태스크로 주기 **Flush**. |
-| **Cleanup(주기 작업)** | (백그라운드 태스크) | `app/core/cleanup.py`, `app/main.py` | 회원가입 임시 이미지·고아 이미지·탈퇴 유저 정리를 주기적으로 수행합니다. 멀티 인스턴스 환경에서는 **Redis 잡 락**으로 중복 실행을 억제했습니다. |
-| **DB 읽기/쓰기 분리 + 트랜잭션 규율** | (DI/서비스 레이어) | `app/api/dependencies/`, `app/db/*` | `get_master_db`/`get_slave_db`, `WRITER_DB_URL`/`READER_DB_URL`로 읽기/쓰기 분리를 고려했고, CUD는 서비스에서 **`async with db.begin():`** 단위로 트랜잭션을 관리하도록 일관성을 유지했습니다. |
-| **헬스체크** | `GET /v1/health` / `GET /` | `app/main.py` | **`/v1/health`**: DB ping 후 **`ApiResponse`**(`requestId` 포함). DB 불가 시 **503**·`DB_ERROR`. **`GET /`**: ALB 등용 단순 JSON(비 ApiResponse). |
-| **프로덕션 설정 가드** | (기동 시) | `app/core/config.py`, `lifespan` | `DEBUG` 기본 **False**. `ENVIRONMENT=production`/`prod`일 때 `JWT_SECRET_KEY`가 기본 placeholder이거나 **32자 미만**이면 **`ValueError`로 기동 중단**. |
-| **요청 추적(request_id)·로그 상관관계** | 전 구간 | `RequestIdMiddleware`, `app/common/*` | 요청마다 ULID 기반 `request_id`를 발급해 성공·에러 **`ApiResponse` 본문 `requestId`** 및 **`X-Request-ID`** 헤더로 반환. 로그에도 자동 포함. |
-| **에러 응답 포맷 통일** | 전 구간 | `app/core/exception_handlers.py` | 모든 에러를 **`{ code, message, data, requestId }`**(camelCase JSON)로 통일. 500에서는 스택/쿼리 노출 없이 마스킹. |
-| **OpenAPI·DTO camelCase** | 전 구간 | `app/core/openapi_camel.py`, `BaseSchema` | 스펙·응답 필드명을 **camelCase**로 노출해 프론트 OpenAPI codegen과 계약을 맞춤. |
-| **응답 압축·Rate Limit** | 전 구간 | `GZipMiddleware`, `RateLimitMiddleware` | 1KB 이상 응답만 gzip 압축했고, Rate Limit은 Redis **Fixed Window**로 경로별 제한을 적용했습니다. Redis 장애 시에는 Fail-open으로 서비스 전체 중단을 피했습니다. |
-| **Redis JSON 직렬화·멱등성 캐시** | 일부 엔드포인트(캐시/멱등) | `TypeAdapter` 기반 유틸 | 캐시는 Pydantic v2 **`TypeAdapter.validate_json`/`dump_json`**으로 직렬화 계약을 고정했고, 스키마 불일치/손상 시 캐시 미스로 처리하여 정상 플로우로 폴백했습니다. |
+**횡단 규약**: 응답은 `{ code, message, data, requestId }` camelCase 통일 · 요청마다 `request_id`(ULID)
+발급·`X-Request-ID` 헤더·로그 상관 · CUD는 서비스에서 `async with db.begin():` 단일 트랜잭션 ·
+읽기/쓰기 세션 분리(`get_master_db`/`get_slave_db`) · Rate Limit·캐시·Pub/Sub 등 외부 I/O는 fail-open.
 
 ---
 
-## 로컬 실행 방법
+## 관측성 · 운영
 
-로컬에서 서버를 띄우려면 **Python 3.11+**가 필요합니다.
+- **헬스 분리** — `/livez`(의존성 무관 liveness, 실패=재시작) · `/readyz`(readiness — **DB=hard→503**,
+  **Redis=soft→report만**). 기존 ALB 경로 `/v1/health`는 하위호환 유지 ([0006](docs/adr/0006-observability.md)).
+- **메트릭** — `/metrics`(Prometheus). HTTP RED(`http_requests_total`·`http_request_duration_seconds`·
+  in-flight, 라벨 `path`는 라우트 템플릿으로 카디널리티 제한) + 도메인 메트릭(rate-limit 429·캐시
+  hit/miss·조회수 flush).
+- **로그** — prod=구조화 JSON(stdout), dev=console. `request_id` 상관. 수집(stdout→CloudWatch)은 ECS 몫.
+- **컨테이너** — 멀티스테이지 `Dockerfile`, `uv sync --frozen --no-dev`, 비루트 유저, `HEALTHCHECK`=`/livez`.
+- **CI/CD** (`.github/workflows/ci.yml`):
 
-- **DB(PostgreSQL) / Redis는 Docker 사용을 권장**합니다. (OS/WSL 환경차, 포트/유저/서비스 관리 이슈를 줄이고 팀 환경을 동일하게 맞출 수 있음)
-- 로컬(네이티브) 설치로도 가능하지만, 설치/서비스 기동/계정/소켓 이슈로 트러블슈팅 비용이 커질 수 있습니다.
-- **코드를 최신으로 가져온 뒤에는 반드시 아래 3번 단계(DB 스키마 마이그레이션)**로 테이블을 현재 리비전에 맞춥니다. (서버만 띄우면 스키마 불일치로 실패할 수 있음)
-- **설계 문서(MkDocs)**: `docs/` 마크다운은 **`mkdocs serve`**(로컬 미리보기 서버; `service` 아님)로 띄웁니다. API(8000)와 포트 분리 등은 **아래 5번** 참고.
+  | 잡 | 내용 |
+  |----|------|
+  | quality | `poe lint-check`·`format-check`·`typecheck`·`vulture-check` |
+  | test | `postgres:15` + `minio` 컨테이너로 `pytest` unit+integration (Redis 필요 테스트는 skip, 스토리지는 MinIO 대상 실행) |
+  | security | `pip-audit` (informational — 이미지 게이트를 막지 않음) |
+  | docker | quality·test 통과 시 build, `main` push면 **GHCR** push |
 
-### 1. 저장소 클론 및 패키지 설치
-
-**uv**로 가상환경·의존성을 관리합니다. ([설치 안내](https://docs.astral.sh/uv/getting-started/installation/))
-
-```bash
-cd 2-kyjness-community-be
-uv lock                    # pyproject.toml 변경 시 (또는 최초 1회) lock 갱신
-uv sync --extra dev        # 런타임 + dev(테스트·ruff·pyright·vulture·poe 등)
-```
-
-실행 시에는 `uv run …`으로 프로젝트 환경의 Python을 쓰거나, `uv run poe <task>`로 Poe 태스크를 돌립니다.
-
-### 2. 환경 변수 설정
-
-[`.env.example`](https://github.com/kyjness/2-kyjness-community-be/blob/main/.env.example)을 복사한 뒤 DB·JWT·Redis 등 필수 값을 채웁니다.
-
-```bash
-cp .env.example .env
-# .env 편집: DB_PASSWORD, JWT_SECRET_KEY, REDIS_URL, ACCESS_TOKEN_EXPIRE_SECONDS(기본 1800), REFRESH_TOKEN_EXPIRE_DAYS(기본 7) 등
-# - Docker(DB/Redis) 권장: DB_HOST=postgres(또는 compose 서비스명), REDIS_URL=redis://redis:6379/0
-# - 로컬(Postgres/Redis 직접 설치): DB_HOST=127.0.0.1(또는 localhost), REDIS_URL=redis://127.0.0.1:6379/0
-# - 로컬 디버그: DEBUG=True (.env.example 참고. 미설정 시 config 기본은 False)
-# - ENVIRONMENT: development(기본) | production | prod — production 계열에서는 강한 JWT_SECRET_KEY 필수(32자+)
-```
-
-**프로덕션 배포 시 필수**
-
-| 변수 | 요구 |
-|------|------|
-| `ENVIRONMENT` | `production` 또는 `prod` |
-| `JWT_SECRET_KEY` | 기본값(`change-me-in-production`) 금지, **32자 이상** 무작위 문자열 |
-| `DEBUG` | `False` 권장(기본값 False) |
-
-기동 시 `validate_settings_for_environment()`가 위 조건을 검사하며, 위반 시 프로세스가 종료됩니다.
-
-### 3. DB 스키마 적용(마이그레이션)
-
-**이 단계가 곧 “DB 업데이트”입니다.** Alembic으로 `migrations/versions/`에 정의된 변경을 PostgreSQL에 순서대로 반영합니다. **최초 1회**뿐 아니라, **git pull 이후 새 마이그레이션 파일이 생겼을 때마다** 다시 실행합니다.
-
-| 명령 | 설명 |
-|------|------|
-| `uv run poe migrate` | **`python3 -m alembic upgrade head`와 동일**(권장, `pyproject.toml` [tool.poe.tasks]). 최신 스키마까지 한 번에 적용. |
-| `uv run python3 -m alembic upgrade head` | 위와 동일(직접 Alembic 호출). |
-| `uv run python3 -m alembic current` | 현재 DB에 적용된 리비전 확인. |
-| `uv run python3 -m alembic history` | 리비전 목록 확인. |
-
-#### 3-A. Docker로 DB/Redis 실행 (권장)
-
-- Docker Compose 파일은 인프라 레포에 있습니다: [PuppyTalk Infra](https://github.com/kyjness/2-kyjness-community-infra)
-- DB(및 실시간 알림·SSE를 쓰려면 Redis)를 기동한 뒤, `.env`의 `DATABASE_URL` / `WRITER_DB_URL` 등이 그 DB를 가리키는지 확인하고 아래를 실행합니다.
-
-```bash
-uv run poe migrate
-```
-
-#### 3-B. 로컬(PostgreSQL 직접 설치)로 실행 (선택)
-
-```bash
-createdb -U postgres puppytalk
-
-uv run poe migrate
-```
-
-**DB 데이터만 비우기(초기화)** 
-
-```bash
-psql -U postgres -d puppytalk -f docs/clear_db.sql
-```
-
-### 4. 서버 실행
-
-```bash
-uv run poe run
-```
-
-기본적으로 `app.core.config`의 **`API_PREFIX`(기본값 `/v1`)**에 맞춰 Swagger·ReDoc·OpenAPI JSON 경로가 잡힙니다(로컬 예: `/v1/docs`). DB 상태 확인은 **`GET /v1/health`** (`ApiResponse`, DB 불가 시 503). 설계 문서 사이트만 따로 보려면 **아래 5번(MkDocs)**을 사용하세요(API와 포트 분리).
-
-API 요청 처리는 항상 FastAPI 비동기 I/O로 동작합니다. **Celery**는 알림 `dispatch`처럼 별도 큐가 필요할 때만 켭니다(`.env`에 `CELERY_ENABLED=true`). 꺼져 있어도 DB·Redis·SSE(요청 경로 publish)는 동작합니다.
-
-```bash
-uv run poe celery-worker   # CELERY_ENABLED=true 일 때만
-uv run poe celery-beat     # 스케줄이 필요할 때
-```
-
-### 5. 문서 사이트 (MkDocs)
-
-`docs/`의 아키텍처·인프라 설명을 [MkDocs](https://www.mkdocs.org/) **Material** 테마로 묶어 둔 설정이 루트 [`mkdocs.yml`](mkdocs.yml)입니다(네비·Mermaid 등).
-
-가상환경을 쓰는 경우 `source .venv/bin/activate` 후에도 `uv run mkdocs …` 사용을 권장합니다.
-
-| 하위 명령 | 용도 |
-|-----------|------|
-| **`mkdocs serve`** | 로컬에서 문서 사이트 미리보기(개발 서버) |
-| **`mkdocs build`** | 정적 HTML을 `site/`에 생성. |
-
-```bash
-uv pip install mkdocs-material          # 최초 1회
-uv run mkdocs serve -a 127.0.0.1:8001   # 미리보기 — API(8000)와 포트 분리 권장
-uv run mkdocs build                     # 정적 빌드 → site/
-```
-
-미리보기 URL: **http://127.0.0.1:8001**
-
-### 6. 개발 도구 (Ruff, Pyright, Vulture, pip-audit)
-
-**수정/적용용** (코드를 직접 변경):
-
-```bash
-uv run poe quality   # lint(--fix) + format 한 방에
-uv run poe lint      # ruff check . --fix (문법·미사용 import 등)
-uv run poe format    # ruff format . (포맷팅)
-```
-
-**검사용** (코드 수정 없이 리포트만, CI/CD용):
-
-```bash
-uv run poe check        # lint-check + format-check + typecheck + vulture-check + audit (하나라도 실패 시 중단)
-uv run poe lint-check   # ruff check . (자동 수정 없음)
-uv run poe format-check # ruff format . --check (포맷 검사만)
-uv run poe typecheck    # pyright (타입 체크)
-uv run poe vulture-check # vulture (데드코드 탐지, 설정은 pyproject.toml [tool.vulture])
-uv run poe audit        # pip-audit (의존성 보안 취약점 스캔)
-```
-
-### 7. 테스트 실행 (Pytest)
-
-테스트 DB를 사용하므로, 먼저 PostgreSQL에 `puppytalk_test` DB를 준비하고 연결 문자열을 설정하세요.
-
-```bash
-# 예시 (로컬)
-export TEST_DB_URL="postgresql+psycopg://postgres:YOUR_PASSWORD@localhost:5432/puppytalk_test"
-```
-
-통합 테스트(`tests/integration/`)는 `tests/integration/conftest.py`에서 세션 시작 시 `pg_trgm` 확장 생성과 스키마 초기화를 수행합니다(`007` 마이그레이션과 동일 확장). 유닛 테스트(`tests/unit/`)는 DB 없이 동작하며, 검색 검증·트렌드 쿼리 등은 `test_post_search.py`, `test_trending_posts_query.py`에서 다룹니다.
-
-```bash
-# 전체 테스트
-uv run pytest -v
-
-# 통합 테스트만
-uv run pytest tests/integration -v
-
-# 특정 테스트 파일만
-uv run pytest tests/integration/test_auth.py -v
-
-# 특정 테스트 함수만
-uv run pytest tests/integration/test_auth.py::test_login_and_refresh_token -v
-```
-
-### 8. 관리자 기능 (Admin)
-
-관리자 전용 API(`/v1/admin/*`)와 프론트 대시보드(`/admin/dashboard`)는 **role이 `ADMIN`인 유저만** 사용할 수 있습니다.
-
-**관리자 계정 만들기**  
-   DB에서 해당 유저의 `role`을 `ADMIN`으로 변경합니다.
-
-   ```sql
-   -- users.id는 DB에서 uuid 타입입니다. 아래는 이메일로 지정하는 예시입니다.
-   UPDATE users SET role = 'ADMIN' WHERE email = 'your-admin@example.com';
-   ```
+  실제 배포 대상(ECS)·인프라(ALB·RDS·ElastiCache·CloudWatch)는 인프라 레포(Terraform)에서 관리합니다.
 
 ---
 
-## 컨테이너 · CI/CD
+## 로컬 실행
 
-### Docker 이미지
+Python 3.11+ 필요. DB(PostgreSQL)·Redis는 Docker 사용을 권장합니다.
 
-멀티스테이지 `Dockerfile`로 얇은 런타임 이미지를 만듭니다. builder에서 `uv`로 잠금 의존성만
-설치하고(`--frozen --no-dev --no-install-project`), runtime은 `.venv`+소스만 얹어 **비루트 유저**로
-실행합니다. `HEALTHCHECK`는 `/livez`를 찌릅니다.
+```bash
+# 1. 의존성
+uv sync --extra dev            # 런타임 + dev(pytest·ruff·pyright·vulture·poe)
+
+# 2. 환경 변수
+cp .env.example .env           # DB_*, JWT_SECRET_KEY, REDIS_URL 등을 채움
+#  - ENVIRONMENT=development(기본) | production — production 계열은 강한 JWT_SECRET_KEY(32자+) 필수
+#  - 스토리지: dev는 MinIO(S3_ENDPOINT_URL 지정), prod는 실제 S3 자격 필수
+
+# 3. DB 스키마 (git pull 후 새 마이그레이션이 생기면 다시 실행)
+uv run poe migrate             # = alembic upgrade head
+
+# 4. 서버
+uv run poe run                 # http://localhost:8000 — 문서는 /v1/docs, 헬스는 /v1/health
+
+# (선택) Celery — CELERY_ENABLED=true 일 때만
+uv run poe celery-worker
+uv run poe celery-beat
+```
+
+프로덕션 기동 시 `validate_settings_for_environment()`가 `JWT_SECRET_KEY`(placeholder 금지·32자+)와
+S3 자격 등을 검사하며, 위반 시 프로세스를 중단합니다.
+
+### API 문서
+
+| 환경 | Swagger UI | ReDoc | OpenAPI JSON |
+|------|-----------|-------|--------------|
+| 로컬 | `/v1/docs` | `/v1/redoc` | `/v1/openapi.json` |
+| 프로덕션 | `https://api.puppytalk.shop/v1/docs` | `/v1/redoc` | `/v1/openapi.json` |
+
+응답·스펙 필드는 프론트 OpenAPI codegen 계약을 위해 **camelCase**로 노출됩니다.
+
+### 검사 · 테스트
+
+```bash
+uv run poe quality   # lint(--fix) + format
+uv run poe check     # lint-check + format-check + typecheck + vulture-check + audit (CI와 동일)
+
+# 테스트 — 통합 테스트는 puppytalk_test DB 필요
+export TEST_DB_URL="postgresql+psycopg://postgres:PASSWORD@localhost:5432/puppytalk_test"
+uv run pytest                      # 전체
+uv run pytest tests/unit           # DB 불필요(검색 검증·트렌드 쿼리·조회수 버퍼·도메인 메트릭 등)
+uv run pytest tests/integration    # PostgreSQL + pg_trgm (스키마는 conftest가 세션 시작 시 생성)
+```
+
+통합 스위트는 세션 스코프 스키마를 공유하며(테스트 간 롤백 없음), Redis 저장소가 필요한 RTR·멱등성
+테스트는 Redis 미연결 시 자동 skip합니다. 컨테이너로 CI를 재현하려면:
+
+```bash
+docker run -d --name pg -e POSTGRES_PASSWORD=PASSWORD -e POSTGRES_DB=puppytalk_test -p 5432:5432 postgres:15
+```
+
+### Docker
 
 ```bash
 docker build -t puppytalk-be .
-# 실행은 DB·Redis·S3(호환) 스토리지가 필요합니다. 스토리지는 S3 단일 경로라 dev/CI는
-# MinIO(S3_ENDPOINT_URL 지정), prod는 실제 S3를 씁니다([ADR 0010](docs/adr/0010-storage-backend-strategy.md)).
-# 인프라 레포의 docker-compose로 전체 스택을 함께 띄우세요.
-# (2-kyjness-community-infra/docker-compose.local.yml — db·redis·minio·nginx 포함)
+# 실행에는 DB·Redis·S3(호환) 스토리지가 필요합니다. 인프라 레포의 compose로 전체 스택을 함께 띄우세요.
+# 배포 command 예: alembic upgrade head && gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
 ```
 
-배포 시 컨테이너 command는 `alembic upgrade head && gunicorn app.main:app -w 4 -k
-uvicorn.workers.UvicornWorker -b 0.0.0.0:8000` 형태로 override합니다(compose/ECS).
+### 관리자 계정
 
-### GitHub Actions (`.github/workflows/ci.yml`)
+관리자 API(`/v1/admin/*`)는 `role='ADMIN'` 유저만 사용할 수 있습니다.
 
-| 잡 | 내용 |
-|----|------|
-| **quality** | `poe lint-check`·`format-check`·`typecheck`·`vulture-check` |
-| **test** | `postgres:15` 서비스 + `minio` 컨테이너(스토리지 파리티)로 `pytest` unit+integration. 대부분 통합은 `ASGITransport`라 Redis 없이 돌고, `test_storage_minio`만 MinIO 대상 실행 |
-| **security** | `pip-audit` (informational — 이미지 게이트를 막지 않음) |
-| **docker** | quality·test 통과 시 이미지 build. `main` push면 **GHCR**(`ghcr.io/<owner>/puppytalk-be`)에 push |
-
-트리거는 `main` push + 모든 PR입니다. 실제 배포 대상(ECS)·인프라(ALB·RDS·CloudWatch)는
-별도 인프라 레포(`2-kyjness-community-infra`, Terraform)에서 관리합니다.
-
-관측성: `/livez`(liveness)·`/readyz`(readiness — DB=hard, Redis=soft)·`/metrics`(Prometheus)를
-노출합니다([ADR 0006](docs/adr/0006-observability.md)). `/metrics`는 HTTP RED(요청 수·지연·in-flight)
-+ 도메인 지표(rate-limit 429·캐시 hit/miss·조회수 flush)를 함께 냅니다. 로그는 prod=구조화 JSON
-(stdout)·dev=console에 `request_id` 상관.
-
----
-
-## 확장 전략
-
-### 기능
-
-- **데이터 무결성(페이로드 계약)**: 메시지 큐·외부 브로커를 붙일 때도 Redis 캐시와 같이 Pydantic V2 **`TypeAdapter` / `validate_json`(또는 동등한 스키마 검증)**으로 메시지 형태를 고정하는 패턴을 권장. (현재 코드베이스는 Redis 캐시·멱등성 응답에 적용.)
-
-### 인프라
-
-- **성능 가속**: 메시지 큐(SQS/Kafka)를 활용한 시스템 간 결합도 완화 검토.
-
-### 구독 및 비즈니스 운영
-
-- **AI 운영 비용 최적화**:
-  - **Tiered Quota 관리**: Redis 기반의 실시간 사용량 제한(Rate Limiting) 로직을 구축하여, 사용자 등급별(Basic/Premium) AI 호출 횟수를 차등 제어하고 LLM 추론 비용(Token Cost) 리스크를 최소화.
-  - **하이브리드 모델 라우팅**: 요청의 난이도에 따라 경량 모델(GPT-4o mini)과 고성능 모델(GPT-4o)을 동적으로 할당하는 인프라 구조를 설계하여 답변 품질과 운영 비용의 최적 균형 달성.
-- **이벤트 기반 결제 및 권한 아키텍처**
-  - **Webhook 기반 실시간 동기화**: 결제 대행사(Stripe/Toss)의 Webhook 이벤트를 비동기적으로 수신하여, 결제 상태 변화에 따른 유저 권한(RBAC) 및 서비스 접근성을 즉각적으로 업데이트하는 안정적인 결제 파이프라인 구축.
-  - **결제 무결성 보장**: 분산 트랜잭션 상황에서의 결제 누락 방지를 위한 재시도(Retry) 로직 및 멱등성(Idempotency) 설계로 데이터 정합성 확보.
-- **데이터 기반 건강 인사이트**
-  - **자동화된 배치 리포트**: Celery Beat를 활용해 사용자의 활동 데이터(산책, 음수량 등)를 주기적으로 분석하고, AI가 생성한 '맞춤형 건강 분석 리포트'를 자동 발행하는 스케줄링 시스템 구현.
-  - **개인화 푸시 알림**: 누적된 시계열 데이터의 통계적 유의미성을 분석하여, 이상 징후(Anomaly Detection) 감지 시 보호자에게 즉시 알림을 발송하는 사용자 유지(Retention) 전략 고도화.
-
+```sql
+UPDATE users SET role = 'ADMIN' WHERE email = 'your-admin@example.com';
+```
 
 ---
 
@@ -362,13 +231,8 @@ uvicorn.workers.UvicornWorker -b 0.0.0.0:8000` 형태로 override합니다(compo
 
 | 문서 | 설명 |
 |------|------|
-| [architecture.md](docs/architecture.md) | 아키텍처 (개요·레이어·**데이터 계층**·DM·Redis 등) |
-| [request-and-api-contract.md](docs/request-and-api-contract.md) | 미들웨어·DI·ApiResponse·멱등·camelCase |
-| [security.md](docs/security.md) | 위협별 보안 (XSS·SQLi·CSRF·IDOR …) |
-| [realtime-notifications.md](docs/realtime-notifications.md) | SSE·Redis Pub/Sub·Celery 알림 |
-| [domain-flows.md](docs/domain-flows.md) | 미디어·피드·트렌드·신고·관리자 |
-| [api-codes.md](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/api-codes.md) | API 응답 코드와 HTTP 상태 코드 매핑 |
-| [infrastructure-reliability-design.md](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/infrastructure-reliability-design.md) | 인프라·신뢰성 설계 (Redis Fail-open 등) |
-| [kubernetes-cicd-pipeline-report.md](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/kubernetes-cicd-pipeline-report.md) | 쿠버네티스·CI/CD 파이프라인 (GitHub Actions, Jenkins, EKS) |
-| [puppytalkdb.sql](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/puppytalkdb.sql) | 참고용 DDL (수동 테이블 생성 시) |
-| [clear_db.sql](https://github.com/kyjness/2-kyjness-community-be/blob/main/docs/clear_db.sql) | DB 데이터만 비우기 (테이블 유지, 시퀀스 리셋) |
+| [00 · 운영 봉투와 범위](docs/00-operating-envelope-and-scope.md) | 모든 설계·복잡도 판정의 단일 근거(전제·과제·재건 순서) |
+| [01 · 아키텍처](docs/01-architecture.md) | 횡단 관심사 결정(식별자·API·트랜잭션·캐시·페이지네이션·관측성·인덱스) |
+| [ADR](docs/adr/) | 핵심 설계 결정 12건 — 각 결정의 트레이드오프와 *안 한 것* |
+| [ROADMAP](docs/ROADMAP.md) | RUP-lite 리팩토링 진행·완료 이력(도메인 단위 + 커밋) |
+| [backlog](docs/backlog.md) | 버그·최적화 백로그와 각 항목의 근거·수정 방향 |
