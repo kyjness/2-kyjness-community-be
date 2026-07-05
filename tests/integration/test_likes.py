@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from app.core.ids import new_ulid_str
 from httpx import AsyncClient
@@ -15,7 +17,14 @@ def _auth_header(login_json: dict) -> dict[str, str]:
 
 
 async def setup_post_and_headers(client: AsyncClient) -> tuple[dict[str, str], str]:
-    payload = {"email": "liker@example.com", "password": _TEST_PW, "nickname": "좋아요퍼피"}
+    # 통합 스위트는 세션 스코프 스키마를 공유(테스트 간 롤백 없음)하므로 이메일·닉네임을
+    # 고유화해 다른 파일과의 닉네임 UNIQUE 충돌(→ signup 409 → login 401)을 막는다.
+    suffix = uuid.uuid4().hex[:12]
+    payload = {
+        "email": f"liker_{suffix}@example.com",
+        "password": _TEST_PW,
+        "nickname": f"좋아요{suffix[:6]}",
+    }
     await client.post("/v1/auth/signup", json=payload)
     login_res = await client.post(
         "/v1/auth/login",

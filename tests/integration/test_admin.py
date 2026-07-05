@@ -4,6 +4,7 @@ from app.db.base_class import utc_now
 from app.domain.comments.model import Comment
 from app.domain.posts.model import Post
 from app.domain.users.model import Report, User
+from app.main import app
 from httpx import AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,6 +70,10 @@ async def test_admin_access_success(client: AsyncClient, db_session: AsyncSessio
 
 async def test_suspend_revokes_refresh_token(client: AsyncClient, db_session: AsyncSession):
     """정지되면 기존 refresh 토큰이 무효화된다(#8)."""
+    # refresh 회전(RTR)은 Redis 저장소 위에서만 동작한다(refresh_tokens가 redis 없으면 401).
+    # 다른 RTR 테스트와 동일하게 Redis 미연결 시 스킵한다.
+    if getattr(app.state, "redis", None) is None:
+        pytest.skip("Redis 미연결: refresh 토큰 무효화(#8) 검증 생략")
     cookie_name = settings.REFRESH_TOKEN_COOKIE_NAME
 
     # 대상 유저 가입·로그인 → 공개 id + refresh 쿠키 확보

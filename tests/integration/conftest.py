@@ -20,8 +20,12 @@ TEST_DB_URL = os.getenv(
 
 @pytest.fixture(scope="session", autouse=True)
 def relax_integration_rate_limits() -> None:
-    """동일 ASGI client IP로 연속 로그인 시 Redis 로그인 RL(기본 5회/창)에 걸린다. 통합 테스트만 상한 완화."""
+    """통합 스위트는 단일 ASGI client IP + Redis 부재(메모리 폴백)라, rate limit 카운터가
+    세션 내내 IP 키 하나로 누적된다. 스위트가 커지면 login뿐 아니라 global(기본 100/창)·
+    signup_upload 한도까지 넘겨 순서 의존적 429가 나므로, 세 한도를 모두 넉넉히 완화한다."""
     settings.LOGIN_RATE_LIMIT_MAX_ATTEMPTS = max(settings.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, 10_000)
+    settings.RATE_LIMIT_MAX_REQUESTS = max(settings.RATE_LIMIT_MAX_REQUESTS, 1_000_000)
+    settings.SIGNUP_UPLOAD_RATE_LIMIT_MAX = max(settings.SIGNUP_UPLOAD_RATE_LIMIT_MAX, 10_000)
 
 
 try:
