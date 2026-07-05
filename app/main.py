@@ -9,7 +9,6 @@ from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from mangum import Mangum
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -255,9 +254,3 @@ def _custom_openapi():
 
 
 app.openapi = _custom_openapi
-
-
-# --- AWS Lambda 배포를 위한 Mangum 핸들러 추가 ---
-handler = Mangum(
-    app, lifespan="on"
-)  # lifespan="on" 설정을 해야 위에서 정의한 DB 연결 로직이 작동합니다.

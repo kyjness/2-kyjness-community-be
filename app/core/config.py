@@ -41,10 +41,8 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # ----- 서버 (노출 주소·CORS·디버그) -----
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    BE_API_URL: str = "http://localhost:8000"
+    # ----- 서버 (환경·CORS·디버그) -----
+    # 참고: bind host/port는 실행 커맨드(poe run·gunicorn -b)가 직접 지정한다(설정에서 미사용).
     ENVIRONMENT: str = Field(
         default="development", validation_alias=AliasChoices("ENVIRONMENT", "ENV")
     )
