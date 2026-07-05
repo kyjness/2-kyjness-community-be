@@ -20,11 +20,12 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # 인박스 미읽음 카운트는 방별 미읽음(is_read=false) 소수 행만 필요하다.
     # 부분 인덱스로 읽음 메시지를 배제해 방 전체 스캔 대신 미읽음만 도는 인덱스 스캔이 되게 한다.
+    # 술어를 쿼리의 .is_(False)(→ IS false)와 동일 형태로 맞춰 플래너의 부분 인덱스 매칭을 보장한다.
     op.create_index(
         "ix_chat_messages_unread",
         "chat_messages",
         ["room_id"],
-        postgresql_where=sa.text("is_read = false"),
+        postgresql_where=sa.text("is_read IS false"),
     )
 
 

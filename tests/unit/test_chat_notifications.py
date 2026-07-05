@@ -42,12 +42,14 @@ def test_notification_realtime_payload_is_camelcase():
 
 
 def test_notifications_list_is_keyset_not_offset():
-    # offset+count(*) → (created_at DESC, id DESC) 튜플 keyset으로 전환(ADR 0002).
+    # offset+count(*) → comments와 동형의 id 단일 컬럼 keyset(ADR 0002). 커서 행을 조회하지
+    # 않으므로 보관정책 삭제로 커서가 사라져도 400을 내지 않는다.
     src = inspect.getsource(NotificationsModel.list_for_user)
-    assert "order_by(Notification.created_at.desc(), Notification.id.desc())" in src
-    assert "tuple_(Notification.created_at, Notification.id)" in src
+    assert "order_by(Notification.id.desc())" in src
+    assert "Notification.id < cursor_id" in src
     assert "offset" not in src
     assert "func.count" not in src
+    assert "InvalidRequestException" not in src
 
 
 def test_cursor_page_has_no_total():
@@ -58,7 +60,9 @@ def test_cursor_page_has_no_total():
 def test_notification_indexes_reconciled():
     table = Notification.metadata.tables["notifications"]
     names = {i.name for i in table.indexes}
-    assert "ix_notifications_user_created" in names
+    # 정렬 축(id DESC)에 맞는 인덱스 + 전체 읽음용 부분 인덱스.
+    assert "ix_notifications_user_recent" in names
     assert "ix_notifications_user_unread" in names
-    # 인라인 index=True로 생기던 단독 user_id 인덱스는 복합 인덱스로 대체됐다.
+    # 인라인 index=True 단독 user_id·created_at 정렬 인덱스는 대체됐다.
     assert "ix_notifications_user_id" not in names
+    assert "ix_notifications_user_created" not in names

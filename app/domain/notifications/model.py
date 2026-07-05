@@ -5,14 +5,13 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, delete, select, text, tuple_, update
+from sqlalchemy import DateTime, ForeignKey, Index, String, delete, select, text, update
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.enums import NotificationKind
-from app.common.exceptions import InvalidRequestException
 from app.core.ids import new_uuid7
 from app.db.base_class import Base, utc_now
 
@@ -22,9 +21,9 @@ _PG_UUID = PG_UUID(as_uuid=True)
 class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = (
-        # 수신자별 최신순 keyset 목록(WHERE user_id + ORDER BY created_at DESC, id DESC). 004에서
-        # 생성된 인덱스를 ORM에도 명시해 모델↔마이그레이션 드리프트를 해소한다.
-        Index("ix_notifications_user_created", "user_id", text("created_at DESC")),
+        # 수신자별 최신순 keyset 목록(WHERE user_id + ORDER BY id DESC). uuid7이라 id DESC = 시간
+        # 역순이며, comments와 동일한 단일 컬럼 keyset이라 이 인덱스 하나로 정렬·범위를 커버한다.
+        Index("ix_notifications_user_recent", "user_id", text("id DESC")),
         # 전체 읽음 처리(WHERE user_id AND read_at IS NULL)용 부분 인덱스 — 미읽음 소수 행만 도는 스캔.
         Index("ix_notifications_user_unread", "user_id", postgresql_where=text("read_at IS NULL")),
     )
@@ -85,24 +84,15 @@ class NotificationsModel:
     ) -> tuple[list[Notification], bool]:
         """수신자 알림 keyset 목록(최신순). cursor_id는 직전 페이지 마지막 알림 id.
 
-        total 없이 has_more로 다음 페이지 표현(ADR 0002). size+1 조회로 초과분 존재 여부를 판정.
-        (created_at DESC, id DESC) 튜플 keyset이라 ix_notifications_user_created를 그대로 탄다.
-        cursor 조회를 user_id로 스코프해 타 수신자 알림 id 탐침을 차단한다.
+        total 없이 has_more로 다음 페이지 표현(ADR 0002). uuid7 id가 시간정렬이라 comments와 동일한
+        단일 컬럼 keyset(id < cursor, ORDER BY id DESC)을 쓴다. 커서 행을 조회하지 않으므로 커서
+        알림이 보관정책으로 삭제돼도 400 없이 다음 페이지를 반환하고, 타 수신자 id를 커서로 넣어도
+        내 알림만 필터되어 노출되지 않는다. size+1 조회로 초과분 존재 여부를 판정한다.
         """
         stmt = select(Notification).where(Notification.user_id == user_id)
         if cursor_id is not None:
-            cur = await db.execute(
-                select(Notification.created_at, Notification.id).where(
-                    Notification.id == cursor_id,
-                    Notification.user_id == user_id,
-                )
-            )
-            cur_row = cur.one_or_none()
-            if cur_row is None:
-                raise InvalidRequestException(message="유효하지 않은 cursor 입니다.")
-            c_at, c_id = cur_row[0], cur_row[1]
-            stmt = stmt.where(tuple_(Notification.created_at, Notification.id) < tuple_(c_at, c_id))
-        stmt = stmt.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(size + 1)
+            stmt = stmt.where(Notification.id < cursor_id)
+        stmt = stmt.order_by(Notification.id.desc()).limit(size + 1)
         rows = list((await db.execute(stmt)).scalars().all())
         has_more = len(rows) > size
         return rows[:size], has_more

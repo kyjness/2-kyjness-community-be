@@ -65,7 +65,9 @@ class ChatMessage(Base):
         Index(
             "ix_chat_messages_unread",
             "room_id",
-            postgresql_where=text("is_read = false"),
+            # 술어를 쿼리의 .is_(False)(→ IS false)와 동일 형태로 맞춰 플래너가 부분 인덱스를
+            # 확실히 선택하게 한다(= false 형태면 IS false 필터와 매칭 실패로 seq-scan 위험).
+            postgresql_where=text("is_read IS false"),
         ),
     )
 
