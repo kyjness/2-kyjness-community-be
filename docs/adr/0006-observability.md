@@ -1,8 +1,9 @@
 # ADR 0006 — 관측성: 구조화 로그 + 얇은 메트릭 & 트레이싱 백엔드 미채택
 
-- **상태**: 채택됨 (Accepted)
+- **상태**: 채택됨 (Accepted) · 메트릭·헬스 분리는 Transition(Ops)에서 구현(아래 구현 노트)
 - **관련 코드**: `app/common/logging_config.py`, `app/core/middleware/request_id.py`,
-  `app/core/middleware/access_log.py`, `/metrics`(신규)
+  `app/core/middleware/access_log.py`, `app/core/middleware/metrics.py`(`/metrics`),
+  `app/main.py`(`/livez`·`/readyz`)
 
 ## 맥락 (Context)
 
@@ -47,3 +48,21 @@
 - **분산 트레이싱 백엔드(OTel Collector·Jaeger)**: `request_id` 기반 로그 상관으로 이 규모의 추적은
   충분하다. 트레이싱 인프라는 봉투 상한 밖 복잡도 — **의식적으로 배제.**
 - **커스텀 대시보드 코드**: 메트릭 노출까지만. 시각화는 운영 도구(Grafana 등) 몫으로 남긴다.
+
+## 구현 노트 (Transition/Ops)
+
+이 ADR의 메트릭·헬스 분리를 Ops 단계에서 구현하며, 결정 문구를 아래처럼 구체화했다.
+
+- **헬스 분리 — DB=hard·Redis=soft.** `/livez`는 의존성 체크 없이 프로세스 생존만(실패=재시작),
+  `/readyz`는 DB 실패 시에만 503(라우팅 제외)한다. 결정 문구는 readiness를 "DB·Redis ping"으로
+  적었으나, **Redis는 fail-open**([ADR 0003](0003-distributed-rate-limit.md)·
+  [0005](0005-resilience-no-circuit-breaker.md))이라 DB만 살아있으면 인스턴스는 (열화된 채로)
+  서빙 가능하다. Redis로 readiness를 gate하면 얻는 것 없이 용량만 깎이므로 **Redis는 ping해서
+  payload에 report만 하고 gate하지 않는다**(hard=DB, soft=Redis). 기존 ALB 경로 `/v1/health`는
+  하위호환으로 유지 — 인프라의 ALB→`/readyz`·liveness→`/livez` 전환은 be-repo 밖(문서화만).
+- **얇은 메트릭 — RED 우선.** `prometheus-client` default registry로 `http_requests_total`
+  (method·path·status)·`http_request_duration_seconds`(히스토그램)·`http_requests_in_progress`
+  (in-flight)를 `access_log`와 동형 미들웨어로 계측한다. **라벨 `path`는 라우트 템플릿**
+  (`/v1/posts/{post_id}`)을 써 저카디널리티를 지키고, `/metrics`·`/livez`·`/readyz`는 기록 제외.
+- **남은 것(도메인 지표).** 결정 2의 도메인 지표(조회수 flush 건수·rate limit 429·캐시 hit/miss)는
+  아직 미계측 — RED http 지표부터 노출하고, 도메인 카운터는 후속 단위로 둔다.

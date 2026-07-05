@@ -24,6 +24,8 @@ PuppyTalk 백엔드의 주요 설계 결정을 기록한다. 각 ADR은
 | [0011](0011-representative-dog-view-relationship.md) | 대표견 — 전용 뷰 관계 + 부분 유니크 인덱스 | 도메인(dogs·posts·comments) | 채택됨 |
 | [0012](0012-admin-report-feed-pagination.md) | 관리자 신고 피드 — DB-side UNION ALL + offset 유지 | 도메인(admin) | 채택됨 |
 
+> 0006의 얇은 메트릭(`/metrics` RED)·헬스 분리(`/livez`·`/readyz`)는 Transition(Ops)에서 구현됐다
+> — readiness는 DB=hard·Redis=soft(fail-open)로 구체화(0006 구현 노트).
 > 0009는 chat·notifications 재건 단계에서 기구현된 실시간 설계를 소급 근거화했다.
 > 0012는 [0002](0002-cursor-pagination.md)의 cursor 표준에 대한 *의도적 예외*(admin 저트래픽·변동 정렬·total 필요)를 근거화한다.
 

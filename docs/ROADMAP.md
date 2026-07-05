@@ -62,7 +62,10 @@
   - [x] 마감: `/code-review`(정확성 0·정리 0 — 순수 정리라 복잡도 미추가) · ADR 불필요(load-bearing 결정 아님)
 
 ## Transition (Ops)
-- [ ] 관측성 인프라 — `/metrics`(prometheus) · 헬스 liveness/readiness 분리
+- [x] 관측성 인프라 — `/metrics`(prometheus) · 헬스 liveness/readiness 분리 ([ADR 0006](adr/0006-observability.md) 구현)
+  - [x] 헬스 분리: `/livez`(의존성 무관 liveness) + `/readyz`(DB=hard→503, Redis=soft→report만). `/v1/health`는 ALB 하위호환 유지
+  - [x] `/metrics`: `prometheus-client`로 RED(`http_requests_total`·`http_request_duration_seconds`·`http_requests_in_progress`). 라벨 `path`는 라우트 템플릿으로 카디널리티 제한, probe·`/metrics` 기록 제외
+  - [x] ADR 0006 구현 노트로 구체화(Redis readiness=soft), 단위 테스트(외부 PG/Redis 불필요) 보강
 - [ ] 스토리지 — docker-compose+CI에 MinIO 배선 → 통합테스트 MinIO 대상 전환 → **local 디스크 백엔드 제거**([ADR 0010](adr/0010-storage-backend-strategy.md))
 - [ ] 배포 — Docker · ECS · CI/CD (재정의)
 - [ ] 모니터링 · 로그 수집
@@ -112,5 +115,7 @@
 | user_blocks 중복 UNIQUE 제거·마이그레이션 012(#13) | `170a5817` |
 | _PG_UUID base_class 공용 타입 중앙화(#18) | `e03876d5` |
 | `__future__` annotations 제거로 통일(#20) | `818444a6` |
+| health liveness/readiness probe 분리(/livez·/readyz) | `d9230b41` |
+| Prometheus /metrics + RED 메트릭 미들웨어 | `31136258` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.
