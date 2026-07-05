@@ -64,5 +64,9 @@
   (method·path·status)·`http_request_duration_seconds`(히스토그램)·`http_requests_in_progress`
   (in-flight)를 `access_log`와 동형 미들웨어로 계측한다. **라벨 `path`는 라우트 템플릿**
   (`/v1/posts/{post_id}`)을 써 저카디널리티를 지키고, `/metrics`·`/livez`·`/readyz`는 기록 제외.
-- **남은 것(도메인 지표).** 결정 2의 도메인 지표(조회수 flush 건수·rate limit 429·캐시 hit/miss)는
-  아직 미계측 — RED http 지표부터 노출하고, 도메인 카운터는 후속 단위로 둔다.
+- **도메인 지표(구현됨).** 결정 2의 도메인 지표를 `app/core/metrics.py`에 두고 계측한다:
+  `rate_limit_rejections_total{limit}`(429를 login·signup_upload·global별로),
+  `cache_events_total{cache,result}`(트렌딩 해시태그 hit/miss),
+  `view_buffer_flushed_views_total`(조회수 flush로 DB 반영된 view 합). 전송 계층 RED 지표
+  (`middleware/metrics.py`)와 분리하되 같은 default registry로 `/metrics`에 함께 노출 — 운영 봉투
+  가정(조회 폭주·RL 압력·캐시 효율)을 실측한다.

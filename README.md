@@ -326,8 +326,10 @@ uvicorn.workers.UvicornWorker -b 0.0.0.0:8000` 형태로 override합니다(compo
 트리거는 `main` push + 모든 PR입니다. 실제 배포 대상(ECS)·인프라(ALB·RDS·CloudWatch)는
 별도 인프라 레포(`2-kyjness-community-infra`, Terraform)에서 관리합니다.
 
-관측성: `/livez`(liveness)·`/readyz`(readiness — DB=hard, Redis=soft)·`/metrics`(Prometheus RED)를
-노출합니다([ADR 0006](docs/adr/0006-observability.md)).
+관측성: `/livez`(liveness)·`/readyz`(readiness — DB=hard, Redis=soft)·`/metrics`(Prometheus)를
+노출합니다([ADR 0006](docs/adr/0006-observability.md)). `/metrics`는 HTTP RED(요청 수·지연·in-flight)
++ 도메인 지표(rate-limit 429·캐시 hit/miss·조회수 flush)를 함께 냅니다. 로그는 prod=구조화 JSON
+(stdout)·dev=console에 `request_id` 상관.
 
 ---
 

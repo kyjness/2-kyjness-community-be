@@ -7,7 +7,7 @@
 - [x] **Inception** — 운영 봉투·범위 (`00`)
 - [x] **Elaboration** — 횡단 결정 (`01`) + ADR 0001~0006 + `/adr` 커맨드
 - [x] **Construction** — 도메인 재건 (아래) **완료**
-- [ ] **Transition** — 배포·모니터링 ← **다음**
+- [x] **Transition** — 관측성·스토리지·Docker/CI·모니터링 **완료**
 
 ## Construction 체크리스트 (재건 순서)
 
@@ -74,7 +74,9 @@
   - [x] 멀티스테이지 `Dockerfile`(uv `--frozen --no-dev --no-install-project`·비루트·HEALTHCHECK `/livez`·gunicorn+uvicorn worker) + `.dockerignore`. 로컬 build·app 임포트·비루트 검증
   - [x] GitHub Actions: quality(poe lint/format/type/vulture) · test(postgres:15 서비스, unit+integration) · security(pip-audit informational) · docker(quality·test 통과 시 build, main push면 GHCR push)
   - [x] CI green화: celery pyright 오탐 한정 ignore, 미포맷 통합 테스트 포맷
-- [ ] 모니터링 · 로그 수집
+- [x] 모니터링 · 로그 수집 ([ADR 0006](adr/0006-observability.md) 완결)
+  - [x] 로그: 구조화 JSON(prod)·console(dev)·`request_id` 상관이 이미 구현(`logging_config.py`) — 수집(stdout→CloudWatch)은 ECS awslogs(infra) 몫
+  - [x] 도메인 메트릭: `rate_limit_rejections_total{limit}`·`cache_events_total{cache,result}`·`view_buffer_flushed_views_total` 추가(default registry로 `/metrics` 노출). 운영 봉투 가정을 실측
 
 ## 완료 유닛 (커밋)
 | 단위 | 커밋 |
@@ -129,5 +131,7 @@
 | GitHub Actions CI(quality·test·security·docker→GHCR) | `02c7170e` |
 | local 스토리지 백엔드 제거·S3 단일 경로·path-style(ADR 0010) | `00c3bccb` |
 | MinIO 파리티 통합 테스트 + CI 배선(ADR 0010) | `44fcd7f0` |
+| 공개 URL media/ 프리픽스 정정(리뷰 수정) | `b7b72663` |
+| 도메인 메트릭(rate-limit·cache·view-flush, ADR 0006) | `ba5b2e4b` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.
