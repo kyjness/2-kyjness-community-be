@@ -67,7 +67,10 @@
   - [x] `/metrics`: `prometheus-client`로 RED(`http_requests_total`·`http_request_duration_seconds`·`http_requests_in_progress`). 라벨 `path`는 라우트 템플릿으로 카디널리티 제한, probe·`/metrics` 기록 제외
   - [x] ADR 0006 구현 노트로 구체화(Redis readiness=soft), 단위 테스트(외부 PG/Redis 불필요) 보강
 - [ ] 스토리지 — docker-compose+CI에 MinIO 배선 → 통합테스트 MinIO 대상 전환 → **local 디스크 백엔드 제거**([ADR 0010](adr/0010-storage-backend-strategy.md))
-- [ ] 배포 — Docker · ECS · CI/CD (재정의)
+- [x] 배포 — Docker · CI/CD (ECS는 infra repo에서 maintain+document)
+  - [x] 멀티스테이지 `Dockerfile`(uv `--frozen --no-dev --no-install-project`·비루트·HEALTHCHECK `/livez`·gunicorn+uvicorn worker) + `.dockerignore`. 로컬 build·app 임포트·비루트 검증
+  - [x] GitHub Actions: quality(poe lint/format/type/vulture) · test(postgres:15 서비스, unit+integration) · security(pip-audit informational) · docker(quality·test 통과 시 build, main push면 GHCR push)
+  - [x] CI green화: celery pyright 오탐 한정 ignore, 미포맷 통합 테스트 포맷
 - [ ] 모니터링 · 로그 수집
 
 ## 완료 유닛 (커밋)
@@ -117,5 +120,9 @@
 | `__future__` annotations 제거로 통일(#20) | `818444a6` |
 | health liveness/readiness probe 분리(/livez·/readyz) | `d9230b41` |
 | Prometheus /metrics + RED 메트릭 미들웨어 | `31136258` |
+| in-progress 게이지 라벨 정리(리뷰 수정) | `a435e44e` |
+| 멀티스테이지 Dockerfile + .dockerignore | `97ded4f7` |
+| CI quality 게이트 green화(pyright 오탐·포맷) | `fd059c43` |
+| GitHub Actions CI(quality·test·security·docker→GHCR) | `02c7170e` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.

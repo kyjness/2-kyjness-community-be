@@ -295,6 +295,40 @@ uv run pytest tests/integration/test_auth.py::test_login_and_refresh_token -v
 
 ---
 
+## 컨테이너 · CI/CD
+
+### Docker 이미지
+
+멀티스테이지 `Dockerfile`로 얇은 런타임 이미지를 만듭니다. builder에서 `uv`로 잠금 의존성만
+설치하고(`--frozen --no-dev --no-install-project`), runtime은 `.venv`+소스만 얹어 **비루트 유저**로
+실행합니다. `HEALTHCHECK`는 `/livez`를 찌릅니다.
+
+```bash
+docker build -t puppytalk-be .
+# 실행은 DB·Redis가 필요합니다. 인프라 레포의 docker-compose로 전체 스택을 함께 띄우세요.
+# (2-kyjness-community-infra/docker-compose.local.yml — db·redis·minio·nginx 포함)
+```
+
+배포 시 컨테이너 command는 `alembic upgrade head && gunicorn app.main:app -w 4 -k
+uvicorn.workers.UvicornWorker -b 0.0.0.0:8000` 형태로 override합니다(compose/ECS).
+
+### GitHub Actions (`.github/workflows/ci.yml`)
+
+| 잡 | 내용 |
+|----|------|
+| **quality** | `poe lint-check`·`format-check`·`typecheck`·`vulture-check` |
+| **test** | `postgres:15` 서비스로 `pytest` unit+integration (통합은 `ASGITransport`라 Redis/MinIO 불필요) |
+| **security** | `pip-audit` (informational — 이미지 게이트를 막지 않음) |
+| **docker** | quality·test 통과 시 이미지 build. `main` push면 **GHCR**(`ghcr.io/<owner>/puppytalk-be`)에 push |
+
+트리거는 `main` push + 모든 PR입니다. 실제 배포 대상(ECS)·인프라(ALB·RDS·CloudWatch)는
+별도 인프라 레포(`2-kyjness-community-infra`, Terraform)에서 관리합니다.
+
+관측성: `/livez`(liveness)·`/readyz`(readiness — DB=hard, Redis=soft)·`/metrics`(Prometheus RED)를
+노출합니다([ADR 0006](docs/adr/0006-observability.md)).
+
+---
+
 ## 확장 전략
 
 ### 기능
