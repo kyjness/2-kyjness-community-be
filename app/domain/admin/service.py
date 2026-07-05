@@ -1,6 +1,5 @@
 # 관리자 전용: 신고 게시글/댓글 목록·블라인드 해제·유저 정지·게시글 삭제. AsyncSession.
 
-import asyncio
 from typing import Any
 from uuid import UUID
 
@@ -16,6 +15,7 @@ from app.common.exceptions import (
     UserNotFoundException,
     UserWithdrawnException,
 )
+from app.domain.admin.model import AdminReportsModel
 from app.domain.admin.schema import ReportedPostAuthorInfo, ReportedPostItem
 from app.domain.auth.service import AuthService
 from app.domain.comments.model import CommentsModel
@@ -24,6 +24,13 @@ from app.domain.reports.model import ReportsModel
 from app.domain.users.model import UsersModel
 
 CONTENT_PREVIEW_LEN = 80  # 게시글/댓글 내용 미리보기 글자 수
+
+
+def _content_preview(content: str | None) -> str:
+    text = content or ""
+    if len(text) > CONTENT_PREVIEW_LEN:
+        return text[:CONTENT_PREVIEW_LEN] + "…"
+    return text[:CONTENT_PREVIEW_LEN]
 
 
 def _author_from_user(user) -> tuple[ReportedPostAuthorInfo | None, str | None]:
@@ -49,89 +56,81 @@ class AdminService:
         db: AsyncSession,
     ) -> tuple[list[ReportedPostItem], int]:
         async with db.begin():
-            # 각각 최대 500건씩 조회 후 병합·정렬·페이지 슬라이스
-            fetch_size = min(500, max(size * 2, (page) * size))
-            posts, total_posts = await PostsModel.get_reported_posts(page=1, size=fetch_size, db=db)
-            comments, total_comments = await CommentsModel.get_reported_comments(
-                page=1, size=fetch_size, db=db
+            # 신고된 게시글·댓글을 DB-side UNION ALL로 합쳐 정렬·페이지(#5). 인메모리 병합·cap 없이
+            # 페이지 경계·total이 정확하다. 여기서 나온 (type, id) 순서를 그대로 유지해 하이드레이션한다.
+            page_rows, total = await AdminReportsModel.page_reported_targets(
+                offset=(page - 1) * size, size=size, db=db
             )
-            post_ids = [p.id for p in posts]
-            comment_ids = [c.id for c in comments]
-            (
-                last_at_by_post,
-                last_at_by_comment,
-                reasons_by_post,
-                reasons_by_comment,
-            ) = await asyncio.gather(
-                ReportsModel.bulk_max_created_at_by_target_ids(TargetType.POST, post_ids, db=db),
-                ReportsModel.bulk_max_created_at_by_target_ids(
-                    TargetType.COMMENT, comment_ids, db=db
-                ),
-                ReportsModel.bulk_reasons_ordered_by_target_ids(TargetType.POST, post_ids, db=db),
-                ReportsModel.bulk_reasons_ordered_by_target_ids(
-                    TargetType.COMMENT, comment_ids, db=db
-                ),
+            post_ids = [tid for ttype, tid in page_rows if ttype == TargetType.POST.value]
+            comment_ids = [tid for ttype, tid in page_rows if ttype == TargetType.COMMENT.value]
+
+            posts = await PostsModel.get_reported_by_ids(post_ids, db=db)
+            comments = await CommentsModel.get_reported_by_ids(comment_ids, db=db)
+            last_at_by_post = await ReportsModel.bulk_max_created_at_by_target_ids(
+                TargetType.POST, post_ids, db=db
             )
-            post_items: list[ReportedPostItem] = []
-            for p in posts:
-                if p.user_id is None:
-                    continue
-                author, author_status = _author_from_user(p.user)
-                content_preview = (p.content or "")[:CONTENT_PREVIEW_LEN]
-                if len(p.content or "") > CONTENT_PREVIEW_LEN:
-                    content_preview += "…"
-                post_items.append(
-                    ReportedPostItem(
-                        target_type="POST",
-                        id=p.id,
-                        post_id=p.id,
-                        title=p.title or "",
-                        content_preview=content_preview,
-                        user_id=p.user_id,
-                        author=author,
-                        author_status=author_status,
-                        report_count=p.report_count,
-                        report_reasons=reasons_by_post.get(p.id, []),
-                        is_blinded=p.is_blinded,
-                        created_at=p.created_at,
-                        last_reported_at=last_at_by_post.get(p.id),
+            last_at_by_comment = await ReportsModel.bulk_max_created_at_by_target_ids(
+                TargetType.COMMENT, comment_ids, db=db
+            )
+            reasons_by_post = await ReportsModel.bulk_reasons_ordered_by_target_ids(
+                TargetType.POST, post_ids, db=db
+            )
+            reasons_by_comment = await ReportsModel.bulk_reasons_ordered_by_target_ids(
+                TargetType.COMMENT, comment_ids, db=db
+            )
+            titles_map = await PostsModel.get_titles_by_ids(
+                list({c.post_id for c in comments}), db=db
+            )
+
+            posts_by_id = {p.id: p for p in posts}
+            comments_by_id = {c.id: c for c in comments}
+
+            items: list[ReportedPostItem] = []
+            for ttype, tid in page_rows:
+                if ttype == TargetType.POST.value:
+                    p = posts_by_id.get(tid)
+                    if p is None or p.user_id is None:
+                        continue
+                    author, author_status = _author_from_user(p.user)
+                    items.append(
+                        ReportedPostItem(
+                            target_type="POST",
+                            id=p.id,
+                            post_id=p.id,
+                            title=p.title or "",
+                            content_preview=_content_preview(p.content),
+                            user_id=p.user_id,
+                            author=author,
+                            author_status=author_status,
+                            report_count=p.report_count,
+                            report_reasons=reasons_by_post.get(p.id, []),
+                            is_blinded=p.is_blinded,
+                            created_at=p.created_at,
+                            last_reported_at=last_at_by_post.get(p.id),
+                        )
                     )
-                )
-            title_post_ids = list({c.post_id for c in comments})
-            titles_map = await PostsModel.get_titles_by_ids(title_post_ids, db=db)
-            comment_items: list[ReportedPostItem] = []
-            for c in comments:
-                if c.author_id is None:
-                    continue
-                author, author_status = _author_from_user(c.author)
-                content_preview = (c.content or "")[:CONTENT_PREVIEW_LEN]
-                if len(c.content or "") > CONTENT_PREVIEW_LEN:
-                    content_preview += "…"
-                comment_items.append(
-                    ReportedPostItem(
-                        target_type="COMMENT",
-                        id=c.id,
-                        post_id=c.post_id,
-                        title=titles_map.get(c.post_id, ""),
-                        content_preview=content_preview,
-                        user_id=c.author_id,
-                        author=author,
-                        author_status=author_status,
-                        report_count=c.report_count,
-                        report_reasons=reasons_by_comment.get(c.id, []),
-                        is_blinded=c.is_blinded,
-                        created_at=c.created_at,
-                        last_reported_at=last_at_by_comment.get(c.id),
+                else:
+                    c = comments_by_id.get(tid)
+                    if c is None or c.author_id is None:
+                        continue
+                    author, author_status = _author_from_user(c.author)
+                    items.append(
+                        ReportedPostItem(
+                            target_type="COMMENT",
+                            id=c.id,
+                            post_id=c.post_id,
+                            title=titles_map.get(c.post_id, ""),
+                            content_preview=_content_preview(c.content),
+                            user_id=c.author_id,
+                            author=author,
+                            author_status=author_status,
+                            report_count=c.report_count,
+                            report_reasons=reasons_by_comment.get(c.id, []),
+                            is_blinded=c.is_blinded,
+                            created_at=c.created_at,
+                            last_reported_at=last_at_by_comment.get(c.id),
+                        )
                     )
-                )
-            merged = post_items + comment_items
-            merged.sort(
-                key=lambda x: x.last_reported_at or x.created_at,
-                reverse=True,
-            )
-            total = total_posts + total_comments
-            start = (page - 1) * size
-            items = merged[start : start + size]
             return items, total
 
     @classmethod

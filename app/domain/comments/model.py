@@ -325,34 +325,17 @@ class CommentsModel:
         return row or 0
 
     @classmethod
-    async def get_reported_comments(
-        cls,
-        page: int = 1,
-        size: int = 20,
-        *,
-        db: AsyncSession,
-    ) -> tuple[list["Comment"], int]:
-        """report_count > 0 인 댓글 목록 (관리자 대시보드용). author 로드."""
-        offset = (page - 1) * size
-        stmt = (
+    async def get_reported_by_ids(cls, comment_ids: list[UUID], db: AsyncSession) -> list["Comment"]:
+        """신고 목록 하이드레이션용 id 배치 조회. 응답은 본문·작성자만 쓰므로
+        작성자+프로필 이미지만 eager-load 한다(정렬·페이지는 UNION 쿼리가 담당)."""
+        if not comment_ids:
+            return []
+        result = await db.execute(
             select(Comment)
-            .where(Comment.report_count > 0)
-            .where(Comment.deleted_at.is_(None))
-            .options(
-                joinedload(Comment.author).joinedload(User.profile_image),
-            )
-            .order_by(Comment.report_count.desc(), Comment.created_at.desc())
+            .where(Comment.id.in_(comment_ids))
+            .options(joinedload(Comment.author).joinedload(User.profile_image))
         )
-        count_stmt = (
-            select(func.count(Comment.id))
-            .where(Comment.report_count > 0)
-            .where(Comment.deleted_at.is_(None))
-        )
-        total = (await db.execute(count_stmt)).scalar_one_or_none() or 0
-        stmt = stmt.limit(size).offset(offset)
-        result = await db.execute(stmt)
-        comments = list(result.unique().scalars().all())
-        return comments, total
+        return list(result.unique().scalars().all())
 
     @classmethod
     async def increment_report_count(cls, comment_id: UUID, db: AsyncSession) -> int | None:

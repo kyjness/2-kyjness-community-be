@@ -602,31 +602,17 @@ class PostsModel:
         return result.scalar_one_or_none() is not None
 
     @classmethod
-    async def get_reported_posts(
-        cls,
-        page: int = 1,
-        size: int = 20,
-        *,
-        db: AsyncSession,
-    ) -> tuple[list[Post], int]:
-        offset = (page - 1) * size
-        stmt_base = (
+    async def get_reported_by_ids(cls, post_ids: list[UUID], db: AsyncSession) -> list[Post]:
+        """신고 목록 하이드레이션용 id 배치 조회. 응답은 제목·본문·작성자만 쓰므로
+        작성자+프로필 이미지만 eager-load 한다(정렬·페이지는 UNION 쿼리가 담당)."""
+        if not post_ids:
+            return []
+        result = await db.execute(
             select(Post)
-            .where(Post.deleted_at.is_(None))
-            .where(Post.report_count > 0)
-            .options(*_post_author_and_content_loads())
-            .order_by(Post.report_count.desc(), Post.created_at.desc())
+            .where(Post.id.in_(post_ids))
+            .options(joinedload(Post.user).joinedload(User.profile_image))
         )
-        count_stmt = (
-            select(func.count(Post.id))
-            .where(Post.deleted_at.is_(None))
-            .where(Post.report_count > 0)
-        )
-        total = (await db.execute(count_stmt)).scalar_one_or_none() or 0
-        stmt = stmt_base.limit(size).offset(offset)
-        result = await db.execute(stmt)
-        posts = list(result.unique().scalars().all())
-        return posts, total
+        return list(result.unique().scalars().all())
 
     @classmethod
     async def get_like_count(cls, post_id: UUID, db: AsyncSession) -> int:
