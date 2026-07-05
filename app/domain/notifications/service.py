@@ -12,7 +12,6 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import NotificationKind
-from app.common.schemas import PaginatedResponse
 from app.core.config import settings
 from app.core.ids import uuid_to_base62
 from app.domain.notifications.model import Notification, NotificationsModel
@@ -214,22 +213,15 @@ class NotificationService:
         cls,
         user_id: UUID,
         *,
-        page: int,
+        cursor_id: UUID | None,
         size: int,
         db: AsyncSession,
-    ) -> PaginatedResponse[NotificationItem]:
+    ) -> tuple[list[NotificationItem], bool]:
         async with db.begin():
-            rows, total = await NotificationsModel.list_for_user(
-                user_id, page=page, size=size, db=db
+            rows, has_more = await NotificationsModel.list_for_user(
+                user_id, cursor_id=cursor_id, size=size, db=db
             )
-        if not rows:
-            return PaginatedResponse(items=[], has_more=False, total=total)
-        has_more = page * size < total
-        return PaginatedResponse(
-            items=[cls.row_to_item(r) for r in rows],
-            has_more=has_more,
-            total=total,
-        )
+        return [cls.row_to_item(r) for r in rows], has_more
 
     @classmethod
     async def mark_read(

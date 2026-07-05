@@ -19,7 +19,8 @@ from app.api.dependencies import (
 from app.common import (
     ApiCode,
     ApiResponse,
-    PaginatedResponse,
+    CursorPage,
+    OptionalPublicId,
     PublicId,
     api_response,
     dump_api_response,
@@ -72,16 +73,21 @@ async def notifications_stream(
     )
 
 
-@router.get("", status_code=200, response_model=ApiResponse[PaginatedResponse[NotificationItem]])
+@router.get("", status_code=200, response_model=ApiResponse[CursorPage[NotificationItem]])
 async def list_notifications(
     request: Request,
-    page: int = Query(1, ge=1),
+    cursor: Annotated[
+        OptionalPublicId,
+        Query(description="무한 스크롤: 직전 응답의 마지막 알림 id(공개 ID). 미지정 시 처음부터."),
+    ] = None,
     size: int = Query(20, ge=1, le=100),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_slave_db),
 ):
-    data = await NotificationService.list_notifications(user.id, page=page, size=size, db=db)
-    return api_response(request, code=ApiCode.OK, data=data)
+    items, has_more = await NotificationService.list_notifications(
+        user.id, cursor_id=cursor, size=size, db=db
+    )
+    return api_response(request, code=ApiCode.OK, data=CursorPage(items=items, has_more=has_more))
 
 
 @router.post(
