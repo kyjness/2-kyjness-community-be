@@ -18,7 +18,6 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import (
@@ -31,11 +30,9 @@ from sqlalchemy.orm import (
 )
 
 from app.core.ids import new_uuid7
-from app.db.base_class import Base, utc_now
+from app.db.base_class import PG_UUID, Base, utc_now
 from app.domain.posts.model import Post
 from app.domain.users.model import DogProfile, User, UserBlock
-
-_PG_UUID = PG_UUID(as_uuid=True)
 
 
 class CommentAuthorPermissionRow(NamedTuple):
@@ -47,15 +44,15 @@ class CommentAuthorPermissionRow(NamedTuple):
 class Comment(Base):
     __tablename__ = "comments"
 
-    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
     post_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True
+        PG_UUID, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True
     )
     author_id: Mapped[UUID | None] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+        PG_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
     parent_id: Mapped[UUID | None] = mapped_column(
-        _PG_UUID, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True
+        PG_UUID, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True, index=True
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     like_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -91,10 +88,10 @@ class CommentLike(Base):
     __tablename__ = "comment_likes"
 
     comment_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("comments.id", ondelete="CASCADE"), primary_key=True
+        PG_UUID, ForeignKey("comments.id", ondelete="CASCADE"), primary_key=True
     )
     user_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -325,7 +322,9 @@ class CommentsModel:
         return row or 0
 
     @classmethod
-    async def get_reported_by_ids(cls, comment_ids: list[UUID], db: AsyncSession) -> list["Comment"]:
+    async def get_reported_by_ids(
+        cls, comment_ids: list[UUID], db: AsyncSession
+    ) -> list["Comment"]:
         """신고 목록 하이드레이션용 id 배치 조회. 응답은 본문·작성자만 쓰므로
         작성자+프로필 이미지만 eager-load 한다(정렬·페이지는 UNION 쿼리가 담당)."""
         if not comment_ids:

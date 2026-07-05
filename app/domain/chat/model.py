@@ -14,13 +14,10 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.ids import new_uuid7
-from app.db.base_class import Base, utc_now
-
-_PG_UUID = PG_UUID(as_uuid=True)
+from app.db.base_class import PG_UUID, Base, utc_now
 
 
 def normalize_dm_user_ids(user_a: UUID, user_b: UUID) -> tuple[UUID, UUID]:
@@ -37,12 +34,12 @@ class ChatRoom(Base):
         CheckConstraint("user1_id < user2_id", name="ck_chat_rooms_user_order"),
     )
 
-    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
     user1_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     user2_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
@@ -71,12 +68,12 @@ class ChatMessage(Base):
         ),
     )
 
-    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
     room_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False
+        PG_UUID, ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False
     )
     sender_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

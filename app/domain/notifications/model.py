@@ -6,16 +6,13 @@ from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, delete, select, text, update
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.enums import NotificationKind
 from app.core.ids import new_uuid7
-from app.db.base_class import Base, utc_now
-
-_PG_UUID = PG_UUID(as_uuid=True)
+from app.db.base_class import PG_UUID, Base, utc_now
 
 
 class Notification(Base):
@@ -28,19 +25,19 @@ class Notification(Base):
         Index("ix_notifications_user_unread", "user_id", postgresql_where=text("read_at IS NULL")),
     )
 
-    id: Mapped[UUID] = mapped_column(_PG_UUID, primary_key=True, default=new_uuid7)
+    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
     user_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     kind: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_id: Mapped[UUID | None] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        PG_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     post_id: Mapped[UUID | None] = mapped_column(
-        _PG_UUID, ForeignKey("posts.id", ondelete="CASCADE"), nullable=True
+        PG_UUID, ForeignKey("posts.id", ondelete="CASCADE"), nullable=True
     )
     comment_id: Mapped[UUID | None] = mapped_column(
-        _PG_UUID, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True
+        PG_UUID, ForeignKey("comments.id", ondelete="CASCADE"), nullable=True
     )
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

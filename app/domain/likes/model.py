@@ -6,24 +6,21 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, delete, select
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.base_class import Base, utc_now
-
-_PG_UUID = PG_UUID(as_uuid=True)
+from app.db.base_class import PG_UUID, Base, utc_now
 
 
 class PostLike(Base):
     __tablename__ = "post_likes"
 
     post_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
+        PG_UUID, ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True
     )
     user_id: Mapped[UUID] = mapped_column(
-        _PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
