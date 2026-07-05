@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -24,6 +24,8 @@ from app.core.exception_handlers import register_exception_handlers
 from app.core.middleware import (
     RequestIdMiddleware,
     access_log_middleware,
+    metrics_middleware,
+    render_metrics,
     security_headers_middleware,
 )
 from app.core.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -147,6 +149,7 @@ if settings.TRUSTED_HOSTS != ["*"]:
 # GZip은 안쪽(코드상 상단)에 두어 IP·Request ID 흐름을 건드리지 않고 응답만 압축.
 app.middleware("http")(security_headers_middleware)
 app.middleware("http")(access_log_middleware)
+app.middleware("http")(metrics_middleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(ProxyHeadersMiddleware)
@@ -194,6 +197,13 @@ async def readyz(request: Request):
     if ready:
         return payload
     return JSONResponse(status_code=503, content=payload)
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus 스크레이프 엔드포인트(비-prefix). 스크레이퍼가 주기적으로 pull."""
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
 
 
 # 3. 루트 및 헬스체크용 공통 라우터 생성
