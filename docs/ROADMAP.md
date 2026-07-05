@@ -6,8 +6,8 @@
 ## 단계
 - [x] **Inception** — 운영 봉투·범위 (`00`)
 - [x] **Elaboration** — 횡단 결정 (`01`) + ADR 0001~0006 + `/adr` 커맨드
-- [ ] **Construction** — 도메인 재건 (아래) ← **진행 중**
-- [ ] **Transition** — 배포·모니터링
+- [x] **Construction** — 도메인 재건 (아래) **완료**
+- [ ] **Transition** — 배포·모니터링 ← **다음**
 
 ## Construction 체크리스트 (재건 순서)
 
@@ -55,7 +55,11 @@
   - [x] 부수: `reports(target_type, target_id) WHERE deleted_at IS NULL` 부분 인덱스(마이그레이션 011)로 집계 스캔 제거, 저자 없는(SET NULL) 신고 콘텐츠를 total·목록에서 일치 제외
   - [x] 테스트: UNION 페이지 컴파일·인덱스 존재·offset 로더 대체 단위 + 신고 피드 interleave·페이지 경계 무중복 통합(무커버리지 해소)
   - [x] 마감: `/code-review`(정확성 0·정리 0) · `/security-review`(취약점 0)
-- [ ] **정리(글로벌)** — #13 UserBlock 중복 인덱스 · #18 `_PG_UUID` 중복 · #20 `__future__` 일관성
+- [x] **정리(글로벌)** — #13 UserBlock 중복 인덱스 · #18 `_PG_UUID` 중복 · #20 `__future__` 일관성
+  - [x] #13: `UserBlock`의 복합 PK와 중복인 `UniqueConstraint` 제거(형제 `PostLike`·`CommentLike`와 동형). 마이그레이션 `012`(head `011`에서 체인). block_user는 plain INSERT라 제약 참조 upsert 없음
+  - [x] #18: 7개 모델 파일에 복제된 `_PG_UUID`를 `base_class.PG_UUID` 하나로 중앙화 — `as_uuid=True` 불변식 단일화(타입 인스턴스 공유는 SQLAlchemy에서 안전)
+  - [x] #20: 35개 파일에만 있던 `from __future__ import annotations`를 **제거로 통일**(88개 이미 부재·`py311`·`TYPE_CHECKING` 없음). 드러난 미따옴표 forward-ref는 따옴표로 명시, 전 모듈 import 스모크로 NameError 부재 확인
+  - [x] 마감: `/code-review`(정확성 0·정리 0 — 순수 정리라 복잡도 미추가) · ADR 불필요(load-bearing 결정 아님)
 
 ## Transition (Ops)
 - [ ] 관측성 인프라 — `/metrics`(prometheus) · 헬스 liveness/readiness 분리
@@ -105,5 +109,8 @@
 | reports (target_type, target_id) 부분 인덱스 | `af448bba` |
 | ADR 0012 관리자 신고 피드 페이지네이션 | `137d806b` |
 | reports/admin 테스트 보강 | `9c25cf37` |
+| user_blocks 중복 UNIQUE 제거·마이그레이션 012(#13) | `170a5817` |
+| _PG_UUID base_class 공용 타입 중앙화(#18) | `e03876d5` |
+| `__future__` annotations 제거로 통일(#20) | `818444a6` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.

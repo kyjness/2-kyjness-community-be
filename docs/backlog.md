@@ -246,6 +246,8 @@ class UserBlock(Base):
 
 복합 PK가 이미 유니크를 보장하므로 `UniqueConstraint`는 중복된 인덱스다. 불필요한 인덱스를 마이그레이션으로 제거.
 
+> **수정 완료(정리 도메인)**: `UserBlock.__table_args__`의 중복 `UniqueConstraint` 제거(복합 PK가 유니크 보장, 형제 `PostLike`·`CommentLike`와 동형). 마이그레이션 `012`에서 `drop_constraint("uq_user_blocks_blocker_blocked")`(head `011`에서 체인). block_user는 plain INSERT라 이 제약을 참조하는 upsert 없음을 확인.
+
 ---
 
 ### 14. `Settings` — pydantic-settings 미사용
@@ -314,6 +316,8 @@ Redis Cluster 해시 슬롯 제어를 위한 `{}` 문법처럼 보이지만 Pyth
 
 `app/domain/users/model.py`, `app/domain/comments/model.py`, `app/domain/posts/model.py`에 각각 `_PG_UUID = PG_UUID(as_uuid=True)`가 별도로 정의된다. `app/db/base_class.py`에 한 번만 정의하고 임포트.
 
+> **수정 완료(정리 도메인)**: 실제로는 7개 모델 파일(`users·comments·posts·notifications·media·likes·chat`)에 복제돼 있었다. `base_class.PG_UUID` 하나로 정의하고 전부 임포트로 교체 — `as_uuid=True` 불변식을 한 곳에서 보장(동일 타입 인스턴스 공유는 SQLAlchemy에서 안전).
+
 ---
 
 ### 19. `chat/service.py:get_room_peer_info` — 채팅방 중복 조회
@@ -334,6 +338,8 @@ res = await db.execute(stmt)
 ### 20. `from __future__ import annotations` 불일치
 
 일부 파일(`auth/service.py`, `notifications/service.py` 등)에는 있고 다른 파일(`users/model.py`, `comments/model.py` 등)에는 없다. Python 3.11+에서는 대부분 불필요하지만 일관성 부족이다.
+
+> **수정 완료(정리 도메인)**: 35개 파일에만 있던 future import를 **제거로 통일**(88개가 이미 부재, `target-version=py311`, `TYPE_CHECKING` 사용처 없음). 제거로 드러난 미따옴표 forward-ref(`posts.model`의 `Mapped[list["Post"]]`·`Mapped[list["PostImage"]]`, `users.schema`의 self 반환 애노테이션)는 따옴표로 명시. 전 모듈 import 스모크로 NameError 부재 확인.
 
 ---
 
