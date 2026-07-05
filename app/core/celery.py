@@ -37,7 +37,7 @@ def _result_backend_url() -> str:
     return _redis_url_with_db(settings.REDIS_URL, settings.CELERY_RESULT_DB)
 
 
-celery_app = Celery(
+celery_app = Celery(  # pyright: ignore[reportCallIssue]  # celery lazy import → 스텁 미비 오탐
     "puppytalk",
     broker=_broker_url(),
     backend=_result_backend_url(),

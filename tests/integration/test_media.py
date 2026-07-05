@@ -91,12 +91,20 @@ async def test_cleanup_keeps_records_when_storage_delete_fails(
     sfx = uuid.uuid4().hex[:8]
     ok_key, fail_key = f"cleanup-ok-{sfx}", f"cleanup-fail-{sfx}"
     ok = Image(
-        file_key=ok_key, file_url="u1", content_type="image/png", size=1,
-        uploader_id=None, created_at=old,
+        file_key=ok_key,
+        file_url="u1",
+        content_type="image/png",
+        size=1,
+        uploader_id=None,
+        created_at=old,
     )
     fail = Image(
-        file_key=fail_key, file_url="u2", content_type="image/png", size=1,
-        uploader_id=None, created_at=old,
+        file_key=fail_key,
+        file_url="u2",
+        content_type="image/png",
+        size=1,
+        uploader_id=None,
+        created_at=old,
     )
     db_session.add_all([ok, fail])
     await db_session.commit()
@@ -117,10 +125,14 @@ async def test_cleanup_keeps_records_when_storage_delete_fails(
         assert fail_key in failed
 
         remaining = (
-            await db_session.execute(
-                select(Image.file_key).where(Image.file_key.in_([ok_key, fail_key]))
+            (
+                await db_session.execute(
+                    select(Image.file_key).where(Image.file_key.in_([ok_key, fail_key]))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # 삭제 실패분만 남고, 성공분은 제거됨.
         assert set(remaining) == {fail_key}
     finally:
@@ -138,12 +150,20 @@ async def test_cleanup_advances_past_failing_head(
     old = utc_now() - timedelta(days=1)
     sfx = uuid.uuid4().hex[:8]
     a = Image(
-        file_key=f"cleanup-a-{sfx}", file_url="u", content_type="image/png", size=1,
-        uploader_id=None, created_at=old,
+        file_key=f"cleanup-a-{sfx}",
+        file_url="u",
+        content_type="image/png",
+        size=1,
+        uploader_id=None,
+        created_at=old,
     )
     b = Image(
-        file_key=f"cleanup-b-{sfx}", file_url="u", content_type="image/png", size=1,
-        uploader_id=None, created_at=old,
+        file_key=f"cleanup-b-{sfx}",
+        file_url="u",
+        content_type="image/png",
+        size=1,
+        uploader_id=None,
+        created_at=old,
     )
     db_session.add_all([a, b])
     await db_session.flush()  # uuid7 PK 확정
@@ -167,10 +187,14 @@ async def test_cleanup_advances_past_failing_head(
         assert head.file_key in failed
 
         remaining = (
-            await db_session.execute(
-                select(Image.file_key).where(Image.file_key.in_([head.file_key, tail.file_key]))
+            (
+                await db_session.execute(
+                    select(Image.file_key).where(Image.file_key.in_([head.file_key, tail.file_key]))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # 실패한 머리는 남고, 커서가 그 뒤로 전진해 꼬리(정상)는 삭제됨.
         assert set(remaining) == {head.file_key}
     finally:
