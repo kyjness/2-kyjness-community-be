@@ -21,10 +21,12 @@ REQUEST_DURATION = Histogram(
     "HTTP 요청 처리 시간(초)",
     ["method", "path"],
 )
+# 라우트 템플릿은 call_next 이후에야 알 수 있어 in-flight 시점엔 미상이므로, 오해를 부르는
+# path 라벨 대신 method로만 계측한다(전체 in-flight 포화도).
 IN_PROGRESS = Gauge(
     "http_requests_in_progress",
     "처리 중인 HTTP 요청 수(in-flight)",
-    ["method", "path"],
+    ["method"],
 )
 
 
@@ -44,8 +46,7 @@ async def metrics_middleware(
 
     method = request.method
     start = time.perf_counter()
-    # in-flight는 라우트 템플릿을 아직 모르므로 미매칭 라벨로 잡고, 완료 시 정확한 라벨로 계측한다.
-    pending = IN_PROGRESS.labels(method=method, path=_UNMATCHED)
+    pending = IN_PROGRESS.labels(method=method)
     pending.inc()
     status = 500
     try:
