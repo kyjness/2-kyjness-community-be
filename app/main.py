@@ -165,6 +165,37 @@ def alb_health_check():
     return {"status": "ok", "message": "PuppyTalk API is running!"}
 
 
+@app.get("/livez")
+def livez():
+    """Liveness probe — 프로세스 생존만 판정(의존성 체크 없음). 실패 시 컨테이너 재시작 신호."""
+    return {"status": "alive"}
+
+
+@app.get("/readyz")
+async def readyz(request: Request):
+    """Readiness probe — 트래픽 수용 가능 여부. DB=hard(없으면 503), Redis=soft(fail-open이라 report만).
+
+    ECS/ALB 타깃 헬스·k8s readiness가 이 경로로 라우팅 제외를 판단한다.
+    """
+    db_ok = await check_database()
+    redis = getattr(request.app.state, "redis", None)
+    redis_ok = False
+    if redis is not None:
+        try:
+            redis_ok = bool(await redis.ping())
+        except Exception:
+            redis_ok = False
+    ready = db_ok  # DB만 hard 의존성. Redis는 미연결이어도 서빙 가능(rate limit fail-open).
+    payload = {
+        "status": "ready" if ready else "not_ready",
+        "db": "ok" if db_ok else "down",
+        "redis": "ok" if redis_ok else "down",
+    }
+    if ready:
+        return payload
+    return JSONResponse(status_code=503, content=payload)
+
+
 # 3. 루트 및 헬스체크용 공통 라우터 생성
 base_router = APIRouter(prefix=_prefix)
 

@@ -14,7 +14,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_SKIP_PATHS = frozenset({"/health"})
+_SKIP_PATHS = frozenset({"/health", "/livez", "/readyz", "/metrics"})
 _KEY_PREFIX = "rl"
 
 # In-memory Fallback: 최대 10,000키, OOM 방지 eviction.
