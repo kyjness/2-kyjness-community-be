@@ -75,6 +75,83 @@
 
 ---
 
+## 아키텍처 다이어그램
+
+### 시스템 토폴로지 (운영 봉투 반영)
+
+앱 인스턴스는 **stateless**로 3~10대 수평 확장하고, **모든 상태는 인스턴스 밖**(PostgreSQL·Redis·S3)에 둔다.
+실시간(WS·SSE)은 Redis Pub/Sub fan-out으로 인스턴스 경계를 넘어 전달된다.
+
+```mermaid
+flowchart TB
+    FE["클라이언트<br/>Web / Mobile"]
+    ALB["ALB · 무중단 배포<br/>(infra repo · Terraform)"]
+
+    subgraph ECS["ECS — 앱 인스턴스 3~10대 (stateless · gunicorn+uvicorn)"]
+        A1["FastAPI 인스턴스<br/>미들웨어 → router → service → repository"]
+    end
+
+    W["Celery Worker<br/>알림 dispatch · 정리 배치"]
+
+    subgraph STATE["인스턴스 밖 공유 상태"]
+        PGW[("PostgreSQL<br/>Writer")]
+        PGR[("PostgreSQL<br/>Reader")]
+        REDIS[("Redis<br/>캐시 · RTR · RateLimit<br/>조회수 버퍼 · Pub/Sub")]
+        S3["S3 / MinIO<br/>이미지"]
+    end
+
+    OBS["관측성<br/>/metrics(Prometheus)<br/>구조화 로그 → CloudWatch"]
+
+    FE -->|"HTTPS /v1/*"| ALB
+    ALB -->|"헬스 /livez · /readyz"| ECS
+    ALB --> ECS
+    ECS -->|CUD| PGW
+    ECS -->|조회| PGR
+    ECS <-->|"캐시·락·Pub/Sub"| REDIS
+    ECS -->|"presigned · put/get"| S3
+    REDIS <-->|broker| W
+    W --> PGW
+    ECS -. scrape · logs .-> OBS
+```
+
+### 요청 레이어링 · 횡단 관심사
+
+```mermaid
+flowchart LR
+    REQ["요청"] --> MW["미들웨어 체인<br/>RequestId · ProxyHeaders · RateLimit<br/>GZip · AccessLog · Metrics · SecurityHeaders"]
+    MW --> RT["Router<br/>(api/v1)"]
+    RT --> SV["Service<br/>도메인 로직 · 트랜잭션 경계"]
+    SV --> RP["Repository<br/>쿼리"]
+    RP --> MD["Model<br/>SQLAlchemy 2.x"]
+    MD --> DB[("PostgreSQL")]
+    SV <-->|"캐시·락·pub/sub · fail-open"| RD[("Redis")]
+    SV --> RESP["ApiResponse<br/>camelCase + requestId"]
+```
+
+### 조회수 write-behind 버퍼링 (ADR 0007 — 대표 차별점)
+
+초당 수백~수천 조회를 매번 DB write하지 않고, Redis에 버퍼링 후 주기적으로 한 번에 반영한다.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant App as App 인스턴스
+    participant R as Redis
+    participant DB as PostgreSQL
+    C->>App: POST /v1/posts/{id}/view
+    App->>R: SET view:{id}:{viewer} NX EX  (중복 조회 차단)
+    alt 신규 조회
+        App->>R: HINCRBY views:buffer {id} +1
+    end
+    App-->>C: 200 (DB write 없음)
+    Note over App,DB: 주기 flush — 인스턴스 1대만 (분산락 CAS)
+    App->>R: RENAME buffer → drain  (원자 스왑)
+    App->>DB: UPDATE view_count += delta
+    App->>R: 락 해제 (값 비교 CAS)
+```
+
+---
+
 ## 아키텍처 · 폴더 구조
 
 `app/` 단일 패키지 아래에 공용 레이어(`api`·`common`·`core`·`db`·`infra`)와 기능 도메인(`domain/`)이
