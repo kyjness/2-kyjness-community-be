@@ -115,6 +115,8 @@ items = merged[start : start + size]  # 메모리에서 500건 범위 내 슬라
 
 **수정**: DB 쪽에서 합산 정렬 쿼리를 구성하거나(UNION), 게시글·댓글 신고 엔드포인트를 분리.
 
+> **수정 완료(reports/admin 도메인)**: 두 테이블을 DB-side `UNION ALL`로 합쳐 `report_count DESC, created_at DESC, id DESC` 단일 정렬·`LIMIT/OFFSET` + `count(*) over union`으로 페이지·total을 DB에서 산출(`AdminReportsModel.page_reported_targets`). 페이지의 `(type, id)`만 받아 id 배치로 하이드레이션해 UNION 순서 그대로 조립 — 인메모리 병합·500 cap·정렬 축 불일치 제거. offset+total은 저트래픽 admin 전제에서 의도적으로 유지([ADR 0012](adr/0012-admin-report-feed-pagination.md)). 부수: `reports(target_type, target_id) WHERE deleted_at IS NULL` 부분 인덱스(마이그레이션 011)로 집계 스캔 제거, 저자 없는(SET NULL) 신고 콘텐츠를 total·목록에서 일치 제외.
+
 ---
 
 ### 6. 댓글 트리 500건 하드 리밋 + 인메모리 페이지네이션

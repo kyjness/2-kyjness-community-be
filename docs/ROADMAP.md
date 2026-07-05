@@ -49,7 +49,12 @@
   - [x] **ADR 0009 실시간 전달** — 기구현된 WebSocket(chat)·SSE(notifications)×Redis Pub/Sub·fail-open·Celery 오프로드 설계를 소급 근거화
   - [x] 테스트: chat 미읽음 집계·멤버십 가드, notifications keyset·total 부재·전체읽음(무커버리지 해소)
   - [x] 마감: `/code-review`(정확성 2건 → 부분 인덱스 술어 정합·id keyset 전환) · `/security-review`(취약점 0)
-- [ ] **reports / admin** — #5 신고 목록 페이지네이션
+- [x] **reports / admin** — #5 신고 목록 페이지네이션
+  - [x] #5: 신고된 게시글·댓글을 DB-side `UNION ALL`로 합쳐 `report_count DESC, created_at DESC, id DESC` 단일 정렬·`LIMIT/OFFSET` + `count(*) over union`로 페이지·total을 DB 산출(`AdminReportsModel.page_reported_targets`). 페이지 `(type, id)`만 id 배치 하이드레이션해 UNION 순서 유지 — 인메모리 병합·500 cap·정렬 축 불일치 제거. 관리자 단독 offset 로더를 by-ids 로더로 대체(불필요 eager-load 축소)
+  - [x] **ADR 0012 페이지네이션 전략** — offset+total을 저트래픽 admin 전제로 유지(공개 피드=cursor와 의도적 비대칭). ADR 0002의 인메모리 슬라이스 지적은 이행하되 메커니즘만 분기
+  - [x] 부수: `reports(target_type, target_id) WHERE deleted_at IS NULL` 부분 인덱스(마이그레이션 011)로 집계 스캔 제거, 저자 없는(SET NULL) 신고 콘텐츠를 total·목록에서 일치 제외
+  - [x] 테스트: UNION 페이지 컴파일·인덱스 존재·offset 로더 대체 단위 + 신고 피드 interleave·페이지 경계 무중복 통합(무커버리지 해소)
+  - [x] 마감: `/code-review`(정확성 0·정리 0) · `/security-review`(취약점 0)
 - [ ] **정리(글로벌)** — #13 UserBlock 중복 인덱스 · #18 `_PG_UUID` 중복 · #20 `__future__` 일관성
 
 ## Transition (Ops)
@@ -96,5 +101,9 @@
 | ADR 0009 실시간 전달 근거화 | `b8052887` |
 | chat/notifications 테스트 보강 | `f6661b31` |
 | chat/notif 리뷰 반영(인덱스 술어·id keyset) | `d3a4a05e` |
+| 신고 목록 DB-side UNION ALL 페이지네이션(#5) | `b357850c` |
+| reports (target_type, target_id) 부분 인덱스 | `af448bba` |
+| ADR 0012 관리자 신고 피드 페이지네이션 | `137d806b` |
+| reports/admin 테스트 보강 | `9c25cf37` |
 
 > 백로그 번호(#n)는 [`backlog.md`](backlog.md) 기준.
