@@ -226,10 +226,25 @@ Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
 
 ## 로컬 실행
 
-두 경로:
-- **A. Docker Compose (권장·원커맨드)** — 클론 후 `docker compose up --build`면 DB·Redis·MinIO와 함께
+세 경로:
+- **0. 전체 스택 원커맨드 (백엔드+프론트)** — `./scripts/dev.sh` (= `uv run poe stack`).
+  compose(DB·Redis·MinIO·API) 기동 → `/v1/health` 대기 → 형제 폴더 프론트의 `pnpm dev`까지 한 번에.
+  옵션: `--backend-only`(백엔드만) · `--down`(스택 종료) · `FE_DIR=` (프론트 경로 지정). 아래 "전체 스택 스크립트" 참고.
+- **A. Docker Compose (백엔드만·원커맨드)** — 클론 후 `docker compose up --build`면 DB·Redis·MinIO와 함께
   API가 `localhost:8000`에 뜬다. 설정 불필요(아래 "Docker" 참고). 프론트는 이 백엔드에 vite 프록시로 붙는다.
 - **B. 호스트 실행 (빠른 reload)** — 의존 서비스만 컨테이너로 띄우고 앱은 호스트에서. Python 3.11+ 필요.
+
+### 전체 스택 스크립트 (`scripts/dev.sh`)
+
+```bash
+./scripts/dev.sh          # 또는: uv run poe stack — 백엔드 스택 + 프론트 dev 서버
+./scripts/dev.sh --backend-only   # = poe stack-backend
+./scripts/dev.sh --down           # = poe stack-down (docker compose down)
+```
+
+백엔드(compose) 기동 → API health 대기 → 프론트 `pnpm dev`를 포그라운드로 실행한다.
+`Ctrl+C`는 프론트만 멈추고 백엔드 스택은 계속 떠 있으므로(빠른 재시작용), 백엔드 종료는 `--down`으로.
+프론트 폴더(`../2-kyjness-community-fe`)가 없으면 백엔드만 실행하고 안내한다.
 
 ### B. 호스트 실행
 
