@@ -19,7 +19,8 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # 유니크 인덱스 생성 전, 기존 데이터에 소유자당 대표견이 2개 이상 있으면 생성이 실패한다.
-    # 소유자별로 가장 이른(uuidv7는 시간정렬이라 MIN=최초 지정) 대표견 1개만 남기고 해제한다.
+    # 소유자별로 가장 이른(uuidv7는 시간정렬) 대표견 1개만 남기고 해제한다.
+    # PostgreSQL엔 MIN(uuid) 집계가 없으므로 ORDER BY id LIMIT 1(uuid 비교연산자 존재)로 최초를 고른다.
     op.execute(
         sa.text(
             """
@@ -27,10 +28,12 @@ def upgrade() -> None:
             SET is_representative = false
             WHERE is_representative = true
               AND id <> (
-                SELECT MIN(d2.id)
+                SELECT d2.id
                 FROM dog_profiles d2
                 WHERE d2.owner_id = dog_profiles.owner_id
                   AND d2.is_representative = true
+                ORDER BY d2.id ASC
+                LIMIT 1
               )
             """
         )
