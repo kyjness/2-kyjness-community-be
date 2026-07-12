@@ -7,6 +7,7 @@ name: puppytalk-be
 services:
   db:
     image: postgres:15-alpine
+    container_name: puppytalk-be-db
     restart: unless-stopped
     ports:
       - "5432:5432"
@@ -25,6 +26,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: puppytalk-be-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -39,6 +41,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    container_name: puppytalk-be-minio
     restart: unless-stopped
     ports:
       - "9000:9000" # S3 API
@@ -53,6 +56,7 @@ services:
   # 최초 1회: 미디어 버킷 생성 + 공개 읽기(이미지 Access Denied 방지)
   minio-init:
     image: minio/mc:latest
+    container_name: puppytalk-be-minio-init
     depends_on:
       - minio
     entrypoint: >
@@ -67,6 +71,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: puppytalk-be-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
