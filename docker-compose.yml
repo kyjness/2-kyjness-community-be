@@ -1,0 +1,109 @@
+name: puppytalk-be
+
+# 로컬 개발 전체 스택 — 클론 후 `docker compose up --build`면 API가 localhost:8000에 뜬다.
+# 컨테이너 네트워킹·개발 자격은 아래 environment로 주입(zero-config). 나머지는 app/core/config.py 기본값.
+# 실제 배포는 ECS task-def/SSM(인프라 레포 설계). 프론트는 이 백엔드(:8000)에 vite 프록시로 붙는다.
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: puppytalk
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d puppytalk"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # 콘솔
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+
+  # 최초 1회: 미디어 버킷 생성 + 공개 읽기(이미지 Access Denied 방지)
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb --ignore-existing local/puppytalk;
+      mc anonymous set download local/puppytalk;
+      exit 0;
+      "
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # DB (컨테이너 네트워킹)
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: puppytalk
+      WRITER_DB_URL: postgresql+psycopg://postgres:postgres@db:5432/puppytalk
+      READER_DB_URL: postgresql+psycopg://postgres:postgres@db:5432/puppytalk
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      # 인증 (로컬 전용 더미 — 배포 시 SSM 주입)
+      JWT_SECRET_KEY: local-dev-only-secret-change-me-0123456789
+      # 스토리지 (로컬 MinIO)
+      STORAGE_BACKEND: s3
+      S3_BUCKET_NAME: puppytalk
+      S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_REGION: ap-northeast-2
+      S3_PUBLIC_BASE_URL: http://localhost:9000/puppytalk
+      # 로컬 편의
+      DEBUG: "true"
+      VIEW_CACHE_TTL_SECONDS: "0"
+    command: >
+      sh -c "alembic upgrade head &&
+             exec gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

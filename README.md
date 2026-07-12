@@ -226,7 +226,12 @@ Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
 
 ## 로컬 실행
 
-Python 3.11+ 필요. DB(PostgreSQL)·Redis는 Docker 사용을 권장합니다.
+두 경로:
+- **A. Docker Compose (권장·원커맨드)** — 클론 후 `docker compose up --build`면 DB·Redis·MinIO와 함께
+  API가 `localhost:8000`에 뜬다. 설정 불필요(아래 "Docker" 참고). 프론트는 이 백엔드에 vite 프록시로 붙는다.
+- **B. 호스트 실행 (빠른 reload)** — 의존 서비스만 컨테이너로 띄우고 앱은 호스트에서. Python 3.11+ 필요.
+
+### B. 호스트 실행
 
 ```bash
 # 1. 의존성
@@ -280,13 +285,22 @@ uv run pytest tests/integration    # PostgreSQL + pg_trgm (스키마는 conftest
 docker run -d --name pg -e POSTGRES_PASSWORD=PASSWORD -e POSTGRES_DB=puppytalk_test -p 5432:5432 postgres:15
 ```
 
-### Docker
+### A. Docker Compose (전체 스택)
+
+`docker-compose.yml`이 DB(PostgreSQL) · Redis · MinIO(S3 호환) · 백엔드를 함께 띄운다.
+컨테이너 네트워킹·개발 자격은 compose에 인라인으로 주입되어 **별도 `.env` 없이 바로 동작**한다.
 
 ```bash
-docker build -t puppytalk-be .
-# 실행에는 DB·Redis·S3(호환) 스토리지가 필요합니다. 인프라 레포의 compose로 전체 스택을 함께 띄우세요.
-# 배포 command 예: alembic upgrade head && gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000
+docker compose up --build -d          # 전체 기동 (backend는 db/redis healthcheck 후 alembic → gunicorn)
+curl http://localhost:8000/v1/health  # {"code":"OK",...} 확인
+docker compose logs -f backend        # 로그
+docker compose down -v                # 중지 + 볼륨 초기화
 ```
+
+- 백엔드: `localhost:8000` (Swagger `/v1/docs`), MinIO 콘솔: `localhost:9001` (minioadmin/minioadmin),
+  미디어 버킷(`puppytalk`)은 `minio-init`가 자동 생성·공개.
+- 프론트 로컬 개발은 프론트 레포에서 `npm run dev` (vite 프록시가 `:8000`으로 붙음).
+- 실 배포 이미지는 동일 `Dockerfile`을 ECS/PaaS가 사용(`alembic upgrade head && gunicorn ...`).
 
 ### 관리자 계정
 
