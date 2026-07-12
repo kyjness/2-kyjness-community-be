@@ -226,84 +226,24 @@ Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
 
 ## 로컬 실행
 
-세 경로:
-- **0. 전체 스택 원커맨드 (백엔드+프론트)** — `./scripts/dev.sh` (= `uv run poe stack`).
-  compose(DB·Redis·MinIO·API) 기동 → `/v1/health` 대기 → 형제 폴더 프론트의 `pnpm dev`까지 한 번에.
-  옵션: `--backend-only`(백엔드만) · `--down`(스택 종료) · `FE_DIR=` (프론트 경로 지정). 아래 "전체 스택 스크립트" 참고.
-- **A. Docker Compose (백엔드만·원커맨드)** — 클론 후 `docker compose up --build`면 DB·Redis·MinIO와 함께
-  API가 `localhost:8000`에 뜬다. 설정 불필요(아래 "Docker" 참고). 프론트는 이 백엔드에 vite 프록시로 붙는다.
-- **B. 호스트 실행 (빠른 reload)** — 의존 서비스만 컨테이너로 띄우고 앱은 호스트에서. Python 3.11+ 필요.
-
-### 전체 스택 스크립트 (`scripts/dev.sh`)
+전체 스택(DB·Redis·MinIO·API + 프론트)을 한 번에 띄우는 `dev.sh`가 기본 경로입니다.
 
 ```bash
-./scripts/dev.sh          # 또는: uv run poe stack — 백엔드 스택 + 프론트 dev 서버
-./scripts/dev.sh --backend-only   # = poe stack-backend
-./scripts/dev.sh --down           # = poe stack-down (docker compose down)
+git clone https://github.com/kyjness/2-kyjness-community-be && cd 2-kyjness-community-be
+./scripts/dev.sh          # compose 기동 → /v1/health 대기 → 형제 폴더 프론트 pnpm dev
 ```
 
-백엔드(compose) 기동 → API health 대기 → 프론트 `pnpm dev`를 포그라운드로 실행한다.
-`Ctrl+C`는 프론트만 멈추고 백엔드 스택은 계속 떠 있으므로(빠른 재시작용), 백엔드 종료는 `--down`으로.
-프론트 폴더(`../2-kyjness-community-fe`)가 없으면 백엔드만 실행하고 안내한다.
+- 뜨는 곳: API `localhost:8000`(Swagger `/v1/docs`) · 프론트 `localhost:5173` · MinIO 콘솔 `localhost:9001`.
+- `Ctrl+C`는 프론트만 멈춥니다(백엔드 스택은 유지 — 빠른 재시작용). 백엔드 종료는 `./scripts/dev.sh --down`.
+- 옵션: `--backend-only`(백엔드만) · `FE_DIR=`(프론트 경로 지정). poe 별칭 `stack`·`stack-backend`·`stack-down`도 동일.
 
-### B. 호스트 실행
+세부 경로(호스트 직접 실행·compose 단독)·검사/테스트·API 문서는 아래에 접어 두었습니다.
 
-```bash
-# 1. 의존성
-uv sync --extra dev            # 런타임 + dev(pytest·ruff·pyright·vulture·poe)
+<details>
+<summary><b>다른 실행 방법 — Docker Compose 단독 · 호스트 직접 실행</b></summary>
 
-# 2. 환경 변수
-cp .env.example .env           # DB_*, JWT_SECRET_KEY, REDIS_URL 등을 채움
-#  - ENVIRONMENT=development(기본) | production — production 계열은 강한 JWT_SECRET_KEY(32자+) 필수
-#  - 스토리지: dev는 MinIO(S3_ENDPOINT_URL 지정), prod는 실제 S3 자격 필수
-
-# 3. DB 스키마 (git pull 후 새 마이그레이션이 생기면 다시 실행)
-uv run poe migrate             # = alembic upgrade head
-
-# 4. 서버
-uv run poe run                 # http://localhost:8000 — 문서는 /v1/docs, 헬스는 /v1/health
-
-# (선택) Celery — CELERY_ENABLED=true 일 때만
-uv run poe celery-worker
-uv run poe celery-beat
-```
-
-프로덕션 기동 시 `validate_settings_for_environment()`가 `JWT_SECRET_KEY`(placeholder 금지·32자+)와
-S3 자격 등을 검사하며, 위반 시 프로세스를 중단합니다.
-
-### API 문서
-
-| 환경 | Swagger UI | ReDoc | OpenAPI JSON |
-|------|-----------|-------|--------------|
-| 로컬 | `/v1/docs` | `/v1/redoc` | `/v1/openapi.json` |
-| 프로덕션 | `https://api.puppytalk.shop/v1/docs` | `/v1/redoc` | `/v1/openapi.json` |
-
-응답·스펙 필드는 프론트 OpenAPI codegen 계약을 위해 **camelCase**로 노출됩니다.
-
-### 검사 · 테스트
-
-```bash
-uv run poe quality   # lint(--fix) + format
-uv run poe check     # lint-check + format-check + typecheck + vulture-check + audit (CI와 동일)
-
-# 테스트 — 통합 테스트는 puppytalk_test DB 필요
-export TEST_DB_URL="postgresql+psycopg://postgres:PASSWORD@localhost:5432/puppytalk_test"
-uv run pytest                      # 전체
-uv run pytest tests/unit           # DB 불필요(검색 검증·트렌드 쿼리·조회수 버퍼·도메인 메트릭 등)
-uv run pytest tests/integration    # PostgreSQL + pg_trgm (스키마는 conftest가 세션 시작 시 생성)
-```
-
-통합 스위트는 세션 스코프 스키마를 공유하며(테스트 간 롤백 없음), Redis 저장소가 필요한 RTR·멱등성
-테스트는 Redis 미연결 시 자동 skip합니다. 컨테이너로 CI를 재현하려면:
-
-```bash
-docker run -d --name pg -e POSTGRES_PASSWORD=PASSWORD -e POSTGRES_DB=puppytalk_test -p 5432:5432 postgres:15
-```
-
-### A. Docker Compose (전체 스택)
-
-`docker-compose.yml`이 DB(PostgreSQL) · Redis · MinIO(S3 호환) · 백엔드를 함께 띄운다.
-컨테이너 네트워킹·개발 자격은 compose에 인라인으로 주입되어 **별도 `.env` 없이 바로 동작**한다.
+**A. Docker Compose (백엔드만)** — 프론트 없이 백엔드 스택만. `docker-compose.yml`이 DB·Redis·MinIO·백엔드를
+함께 띄우며, 개발 자격은 compose에 인라인 주입되어 **별도 `.env` 없이 바로 동작**합니다.
 
 ```bash
 docker compose up --build -d          # 전체 기동 (backend는 db/redis healthcheck 후 alembic → gunicorn)
@@ -312,18 +252,72 @@ docker compose logs -f backend        # 로그
 docker compose down -v                # 중지 + 볼륨 초기화
 ```
 
-- 백엔드: `localhost:8000` (Swagger `/v1/docs`), MinIO 콘솔: `localhost:9001` (minioadmin/minioadmin),
-  미디어 버킷(`puppytalk`)은 `minio-init`가 자동 생성·공개.
-- 프론트 로컬 개발은 프론트 레포에서 `npm run dev` (vite 프록시가 `:8000`으로 붙음).
-- 실 배포 이미지는 동일 `Dockerfile`을 ECS/PaaS가 사용(`alembic upgrade head && gunicorn ...`).
+MinIO 콘솔 `localhost:9001`(minioadmin/minioadmin), 미디어 버킷(`puppytalk`)은 `minio-init`가 자동 생성·공개.
+실 배포 이미지도 동일 `Dockerfile`을 ECS/PaaS가 사용(`alembic upgrade head && gunicorn ...`).
 
-### 관리자 계정
+**B. 호스트 직접 실행 (빠른 reload)** — 의존 서비스만 컨테이너로 띄우고 앱은 호스트에서. Python 3.11+ 필요.
 
-관리자 API(`/v1/admin/*`)는 `role='ADMIN'` 유저만 사용할 수 있습니다.
+```bash
+uv sync --extra dev            # 1. 의존성(런타임 + dev: pytest·ruff·pyright·vulture·poe)
+
+cp .env.example .env           # 2. 환경 변수 — DB_*, JWT_SECRET_KEY, REDIS_URL 등
+#  - ENVIRONMENT=development(기본) | production — production 계열은 강한 JWT_SECRET_KEY(32자+) 필수
+#  - 스토리지: dev는 MinIO(S3_ENDPOINT_URL 지정), prod는 실제 S3 자격 필수
+
+uv run poe migrate             # 3. DB 스키마 = alembic upgrade head (새 마이그레이션 생기면 재실행)
+uv run poe run                 # 4. 서버 http://localhost:8000 (문서 /v1/docs · 헬스 /v1/health)
+
+uv run poe celery-worker       # (선택) Celery — CELERY_ENABLED=true 일 때만
+uv run poe celery-beat
+```
+
+프로덕션 기동 시 `validate_settings_for_environment()`가 `JWT_SECRET_KEY`(placeholder 금지·32자+)와
+S3 자격 등을 검사하며, 위반 시 프로세스를 중단합니다.
+
+</details>
+
+<details>
+<summary><b>검사 · 테스트 (CI와 동일한 게이트)</b></summary>
+
+`ci.yml`이 돌리는 것과 **같은 poe 태스크**를 로컬에서 그대로 실행합니다(push 전 선검증). 태스크 정의는
+`pyproject.toml`의 `[tool.poe.tasks]`가 단일 출처입니다.
+
+```bash
+uv run poe quality   # lint(--fix) + format
+uv run poe check     # lint-check + format-check + typecheck + vulture-check + audit (= CI quality/security 잡)
+
+# 테스트 — 통합 테스트는 puppytalk_test DB 필요
+export TEST_DB_URL="postgresql+psycopg://postgres:PASSWORD@localhost:5432/puppytalk_test"
+uv run pytest tests/unit           # DB 불필요(검색 검증·트렌드 쿼리·조회수 버퍼·도메인 메트릭 등)
+uv run pytest tests/integration    # PostgreSQL + pg_trgm (스키마는 conftest가 세션 시작 시 생성)
+```
+
+통합 스위트는 세션 스코프 스키마를 공유하며(테스트 간 롤백 없음), Redis 저장소가 필요한 RTR·멱등성
+테스트는 Redis 미연결 시 자동 skip합니다. 컨테이너로 CI의 DB를 재현하려면:
+
+```bash
+docker run -d --name pg -e POSTGRES_PASSWORD=PASSWORD -e POSTGRES_DB=puppytalk_test -p 5432:5432 postgres:15
+```
+
+</details>
+
+<details>
+<summary><b>API 문서 · 관리자 계정</b></summary>
+
+| 환경 | Swagger UI | ReDoc | OpenAPI JSON |
+|------|-----------|-------|--------------|
+| 로컬 | `/v1/docs` | `/v1/redoc` | `/v1/openapi.json` |
+| 프로덕션 | `https://api.puppytalk.shop/v1/docs` | `/v1/redoc` | `/v1/openapi.json` |
+
+응답·스펙 필드는 프론트 OpenAPI codegen 계약을 위해 **camelCase**로 노출됩니다.
+
+관리자 API(`/v1/admin/*`)는 `role='ADMIN'` 유저만 사용할 수 있습니다:
 
 ```sql
 UPDATE users SET role = 'ADMIN' WHERE email = 'your-admin@example.com';
 ```
+
+</details>
 
 ---
 
