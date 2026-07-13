@@ -16,6 +16,7 @@ from app.domain.auth.schema import (
     SignUpRequest,
 )
 from app.domain.auth.service import AuthService
+from app.infra.redis import get_app_redis
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -30,7 +31,7 @@ async def signup(
     signup_data: SignUpRequest,
     db: AsyncSession = Depends(get_master_db),
 ):
-    redis: Redis | None = getattr(request.app.state, "redis", None)
+    redis: Redis | None = get_app_redis(request.app)
     await AuthService.signup(signup_data, db=db, redis=redis)
     return api_response(request, code=ApiCode.SIGNUP_SUCCESS, data=None)
 
@@ -41,7 +42,7 @@ async def login(
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_master_db),
 ):
-    redis: Redis | None = getattr(request.app.state, "redis", None)
+    redis: Redis | None = get_app_redis(request.app)
     ttl = _refresh_ttl_seconds()
     payload, refresh_token = await AuthService.login(
         login_data, db=db, redis=redis, refresh_ttl_seconds=ttl
@@ -67,7 +68,7 @@ async def logout(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
-    redis: Redis | None = getattr(request.app.state, "redis", None)
+    redis: Redis | None = get_app_redis(request.app)
     auth = request.headers.get("Authorization") or ""
     access_token = auth[7:].strip() if auth.startswith("Bearer ") else ""
     access_payload = verify_access_token(access_token) if access_token else {}
@@ -90,7 +91,7 @@ async def refresh(
     db: AsyncSession = Depends(get_master_db),
 ):
     refresh_token = request.cookies.get(settings.REFRESH_TOKEN_COOKIE_NAME)
-    redis: Redis | None = getattr(request.app.state, "redis", None)
+    redis: Redis | None = get_app_redis(request.app)
     ttl = _refresh_ttl_seconds()
     data, new_refresh = await AuthService.refresh_tokens(refresh_token, redis, db, ttl)
     response = JSONResponse(

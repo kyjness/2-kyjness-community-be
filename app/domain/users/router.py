@@ -23,6 +23,7 @@ from app.domain.users.schema import (
     UserProfileResponse,
 )
 from app.domain.users.service import UserService
+from app.infra.redis import get_app_redis
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -66,7 +67,7 @@ async def update_password(
     db: AsyncSession = Depends(get_master_db),
 ):
     await UserService.update_password(user.id, password_data, db=db)
-    redis = getattr(request.app.state, "redis", None)
+    redis = get_app_redis(request.app)
     await AuthService.revoke_refresh_for_user(user.id, redis)
     return api_response(request, code=ApiCode.OK, data=None)
 
@@ -77,7 +78,7 @@ async def delete_me(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
 ):
-    redis = getattr(request.app.state, "redis", None)
+    redis = get_app_redis(request.app)
     await AuthService.revoke_refresh_for_user(user.id, redis)
     await UserService.delete_user(user.id, db=db)
     await AuthService.invalidate_user_status_cache(redis, user.id)

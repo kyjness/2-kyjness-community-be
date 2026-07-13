@@ -23,6 +23,7 @@ from app.domain.chat.payload import parse_incoming_message, validation_error_to_
 from app.domain.chat.schema import ChatWsErrorPayload
 from app.domain.chat.service import DM_SAME_USER, ChatService
 from app.domain.chat.ws_auth import authenticate_chat_websocket
+from app.infra.redis import get_app_redis
 
 log = logging.getLogger(__name__)
 
@@ -56,9 +57,7 @@ class _RejectionGate:
 
 
 def _redis_from_websocket(websocket: WebSocket) -> Redis | None:
-    app = websocket.scope.get("app")
-    raw = getattr(app.state, "redis", None) if app is not None else None
-    return raw if isinstance(raw, Redis) else None
+    return get_app_redis(websocket.scope.get("app"))
 
 
 async def _safe_send_text(websocket: WebSocket, text: str) -> None:

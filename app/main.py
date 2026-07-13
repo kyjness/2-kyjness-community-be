@@ -29,6 +29,7 @@ from app.core.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
 from app.core.openapi_camel import openapi_schema_to_camel
 from app.db import check_database
+from app.infra.redis import get_app_redis
 
 
 async def _view_buffer_flush_loop(stop_event: asyncio.Event, redis_client: Any) -> None:
@@ -69,7 +70,7 @@ async def lifespan(app: FastAPI):
 
     await init_redis(app)
 
-    redis_client = getattr(app.state, "redis", None)
+    redis_client = get_app_redis(app)
     await cleanup_once(redis=redis_client)
     stop_event = asyncio.Event()
     cleanup_task = None
@@ -193,7 +194,7 @@ async def readyz(request: Request):
     ECS/ALB 타깃 헬스·k8s readiness가 이 경로로 라우팅 제외를 판단한다.
     """
     db_ok = await check_database()
-    redis = getattr(request.app.state, "redis", None)
+    redis = get_app_redis(request.app)
     redis_ok = False
     if redis is not None:
         try:

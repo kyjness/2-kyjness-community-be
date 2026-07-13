@@ -5,6 +5,7 @@ from app.api.dependencies import CurrentUser, get_current_user_optional, get_sla
 from app.common import ApiCode, ApiResponse, api_response
 from app.domain.posts.schemas import TrendingPostResponse
 from app.domain.posts.services import TrendingPostService
+from app.infra.redis import get_app_redis
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
@@ -27,7 +28,7 @@ async def get_trending_posts(
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
-    redis = getattr(request.app.state, "redis", None)
+    redis = get_app_redis(request.app)
     result = await TrendingPostService.get_trending_posts(
         db=db,
         redis_client=redis,

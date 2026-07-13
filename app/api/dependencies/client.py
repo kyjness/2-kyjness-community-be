@@ -3,19 +3,19 @@
 import hashlib
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter, ValidationError
-from redis.asyncio import Redis
 
 from app.common.codes import ApiCode
 from app.common.responses import get_request_id
 from app.common.schemas import ApiResponse
 from app.core.config import settings
 from app.domain.posts.schemas import PostIdData
+from app.infra.redis import get_app_redis
 
 log = logging.getLogger(__name__)
 
@@ -78,13 +78,6 @@ def _merge_request_id_into_cached_body(body: dict[str, Any], request: Request) -
     return out
 
 
-def _redis_client(request: Request) -> Any | None:
-    redis_raw = getattr(request.app.state, "redis", None)
-    if not isinstance(redis_raw, Redis):
-        return None
-    return redis_raw
-
-
 async def idempotency_before(
     request: Request,
     raw_key: str | None,
@@ -103,7 +96,7 @@ async def idempotency_before(
     if norm is None:
         return None
 
-    rcli = _redis_client(request)
+    rcli = cast(Any, get_app_redis(request.app))
     if rcli is None:
         return None
 
@@ -167,7 +160,7 @@ async def idempotency_after_success(
     if norm is None:
         return
 
-    rcli = _redis_client(request)
+    rcli = cast(Any, get_app_redis(request.app))
     if rcli is None:
         return
 
@@ -201,7 +194,7 @@ async def idempotency_after_failure(
     if norm is None:
         return
 
-    rcli = _redis_client(request)
+    rcli = cast(Any, get_app_redis(request.app))
     if rcli is None:
         return
 

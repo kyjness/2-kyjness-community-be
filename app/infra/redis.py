@@ -9,6 +9,16 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 
+def get_app_redis(app: Any) -> Redis | None:
+    """앱 lifespan에 붙은 클라이언트 조회의 단일 창구. 미초기화·비Redis 값은 None(fail-open).
+
+    bare getattr는 isinstance 가드가 없어 잘못된 state 주입이 하류에서 AttributeError로
+    터진다 — 접근자를 한 곳으로 모아 가드·계약을 통일한다.
+    """
+    raw = getattr(app.state, "redis", None) if app is not None else None
+    return raw if isinstance(raw, Redis) else None
+
+
 def bulk_to_str(value: Any) -> str | None:
     """Redis GET 결과(bytes/str)를 비교용 문자열로 통일한다."""
     if value is None:

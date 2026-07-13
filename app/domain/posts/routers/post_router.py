@@ -25,6 +25,7 @@ from app.common import (
 )
 from app.domain.posts.schemas import PostCreateRequest, PostIdData, PostResponse, PostUpdateRequest
 from app.domain.posts.services import PostService
+from app.infra.redis import get_app_redis
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
@@ -93,7 +94,7 @@ async def get_post(
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
     viewer_key = f"u:{current_user.id}" if current_user else f"ip:{client_id}"
-    redis = getattr(request.app.state, "redis", None)
+    redis = get_app_redis(request.app)
     data = await PostService.get_post_detail(
         post_id,
         db=db,

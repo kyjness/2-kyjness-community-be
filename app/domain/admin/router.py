@@ -19,6 +19,7 @@ from app.domain.admin.schema import (
 )
 from app.domain.admin.service import AdminService
 from app.domain.media.service import MediaService
+from app.infra.redis import get_app_redis
 
 router = APIRouter(
     prefix="/admin",
@@ -117,7 +118,7 @@ async def suspend_user(
     user_id: Annotated[PublicId, Path(..., description="사용자 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
-    redis = getattr(request.app.state, "redis", None)
+    redis = get_app_redis(request.app)
     await AdminService.suspend_user(user_id, db=db, redis=redis)
     return api_response(request, code=ApiCode.OK, data=SuspendedResponse())
 
@@ -132,7 +133,7 @@ async def activate_user(
     user_id: Annotated[PublicId, Path(..., description="사용자 공개 ID (Base62)")],
     db: AsyncSession = Depends(get_master_db),
 ):
-    redis = getattr(request.app.state, "redis", None)
+    redis = get_app_redis(request.app)
     await AdminService.activate_user(user_id, db=db, redis=redis)
     return api_response(request, code=ApiCode.OK, data=ActivatedResponse())
 

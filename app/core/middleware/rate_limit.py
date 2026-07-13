@@ -12,6 +12,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.common import ApiCode
 from app.core.config import settings
 from app.core.metrics import RATE_LIMIT_REJECTIONS
+from app.infra.redis import get_app_redis
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,7 @@ def _redis_from_scope(scope: Scope) -> Redis | None:
     미들웨어 체인 객체를 .app으로 거슬러 올라가는 방식은 어떤 노드도 .state를
     갖지 않아 항상 None이 나온다(분산 rate limit이 조용히 비활성화되는 결함).
     """
-    app = scope.get("app")
-    if app is None:
-        return None
-    return getattr(app.state, "redis", None)
+    return get_app_redis(scope.get("app"))
 
 
 def get_client_ip_from_scope(scope: Scope) -> str:

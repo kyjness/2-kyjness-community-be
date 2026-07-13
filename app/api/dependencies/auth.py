@@ -6,7 +6,6 @@ from typing import Any, cast
 import jwt
 from fastapi import Depends, Request
 from pydantic import Field
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common import BaseSchema, OptionalPublicId, PublicId, UserStatus, UtcDatetime
@@ -19,7 +18,7 @@ from app.domain.auth.user_status_cache import (
     user_status_cache_key,
 )
 from app.domain.users.model import UsersModel
-from app.infra.redis import bulk_to_str
+from app.infra.redis import bulk_to_str, get_app_redis
 
 from .db import get_slave_db
 
@@ -45,12 +44,12 @@ def _bearer_token(request: Request) -> str | None:
 
 async def _ensure_jti_not_blacklisted(jti: str, request: Request) -> None:
     """Access Token jti 블랙리스트(로그아웃). Redis 장애 시 Fail-open."""
-    redis_raw = getattr(request.app.state, "redis", None)
-    if not isinstance(redis_raw, Redis):
+    redis_client = get_app_redis(request.app)
+    if redis_client is None:
         return
     key = access_jti_blacklist_redis_key(jti)
     try:
-        redis = cast(Any, redis_raw)
+        redis = cast(Any, redis_client)
         if await redis.get(key) is not None:
             raise UnauthorizedException(message="인증 토큰이 유효하지 않습니다.")
     except UnauthorizedException:
@@ -120,8 +119,7 @@ async def get_current_user(
 
     # refresh_tokens와 동일한 user:status 캐시(키·TTL 공유)로 정지/탈퇴 사용자를 fast-fail.
     # CurrentUser는 email/nickname/role 등 전체 row가 필요해 ACTIVE 히트 시에도 DB 조회는 유지.
-    redis_raw = getattr(request.app.state, "redis", None)
-    redis_client = redis_raw if isinstance(redis_raw, Redis) else None
+    redis_client = get_app_redis(request.app)
     cached_status: str | None = None
     if redis_client is not None:
         try:
