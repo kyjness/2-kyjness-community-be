@@ -4,15 +4,13 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-from redis.asyncio import Redis
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
     CurrentUser,
     get_current_user,
     get_master_db,
-    get_optional_redis,
     get_slave_db,
 )
 from app.common import (
@@ -21,7 +19,6 @@ from app.common import (
     CursorPage,
     OptionalPublicId,
     api_response,
-    dump_api_response,
 )
 from app.domain.notifications.schema import (
     MarkNotificationsReadData,
@@ -42,22 +39,12 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 async def notifications_stream(
     request: Request,
     user: CurrentUser = Depends(get_current_user),
-    redis: Redis | None = Depends(get_optional_redis),
 ):
-    """Redis Pub/Sub를 구독하는 SSE. 앱에 Redis가 없으면 503(JSON)."""
+    """로컬 팬아웃 큐 기반 SSE. Redis 장애 시에도 스트림은 유지되고 같은 인스턴스
+    이벤트는 계속 수신된다(fail-open) — 503으로 끊는 것보다 낫다."""
 
-    if redis is None:
-        return JSONResponse(
-            status_code=503,
-            content=dump_api_response(
-                request,
-                code=ApiCode.NOTIFICATION_SSE_UNAVAILABLE,
-                message="실시간 알림 스트림을 사용할 수 없습니다. Redis 연결 후 재시도하거나 목록 API를 사용하세요.",
-                data=None,
-            ),
-        )
     return StreamingResponse(
-        NotificationService.sse_subscribe(redis, user.id),
+        NotificationService.sse_subscribe(user.id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

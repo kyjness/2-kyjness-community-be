@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any, cast
 from uuid import UUID
 
@@ -15,16 +15,10 @@ from app.core.config import settings
 from app.core.ids import uuid_to_base62
 from app.domain.notifications.model import Notification, NotificationsModel
 from app.domain.notifications.schema import NotificationItem
+from app.domain.notifications.stream import NOTIF_SSE_FANOUT_CHANNEL, notification_sse_manager
+from app.infra.pubsub import publish_user_envelope
 
 log = logging.getLogger(__name__)
-
-_NOTIF_USER_CHANNEL_PREFIX = "notif:user:"
-
-
-def notification_channel_for_user(user_id: UUID) -> str:
-    """Redis Pub/Sub 채널명. UUID 문자열로 정규화."""
-
-    return f"{_NOTIF_USER_CHANNEL_PREFIX}{user_id}"
 
 
 class NotificationService:
@@ -210,25 +204,27 @@ class NotificationService:
     ) -> None:
         """트랜잭션이 성공적으로 커밋된 뒤에만 호출. Redis 장애 시 DB 데이터는 유지(fail-open)."""
 
-        if redis is not None:
-            payload = cls.build_realtime_payload(
+        payload_json = json.dumps(
+            cls.build_realtime_payload(
                 notification_id,
                 kind,
                 actor_id=actor_id,
                 post_id=post_id,
                 comment_id=comment_id,
-            )
-            try:
-                r = cast(Any, redis)
-                await r.publish(
-                    notification_channel_for_user(recipient_user_id),
-                    json.dumps(payload, ensure_ascii=False),
-                )
-            except Exception:
-                log.exception(
-                    "알림 Redis publish 실패(수신자는 GET /notifications 로 동기화 가능). recipient=%s",
-                    recipient_user_id,
-                )
+            ),
+            ensure_ascii=False,
+        )
+        # 단일 채널 envelope → 각 인스턴스의 공용 리스너가 로컬 SSE로 팬아웃(chat DM과 동형).
+        # publish 실패·Redis 부재 시 이 인스턴스의 스트림에라도 직접 전달 — 다른 인스턴스
+        # 수신자는 GET /notifications로 동기화 가능하다.
+        published = await publish_user_envelope(
+            redis,
+            NOTIF_SSE_FANOUT_CHANNEL,
+            target_user_id=recipient_user_id,
+            payload=payload_json,
+        )
+        if not published:
+            await notification_sse_manager.deliver(recipient_user_id, payload_json)
 
         await cls._dispatch_sns_publish(
             recipient_user_id=recipient_user_id,
@@ -294,40 +290,21 @@ class NotificationService:
 
     @staticmethod
     async def sse_subscribe(
-        redis: Redis,
         user_id: UUID,
         *,
         heartbeat_interval_sec: float = 25.0,
-    ) -> AsyncIterator[str]:
-        """로그인 유저 전용 채널 구독. 클라이언트 연결 해제 시 제너레이터 취소 → pubsub teardown."""
+    ) -> AsyncGenerator[str]:
+        """로컬 팬아웃 큐 대기 — 연결마다 Redis pubsub을 점유하지 않는다(공유 풀 고갈 방지).
+        클라이언트 연결 해제 시 제너레이터 취소 → 큐 등록 해제."""
 
-        channel = notification_channel_for_user(user_id)
-        r = cast(Any, redis)
-        pubsub = r.pubsub()
-        await pubsub.subscribe(channel)
+        queue = await notification_sse_manager.register(user_id)
         try:
             while True:
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True,
-                    timeout=heartbeat_interval_sec,
-                )
-                if message is None:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval_sec)
+                except TimeoutError:
                     yield ": ping\n\n"
                     continue
-                if message.get("type") != "message":
-                    continue
-                raw = message.get("data")
-                if isinstance(raw, bytes):
-                    raw = raw.decode("utf-8")
-                yield f"data: {raw}\n\n"
-        except asyncio.CancelledError:
-            raise
+                yield f"data: {payload}\n\n"
         finally:
-            try:
-                await pubsub.unsubscribe(channel)
-            except Exception:
-                log.exception("알림 pubsub unsubscribe 실패(user_id=%s)", user_id)
-            try:
-                await pubsub.aclose()
-            except Exception:
-                log.exception("알림 pubsub aclose 실패(user_id=%s)", user_id)
+            await notification_sse_manager.unregister(user_id, queue)

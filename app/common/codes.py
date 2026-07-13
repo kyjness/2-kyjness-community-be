@@ -56,5 +56,3 @@ class ApiCode(StrEnum):
     HTTP_ERROR = "HTTP_ERROR"
     # --- Reports ---
     ALREADY_REPORTED = "ALREADY_REPORTED"
-    # --- Notifications (SSE 불가 등) ---
-    NOTIFICATION_SSE_UNAVAILABLE = "NOTIFICATION_SSE_UNAVAILABLE"

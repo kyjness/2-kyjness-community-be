@@ -4,10 +4,12 @@
 - **관련 코드**:
   `app/api/v1/chat/ws.py`(WebSocket `/ws/chat`),
   `app/domain/chat/manager.py`(워커-로컬 `ConnectionManager`),
-  `app/domain/chat/pubsub.py`(단일 채널 fanout·워커 구독 리스너),
+  `app/domain/chat/pubsub.py`(chat DM 채널·publish),
   `app/domain/chat/service.py`(`send_dm_from_ws`·`_fanout_dm`),
   `app/domain/notifications/router.py`(SSE `/notifications/stream`),
   `app/domain/notifications/service.py`(`publish_after_commit`·`sse_subscribe`),
+  `app/domain/notifications/stream.py`(워커-로컬 `SseFanoutManager`),
+  `app/infra/pubsub.py`(envelope publish·공용 구독 리스너),
   `app/worker/jobs/notification_delivery.py`(Celery SNS 배송 잡),
   `app/infra/redis.py`·`app/main.py`(풀 커넥션·lifespan 리스너 배선)
 
@@ -35,19 +37,24 @@
      `EventSource` 자동 재연결, 프록시 친화적, 업그레이드 핸드셰이크 불필요. 25초 `: ping` 하트비트로
      유휴 연결 유지.
 
-2. **멀티 인스턴스 fanout = Redis Pub/Sub**
-   - **채팅**: 단일 채널 `puppytalk:channel:chat:dm` + envelope `{target_user_id, payload}`.
-     워커마다 **전용 Redis 연결로 구독 리스너 1개**(`run_chat_subscribe_listener`, lifespan 기동)를
-     띄우고, 수신 envelope의 `target_user_id`가 로컬에 붙어 있으면 그 소켓으로 push.
-   - **알림**: **수신자별 채널** `notif:user:{uuid}`. SSE 스트림이 열릴 때 그 유저 채널만 구독
-     (`sse_subscribe`)하고, `publish_after_commit`이 트랜잭션 커밋 후 해당 채널로 publish.
-   - 두 경로 모두 **요청 I/O용 풀 커넥션(`app.state.redis`)과 Pub/Sub 전용 소켓을 분리**한다 —
+2. **멀티 인스턴스 fanout = Redis Pub/Sub, 채팅·알림 공용 패턴**
+   - **단일 채널 + envelope `{target_user_id, payload}`** — 채팅 `puppytalk:channel:chat:dm`,
+     알림 `puppytalk:channel:notif:sse`(네임스페이스만 분리).
+   - **인스턴스당 전용 Redis 연결 1개**가 두 채널을 함께 구독(`run_user_fanout_listener`,
+     lifespan 기동)하고, envelope의 `target_user_id`를 **로컬 매니저**로 넘긴다 — 채팅은
+     `ConnectionManager`(WS 소켓), 알림은 `SseFanoutManager`(SSE 스트림별 bounded 큐).
+   - SSE 스트림(`sse_subscribe`)은 Redis를 만지지 않고 **로컬 큐 대기**만 한다. 초기 설계의
+     "연결마다 유저별 채널 구독"은 SSE 동시 연결 수만큼 공유 풀(128) pubsub을 점유해, 풀 한도
+     근접 시 rate limit·인증 캐시·조회수 버퍼가 연쇄 fail-open되는 결함이라 폐기했다(2차 감사 #23).
+   - **요청 I/O용 풀 커넥션(`app.state.redis`)과 Pub/Sub 전용 소켓을 분리**한다 —
      구독 루프는 오래 블록되므로 풀을 점유하면 안 된다.
 
 3. **fail-open 복원력** ([ADR 0005](0005-resilience-no-circuit-breaker.md) 정합)
-   - Redis가 없거나(`None`) publish/subscribe가 실패해도 **DB·인앱 데이터는 유지**된다. 채팅 fanout은
-     Redis 장애 시 **로컬 워커 전달만** 시도(`_fanout_dm`). 알림 publish 실패는 삼켜지고 수신자는
-     `GET /notifications`로 동기화한다. 실시간 전달 실패가 **쓰기 트랜잭션을 절대 되돌리지 않는다**.
+   - Redis가 없거나(`None`) publish/subscribe가 실패해도 **DB·인앱 데이터는 유지**된다.
+     publish 헬퍼는 예외를 삼키고 **성공 여부를 반환**하며, 실패 시 채팅·알림 모두 **같은
+     인스턴스의 수신자에게는 로컬 매니저로 직접 전달**한다(다른 인스턴스 수신자는
+     `GET /notifications`·재접속으로 동기화). 실시간 전달 실패가 **쓰기 트랜잭션을 절대
+     되돌리지 않는다**. 알림 SSE 엔드포인트도 Redis 부재 시 503이 아니라 스트림을 유지한다.
 
 4. **오프라인 배송(SNS) 오프로드 = Celery**
    - 실시간 인앱(pub/sub)은 인라인으로 두고, **재시도·백오프가 필요한 외부 I/O인 SNS publish만**
@@ -70,8 +77,10 @@
 **치른 비용**
 - **at-most-once**: Pub/Sub는 fire-and-forget이라 수신자가 오프라인이거나 워커가 publish 순간
   재시작 중이면 그 실시간 이벤트는 유실된다 — DB가 진실이고 클라가 GET으로 재동기하므로 수용.
-- **채팅 단일 채널의 워커별 필터링**: 모든 워커가 모든 DM envelope를 수신해 `target_user_id`로
+- **단일 채널의 워커별 필터링**: 모든 워커가 모든 envelope를 수신해 `target_user_id`로
   거른다(워커 수 × 메시지 수). 운영 봉투 내에서는 수용하되, 초고fanout 시 채널 샤딩이 탈출구다.
+- **느린 SSE 클라이언트의 이벤트 드롭**: 로컬 큐(100)가 차면 신규 이벤트를 버린다 —
+  백프레셔로 전체 팬아웃을 지연시키는 것보다 낫고, 클라는 목록 API로 재동기한다.
 - **전송 이원화**: WebSocket·SSE 두 경로를 유지·테스트해야 한다.
 
 ## 고려한 대안 (Alternatives)
@@ -88,8 +97,8 @@
 
 - **전달 보장(ack·replay·오프라인 큐)**: 실시간은 at-most-once로 두고 지속성은 DB에 위임한다.
   재접속 시 GET 목록으로 재동기 — 실시간 계층에 durable queue를 얹지 않는다.
-- **WS/SSE 공용 추상화 강제**: 전송 시맨틱(양방향 vs 단방향)·채널 전략(단일+envelope vs 유저별)이
-  달라, 억지 통합 대신 각 경로를 그 특성에 맞게 둔다("쓸 데·안 쓸 데 구분").
+- **전송 계층 통일**: 전송 시맨틱(양방향 vs 단방향)이 달라 WS·SSE는 각자 유지한다 — 공용화는
+  fanout 계층(단일 채널+envelope+공용 리스너)까지만("쓸 데·안 쓸 데 구분").
 - **sse-starlette 도입**: `data:`/`: ping` 프레이밍을 직접 다뤄 의존성 1개를 줄인다.
-- **Redis Cluster 슬롯 최적화**: 채팅은 단일 채널이라 크로스-슬롯 이슈가 없고, 알림 유저별 채널도
-  현 단일 노드 전제로 충분. 클러스터 도입은 별도 결정으로 미룬다.
+- **Redis Cluster 슬롯 최적화**: 두 경로 모두 단일 채널이라 크로스-슬롯 이슈가 없다.
+  클러스터 도입은 별도 결정으로 미룬다.

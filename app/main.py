@@ -74,16 +74,30 @@ async def lifespan(app: FastAPI):
     stop_event = asyncio.Event()
     cleanup_task = None
     view_flush_task: asyncio.Task[None] | None = None
-    chat_pubsub_task: asyncio.Task[None] | None = None
+    fanout_listener_task: asyncio.Task[None] | None = None
     if settings.SIGNUP_IMAGE_CLEANUP_INTERVAL > 0:
         cleanup_task = asyncio.create_task(run_loop_async(stop_event, redis=redis_client))
     if redis_client is not None and settings.VIEW_BUFFER_FLUSH_INTERVAL_SECONDS > 0:
         view_flush_task = asyncio.create_task(_view_buffer_flush_loop(stop_event, redis_client))
     if redis_client is not None and settings.REDIS_URL:
-        from app.domain.chat.pubsub import run_chat_subscribe_listener
+        # 인스턴스당 전용 Pub/Sub 연결 1개로 chat DM(WS)·알림(SSE) 채널을 함께 구독.
+        from app.domain.chat.manager import chat_connection_manager
+        from app.domain.chat.pubsub import CHAT_DM_FANOUT_CHANNEL
+        from app.domain.notifications.stream import (
+            NOTIF_SSE_FANOUT_CHANNEL,
+            notification_sse_manager,
+        )
+        from app.infra.pubsub import run_user_fanout_listener
 
-        chat_pubsub_task = asyncio.create_task(
-            run_chat_subscribe_listener(redis_url=settings.REDIS_URL, stop_event=stop_event)
+        fanout_listener_task = asyncio.create_task(
+            run_user_fanout_listener(
+                redis_url=settings.REDIS_URL,
+                handlers={
+                    CHAT_DM_FANOUT_CHANNEL: chat_connection_manager.send_personal_message,
+                    NOTIF_SSE_FANOUT_CHANNEL: notification_sse_manager.deliver,
+                },
+                stop_event=stop_event,
+            )
         )
 
     yield
@@ -107,10 +121,10 @@ async def lifespan(app: FastAPI):
                 await view_flush_task
             except asyncio.CancelledError:
                 pass
-    if chat_pubsub_task is not None:
-        chat_pubsub_task.cancel()
+    if fanout_listener_task is not None:
+        fanout_listener_task.cancel()
         try:
-            await chat_pubsub_task
+            await fanout_listener_task
         except asyncio.CancelledError:
             pass
     await close_redis(app)

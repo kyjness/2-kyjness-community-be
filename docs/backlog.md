@@ -383,6 +383,13 @@ SSE 연결마다 `app.state.redis` 공유 풀(128)에서 pubsub 연결을 점유
 
 **수정 방향**: 알림도 chat 동형으로 통일(인스턴스당 전용 연결 구독 1개 → 로컬 SSE 클라이언트 팬아웃). ADR 0009 갱신.
 
+> **수정 완료**: fanout 공용 인프라 `app/infra/pubsub.py` 신설 — envelope publish(성공 여부 반환)
+> + **전용 연결 1개로 chat·notif 채널 동시 구독** 리스너(`run_user_fanout_listener`). 알림은 단일
+> 채널 `puppytalk:channel:notif:sse` + `SseFanoutManager`(유저별 bounded 큐 100, 가득 차면 드롭)로
+> 전환 — `sse_subscribe`는 Redis 미점유 로컬 큐 대기. publish 실패·Redis 부재 시 로컬 직접 전달로
+> 폴백하고 SSE 503 분기 제거(fail-open). 부수 수정: chat `_fanout_dm`의 로컬 폴백이 publish 내부
+> 예외 삼킴 때문에 **도달 불가능**하던 결함을 성공 여부 반환으로 복원. ADR 0009 갱신, 테스트 12종.
+
 ---
 
 ### 24. 업로드 경로 2벌 공존 (direct multipart + presigned) — P2

@@ -147,16 +147,11 @@ class ChatService:
         sender_id: UUID,
         wire: str,
     ) -> None:
-        if redis is None:
+        # publish는 내부에서 예외를 삼키고 성공 여부만 반환한다 — False면 로컬 소켓에라도
+        # 직접 전달해야 같은 인스턴스 수신자가 유실되지 않는다(다른 인스턴스는 fail-open).
+        if not await publish_chat_dm(redis, target_user_id=peer_id, payload=wire):
             await chat_connection_manager.send_personal_message(peer_id, wire)
-            await chat_connection_manager.send_personal_message(sender_id, wire)
-            return
-        try:
-            await publish_chat_dm(redis, target_user_id=peer_id, payload=wire)
-            await publish_chat_dm(redis, target_user_id=sender_id, payload=wire)
-        except Exception:
-            log.exception("chat redis fanout 실패, 로컬만 시도")
-            await chat_connection_manager.send_personal_message(peer_id, wire)
+        if not await publish_chat_dm(redis, target_user_id=sender_id, payload=wire):
             await chat_connection_manager.send_personal_message(sender_id, wire)
 
     @classmethod
