@@ -1,5 +1,6 @@
-# 요청 기반 클라이언트 식별자. 조회수 중복 방지 등에서 사용.
-# Redis 멱등성: 네임스페이스·fingerprint_scope_parts로 도메인 분리.
+# 요청 기반 클라이언트 식별자 + POST /posts 멱등성(X-Idempotency-Key, ADR 0008).
+# 멱등 소비자는 게시글 생성 하나라 다중 네임스페이스 매개변수화 없이 post:create 전용으로 둔다 —
+# 두 번째 소비자가 생기면 그때 네임스페이스·어댑터를 인자로 끌어올린다.
 import hashlib
 import json
 import logging
@@ -19,7 +20,10 @@ from app.infra.redis import get_app_redis
 
 log = logging.getLogger(__name__)
 
-_IDEMP_POST_CREATE_ADAPTER = TypeAdapter(ApiResponse[PostIdData])
+_IDEMP_NAMESPACE = "post:create"
+_IDEMP_ADAPTER = TypeAdapter(ApiResponse[PostIdData])
+_IDEMP_SUCCESS_STATUS = 201
+_IDEMP_CONFLICT_MESSAGE = "동일 멱등성 키로 게시글 생성이 진행 중입니다."
 
 _IDEMP_KEY_MIN = 8
 _IDEMP_KEY_MAX = 128
@@ -60,16 +64,17 @@ def _coerce_idempotency_key(raw: str | None) -> str | None:
     return s
 
 
-def _idempotency_fingerprint(scope_parts: tuple[str, ...], norm: str) -> str:
-    return hashlib.sha256(":".join((*scope_parts, norm)).encode()).hexdigest()
+def _idempotency_fingerprint(user_id: UUID, norm: str) -> str:
+    # 유저 스코프 fingerprint: 다른 사용자의 같은 키와 충돌·열람되지 않는다(ADR 0008).
+    return hashlib.sha256(f"{user_id}:{norm}".encode()).hexdigest()
 
 
-def _result_redis_key(namespace: str, fp: str) -> str:
-    return f"idemp:{namespace}:res:{fp}"
+def _result_redis_key(fp: str) -> str:
+    return f"idemp:{_IDEMP_NAMESPACE}:res:{fp}"
 
 
-def _lock_redis_key(namespace: str, fp: str) -> str:
-    return f"idemp:{namespace}:lock:{fp}"
+def _lock_redis_key(fp: str) -> str:
+    return f"idemp:{_IDEMP_NAMESPACE}:lock:{fp}"
 
 
 def _merge_request_id_into_cached_body(body: dict[str, Any], request: Request) -> dict[str, Any]:
@@ -78,21 +83,13 @@ def _merge_request_id_into_cached_body(body: dict[str, Any], request: Request) -
     return out
 
 
-async def idempotency_before(
-    request: Request,
-    raw_key: str | None,
-    *,
-    fingerprint_scope_parts: tuple[str, ...],
-    namespace: str,
-    lock_ttl_sec: int,
-    conflict_message: str,
-    success_status: int = 201,
-    cache_adapter: TypeAdapter[Any],
+async def post_create_idempotency_before(
+    request: Request, user_id: UUID, raw_key: str | None
 ) -> JSONResponse | None:
-    try:
-        norm = _normalize_idempotency_key(raw_key)
-    except HTTPException:
-        raise
+    """결과 캐시 히트면 저장된 성공 응답 재생(requestId만 갱신), 미스면 in-flight 락 선점.
+
+    같은 키가 처리 중이면 409, Redis 오류는 멱등성 없이 진행(fail-open, ADR 0005)."""
+    norm = _normalize_idempotency_key(raw_key)
     if norm is None:
         return None
 
@@ -100,12 +97,9 @@ async def idempotency_before(
     if rcli is None:
         return None
 
-    fp = _idempotency_fingerprint(fingerprint_scope_parts, norm)
-    res_key = _result_redis_key(namespace, fp)
-    lock_key = _lock_redis_key(namespace, fp)
-
+    fp = _idempotency_fingerprint(user_id, norm)
     try:
-        cached = await rcli.get(res_key)
+        cached = await rcli.get(_result_redis_key(fp))
         if cached:
             payload: bytes | str
             if isinstance(cached, (bytes, bytearray)):
@@ -113,113 +107,42 @@ async def idempotency_before(
             else:
                 payload = str(cached)
             try:
-                validated = cache_adapter.validate_json(payload)
+                validated = _IDEMP_ADAPTER.validate_json(payload)
             except ValidationError as e:
                 log.warning(
-                    "멱등성 캐시 검증 실패(캐시 미스 처리) ns=%s fp_prefix=%s: %s",
-                    namespace,
+                    "멱등성 캐시 검증 실패(캐시 미스 처리) fp_prefix=%s: %s",
                     fp[:16],
                     e,
                 )
             else:
                 body = validated.model_dump(mode="json", by_alias=True)
                 return JSONResponse(
-                    status_code=success_status,
+                    status_code=_IDEMP_SUCCESS_STATUS,
                     content=_merge_request_id_into_cached_body(body, request),
                 )
 
-        got_lock = await rcli.set(lock_key, "1", nx=True, ex=lock_ttl_sec)
+        got_lock = await rcli.set(
+            _lock_redis_key(fp),
+            "1",
+            nx=True,
+            ex=settings.IDEMPOTENCY_POST_CREATE_LOCK_TTL_SECONDS,
+        )
         if not got_lock:
             raise HTTPException(
                 status_code=409,
                 detail={
                     "code": ApiCode.CONFLICT.value,
-                    "message": conflict_message,
+                    "message": _IDEMP_CONFLICT_MESSAGE,
                     "data": None,
                 },
             )
     except HTTPException:
         raise
     except Exception as e:
-        log.warning("멱등성 Redis 오류(Fail-open) ns=%s: %s", namespace, e)
+        log.warning("멱등성 Redis 오류(Fail-open): %s", e)
         return None
 
     return None
-
-
-async def idempotency_after_success(
-    request: Request,
-    raw_key: str | None,
-    *,
-    fingerprint_scope_parts: tuple[str, ...],
-    namespace: str,
-    result_ttl_sec: int,
-    response_obj: Any,
-) -> None:
-    norm = _coerce_idempotency_key(raw_key)
-    if norm is None:
-        return
-
-    rcli = cast(Any, get_app_redis(request.app))
-    if rcli is None:
-        return
-
-    fp = _idempotency_fingerprint(fingerprint_scope_parts, norm)
-    res_key = _result_redis_key(namespace, fp)
-    lock_key = _lock_redis_key(namespace, fp)
-
-    try:
-        dumped = response_obj.model_dump(mode="json", by_alias=True)
-        await rcli.set(
-            res_key,
-            json.dumps(dumped, ensure_ascii=False),
-            ex=result_ttl_sec,
-        )
-    except Exception as e:
-        log.warning("멱등성 성공 캐시 저장 실패 ns=%s: %s", namespace, e)
-    try:
-        await rcli.delete(lock_key)
-    except Exception as e:
-        log.warning("멱등성 잠금 해제 실패 ns=%s: %s", namespace, e)
-
-
-async def idempotency_after_failure(
-    request: Request,
-    raw_key: str | None,
-    *,
-    fingerprint_scope_parts: tuple[str, ...],
-    namespace: str,
-) -> None:
-    norm = _coerce_idempotency_key(raw_key)
-    if norm is None:
-        return
-
-    rcli = cast(Any, get_app_redis(request.app))
-    if rcli is None:
-        return
-
-    fp = _idempotency_fingerprint(fingerprint_scope_parts, norm)
-    try:
-        await rcli.delete(_lock_redis_key(namespace, fp))
-    except Exception as e:
-        log.warning("멱등성 실패 시 잠금 해제 오류 ns=%s: %s", namespace, e)
-
-
-# --- POST /posts ---
-
-
-async def post_create_idempotency_before(
-    request: Request, user_id: UUID, raw_key: str | None
-) -> JSONResponse | None:
-    return await idempotency_before(
-        request,
-        raw_key,
-        fingerprint_scope_parts=(str(user_id),),
-        namespace="post:create",
-        lock_ttl_sec=settings.IDEMPOTENCY_POST_CREATE_LOCK_TTL_SECONDS,
-        conflict_message="동일 멱등성 키로 게시글 생성이 진행 중입니다.",
-        cache_adapter=_IDEMP_POST_CREATE_ADAPTER,
-    )
 
 
 async def post_create_idempotency_after_success(
@@ -228,14 +151,28 @@ async def post_create_idempotency_after_success(
     raw_key: str | None,
     response_obj: Any,
 ) -> None:
-    await idempotency_after_success(
-        request,
-        raw_key,
-        fingerprint_scope_parts=(str(user_id),),
-        namespace="post:create",
-        result_ttl_sec=settings.IDEMPOTENCY_POST_CREATE_TTL_SECONDS,
-        response_obj=response_obj,
-    )
+    norm = _coerce_idempotency_key(raw_key)
+    if norm is None:
+        return
+
+    rcli = cast(Any, get_app_redis(request.app))
+    if rcli is None:
+        return
+
+    fp = _idempotency_fingerprint(user_id, norm)
+    try:
+        dumped = response_obj.model_dump(mode="json", by_alias=True)
+        await rcli.set(
+            _result_redis_key(fp),
+            json.dumps(dumped, ensure_ascii=False),
+            ex=settings.IDEMPOTENCY_POST_CREATE_TTL_SECONDS,
+        )
+    except Exception as e:
+        log.warning("멱등성 성공 캐시 저장 실패: %s", e)
+    try:
+        await rcli.delete(_lock_redis_key(fp))
+    except Exception as e:
+        log.warning("멱등성 잠금 해제 실패: %s", e)
 
 
 async def post_create_idempotency_after_failure(
@@ -243,9 +180,16 @@ async def post_create_idempotency_after_failure(
     user_id: UUID,
     raw_key: str | None,
 ) -> None:
-    await idempotency_after_failure(
-        request,
-        raw_key,
-        fingerprint_scope_parts=(str(user_id),),
-        namespace="post:create",
-    )
+    norm = _coerce_idempotency_key(raw_key)
+    if norm is None:
+        return
+
+    rcli = cast(Any, get_app_redis(request.app))
+    if rcli is None:
+        return
+
+    fp = _idempotency_fingerprint(user_id, norm)
+    try:
+        await rcli.delete(_lock_redis_key(fp))
+    except Exception as e:
+        log.warning("멱등성 실패 시 잠금 해제 오류: %s", e)
