@@ -10,13 +10,20 @@ from redis.asyncio import Redis
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.common import ApiCode
+from app.common.paths import (
+    HEALTH_PATH,
+    LOGIN_PATH,
+    SIGNUP_CONFIRM_PATH,
+    SIGNUP_PRESIGN_PATH,
+)
 from app.core.config import settings
 from app.core.metrics import RATE_LIMIT_REJECTIONS
 from app.infra.redis import get_app_redis
 
 logger = logging.getLogger(__name__)
 
-_SKIP_PATHS = frozenset({"/health", "/livez", "/readyz", "/metrics"})
+# 프로브·계측 경로는 한도 제외. /livez·/readyz·/metrics는 앱 루트, health는 API prefix 아래.
+_SKIP_PATHS = frozenset({HEALTH_PATH, "/livez", "/readyz", "/metrics"})
 _KEY_PREFIX = "rl"
 
 # In-memory Fallback: 최대 10,000키, OOM 방지 eviction.
@@ -51,15 +58,14 @@ def get_client_ip_from_scope(scope: Scope) -> str:
 
 
 def _path_is_login(path: str) -> bool:
-    p = path.rstrip("/")
-    return p == "/v1/auth/login" or p.endswith("/auth/login")
+    return path.rstrip("/") == LOGIN_PATH
 
 
 def _path_is_signup_upload(path: str) -> bool:
     """비인증 회원가입 업로드 경로(presign·confirm 2단). 글로벌 100/분만으로는 비로그인
     IP가 presign을 대량 발급받아 pending/ 객체를 쌓을 수 있어 전용 한도로 조인다."""
     p = path.rstrip("/")
-    return p.endswith("/media/images/signup/presign") or p.endswith("/media/images/signup/confirm")
+    return p in (SIGNUP_PRESIGN_PATH, SIGNUP_CONFIRM_PATH)
 
 
 def _is_critical_path(path: str) -> bool:
