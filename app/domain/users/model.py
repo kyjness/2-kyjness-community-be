@@ -14,7 +14,9 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    and_,
     delete,
+    or_,
     select,
     text,
     update,
@@ -309,6 +311,21 @@ class UsersModel:
             .where(
                 UserBlock.blocker_id == blocker_id,
                 UserBlock.blocked_id == blocked_id,
+            )
+            .limit(1)
+        )
+        return result.first() is not None
+
+    @classmethod
+    async def block_exists_between(cls, user_a: UUID, user_b: UUID, db: AsyncSession) -> bool:
+        """양방향 차단 관계 존재 여부(방향 무관). DM 등 상호작용 차단 판정용."""
+        result = await db.execute(
+            select(UserBlock.blocker_id)
+            .where(
+                or_(
+                    and_(UserBlock.blocker_id == user_a, UserBlock.blocked_id == user_b),
+                    and_(UserBlock.blocker_id == user_b, UserBlock.blocked_id == user_a),
+                )
             )
             .limit(1)
         )

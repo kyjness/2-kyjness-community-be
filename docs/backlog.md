@@ -503,6 +503,12 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 
 **수정 방향**: WS 수신 루프에 유저 단위 한도(Redis fixed-window 재사용) + 차단 관계 검사 추가.
 
+> **수정 완료**: rate_limit 모듈에 공개 헬퍼 `check_fixed_window`(Redis Lua fixed-window 우선,
+> 부재·장애 시 인스턴스 로컬 메모리 폴백 — 남용 방어라 완전 fail-open 안 함) 추출, WS 수신
+> 루프에서 `chat:ws:{user_id}` 키로 검사(기본 60건/60초, 초과 시 `rate_limited` + retry_after
+> 에러 프레임, 연결은 유지). `send_dm_from_ws`는 방 생성 전에 `block_exists_between`(방향 무관
+> OR 술어 1쿼리)으로 거부 — 응답 문구는 차단 방향을 노출하지 않는 중립 표현. 테스트 6종.
+
 ---
 
 ### 33. 트렌딩 캐시 wait-timeout이 빈 목록 반환 — P2

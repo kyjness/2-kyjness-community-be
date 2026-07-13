@@ -117,6 +117,26 @@ async def _check_redis_fixed_window(
         raise
 
 
+async def check_fixed_window(
+    redis: Redis | None,
+    key: str,
+    *,
+    window_sec: int,
+    max_count: int,
+) -> tuple[bool, int]:
+    """미들웨어 밖(WS 수신 루프 등)에서 재사용하는 fixed-window 검사. (allowed, retry_after).
+
+    Redis 우선(멀티 인스턴스 공유 한도), 부재·장애 시 인스턴스 로컬 메모리 윈도로 폴백 —
+    남용 방어가 목적이라 완전 fail-open 대신 근사 한도라도 유지한다.
+    """
+    if redis is not None:
+        try:
+            return await _check_redis_fixed_window(redis, key, window_sec, max_count)
+        except Exception:
+            pass  # _check_redis_fixed_window가 경고 로그를 남긴다
+    return _check_memory_fixed_window(key, window_sec, max_count)
+
+
 async def _send_429(send: Send, scope: Scope, code: ApiCode, retry_after_seconds: int) -> None:
     """순수 ASGI: 429 응답만 전송. ApiResponse·전역 에러와 동일 키(requestId 등)."""
     state = scope.get("state") or {}

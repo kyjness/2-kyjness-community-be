@@ -113,6 +113,9 @@ class ChatService:
             peer = await UsersModel.get_user_by_id(peer_id, db=db)
             if not peer or not UserStatus.is_active_value(peer.status):
                 raise UserNotFoundException(message="상대방을 찾을 수 없습니다.")
+            # 방향 무관 차단 검사 — 메시지도 동일 문구로 응답해 누가 차단했는지 노출하지 않는다.
+            if await UsersModel.block_exists_between(sender_id, peer_id, db=db):
+                raise ForbiddenException(message="메시지를 보낼 수 없는 상대입니다.")
             room = await cls.get_or_create_room(db, user_id=sender_id, peer_id=peer_id)
             msg = ChatMessage(
                 id=new_uuid7(),

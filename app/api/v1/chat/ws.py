@@ -14,6 +14,8 @@ from app.common.exceptions import (
     UnauthorizedException,
     UserNotFoundException,
 )
+from app.core.config import settings
+from app.core.middleware.rate_limit import check_fixed_window
 from app.db import AsyncSessionLocal
 from app.domain.chat.manager import chat_connection_manager
 from app.domain.chat.payload import parse_incoming_message, validation_error_to_ws_error
@@ -58,6 +60,21 @@ async def chat_dm_websocket(websocket: WebSocket) -> None:
             except ValidationError as e:
                 payload = validation_error_to_ws_error(e)
                 await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+                continue
+            # WS는 HTTP rate limit 미들웨어 밖 — 접속 1회로 무제한 DB 쓰기+팬아웃이
+            # 가능하므로 유저 단위 한도를 수신 루프에서 직접 검사한다.
+            allowed, retry_after = await check_fixed_window(
+                _redis_from_websocket(websocket),
+                f"chat:ws:{user_id}",
+                window_sec=settings.CHAT_WS_RATE_LIMIT_WINDOW,
+                max_count=settings.CHAT_WS_RATE_LIMIT_MAX_MESSAGES,
+            )
+            if not allowed:
+                err = ChatWsErrorPayload(
+                    code="rate_limited",
+                    message=f"메시지 전송이 너무 잦습니다. {retry_after}초 후 다시 시도하세요.",
+                ).model_dump(mode="json", by_alias=True)
+                await websocket.send_text(json.dumps(err, ensure_ascii=False))
                 continue
             try:
                 async with AsyncSessionLocal() as db:
