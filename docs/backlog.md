@@ -366,6 +366,13 @@ res = await db.execute(stmt)
 
 **수정 방향**: (a) SNS publish·오프라인 배송을 Celery로 실배선하고 dispatch 엔드포인트 제거, 또는 (b) Celery 전체 제거 + "쓰기 초당 수십 규모에선 인라인 발행으로 충분"을 ADR로 기록. 채택안은 착수 시 결정.
 
+> **수정 완료 — (a) 실배선 채택**: 알림 생성 시 `publish_after_commit`이 SNS 배송을
+> `deliver_notification_sns`(high_priority)로 enqueue(비동기 컨텍스트 블록 방지 위해 `to_thread`,
+> 결정적 멱등키 `sns:{notification_id}`). `CELERY_ENABLED=false`·브로커 장애는 기존 인라인
+> fire-and-forget으로 폴백. 워커 잡은 DB 행에서 페이로드 재구성, SNS client 프로세스당 재사용,
+> **publish 성공 후에만 멱등 마킹**(#34 첫 항목 선반영 — 선마킹이면 실패 재시도가 skip으로 유실).
+> 합성 dispatch 엔드포인트·미배선 `mark_notifications_read_job`·구 재전달 잡 제거. ADR 0009 갱신.
+
 ---
 
 ### 23. SSE 알림 pubsub가 공유 풀 연결 점유 (풀 고갈 → 전면 fail-open) — P1

@@ -92,6 +92,50 @@ class NotificationService:
         client.publish(TopicArn=topic_arn, Message=message_json)
 
     @classmethod
+    async def _dispatch_sns_publish(
+        cls,
+        *,
+        recipient_user_id: UUID,
+        notification_id: UUID,
+        kind: NotificationKind,
+        actor_id: UUID | None,
+        post_id: UUID | None,
+        comment_id: UUID | None,
+    ) -> None:
+        """오프라인 배송(SNS)은 재시도·백오프가 필요한 외부 I/O라 Celery로 오프로드한다.
+
+        워커 비활성(CELERY_ENABLED=false)·브로커 장애 시에는 인라인 fire-and-forget으로
+        폴백한다(fail-open — 실시간 인앱 경로와 DB는 이미 확보된 상태).
+        """
+        if not settings.SNS_TOPIC_ARN:
+            return
+        if settings.CELERY_ENABLED:
+            try:
+                from app.worker.tasks.notifications import deliver_notification_sns
+
+                # 결정적 멱등키: 같은 알림의 중복 enqueue가 워커에서 1회 배송으로 수렴.
+                await asyncio.to_thread(
+                    cast(Any, deliver_notification_sns).delay,
+                    notification_id=uuid_to_base62(notification_id),
+                    user_id=uuid_to_base62(recipient_user_id),
+                    idempotency_key=f"sns:{uuid_to_base62(notification_id)}",
+                )
+                return
+            except Exception:
+                log.exception(
+                    "알림 SNS Celery enqueue 실패 — 인라인 폴백. notification_id=%s",
+                    notification_id,
+                )
+        cls._schedule_sns_publish(
+            recipient_user_id=recipient_user_id,
+            notification_id=notification_id,
+            kind=kind,
+            actor_id=actor_id,
+            post_id=post_id,
+            comment_id=comment_id,
+        )
+
+    @classmethod
     def _schedule_sns_publish(
         cls,
         *,
@@ -186,7 +230,7 @@ class NotificationService:
                     recipient_user_id,
                 )
 
-        cls._schedule_sns_publish(
+        await cls._dispatch_sns_publish(
             recipient_user_id=recipient_user_id,
             notification_id=notification_id,
             kind=kind,

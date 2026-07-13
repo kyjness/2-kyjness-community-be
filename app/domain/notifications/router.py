@@ -1,9 +1,9 @@
 # 알림 REST + SSE. 목록/읽음은 ApiResponse, 스트림은 text/event-stream.
+# 오프라인 배송(SNS)은 알림 생성 시 서비스가 Celery로 오프로드한다 — 별도 재전달 API 없음.
 
-from typing import Annotated, cast
+from typing import Annotated
 
-from celery import Task
-from fastapi import APIRouter, Depends, Header, Path, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,15 +20,10 @@ from app.common import (
     ApiResponse,
     CursorPage,
     OptionalPublicId,
-    PublicId,
     api_response,
     dump_api_response,
 )
-from app.common.exceptions import InvalidRequestException
-from app.core.config import settings
-from app.core.ids import uuid_to_base62
 from app.domain.notifications.schema import (
-    DispatchNotificationTaskData,
     MarkNotificationsReadData,
     MarkNotificationsReadRequest,
     NotificationItem,
@@ -87,39 +82,6 @@ async def list_notifications(
         user.id, cursor_id=cursor, size=size, db=db
     )
     return api_response(request, code=ApiCode.OK, data=CursorPage(items=items, has_more=has_more))
-
-
-@router.post(
-    "/{notification_id}/dispatch",
-    status_code=202,
-    response_model=ApiResponse[DispatchNotificationTaskData],
-)
-async def dispatch_notification_delivery(
-    request: Request,
-    notification_id: Annotated[PublicId, Path(..., description="알림 공개 ID (Base62)")],
-    user: CurrentUser = Depends(get_current_user),
-    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
-):
-    """알림 푸시/SSE 재전달을 Celery high_priority 큐로 오프로딩."""
-    if not settings.CELERY_ENABLED:
-        raise InvalidRequestException(
-            message="Celery worker is disabled. Set CELERY_ENABLED=true and run the worker."
-        )
-    idem = (x_idempotency_key or "").strip() or f"dispatch:{uuid_to_base62(notification_id)}"
-    from app.worker.tasks.notifications import deliver_notification_push
-
-    task = cast(Task, deliver_notification_push)
-    async_result = task.delay(
-        notification_id=uuid_to_base62(notification_id),
-        user_id=uuid_to_base62(user.id),
-        idempotency_key=idem,
-    )
-    return api_response(
-        request,
-        code=ApiCode.OK,
-        data=DispatchNotificationTaskData(task_id=async_result.id, queue="high_priority"),
-        message="알림 전달 작업이 큐에 등록되었습니다.",
-    )
 
 
 @router.patch("/read", status_code=200, response_model=ApiResponse[MarkNotificationsReadData])

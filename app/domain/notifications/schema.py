@@ -27,8 +27,3 @@ class MarkNotificationsReadRequest(BaseSchema):
 
 class MarkNotificationsReadData(BaseSchema):
     updated_count: int
-
-
-class DispatchNotificationTaskData(BaseSchema):
-    task_id: str = Field(..., description="Celery task id")
-    queue: str = Field(default="high_priority", description="적재 큐")

@@ -82,7 +82,9 @@
 
 전면 재감사 산출물. 항목 상세는 [`backlog.md`](backlog.md) 2차 감사 섹션. 권장 순서대로 진행:
 
-- [ ] **① #22** Celery 실배선 or 제거 (설계 서사 정합성 — 착수 시 채택안 결정)
+- [x] **① #22** Celery 실배선 — SNS 배송을 `deliver_notification_sns`로 오프로드(재시도·백오프),
+      dispatch 합성 API·미배선 태스크 제거, ENABLED=false/브로커 장애 인라인 폴백, 성공 후 멱등 마킹.
+      단위 테스트 7종(enqueue·폴백·멱등 순서). ADR 0009 갱신
 - [ ] **② 핫패스·정확성**: #27 미들웨어 순서 · #28 XFF 신뢰 · #29 record_post_view 경량화
 - [ ] **③ 실시간 견고화**: #23 SSE 팬아웃 통일 · #30 pubsub 재연결 · #32 WS 남용 방어
 - [ ] **④ 미디어 정리**: #24 업로드 단일화 · #31 presign 한도·pending GC

@@ -8,7 +8,7 @@
   `app/domain/chat/service.py`(`send_dm_from_ws`·`_fanout_dm`),
   `app/domain/notifications/router.py`(SSE `/notifications/stream`),
   `app/domain/notifications/service.py`(`publish_after_commit`·`sse_subscribe`),
-  `app/worker/jobs/notification_delivery.py`(Celery 오프로드 재전달),
+  `app/worker/jobs/notification_delivery.py`(Celery SNS 배송 잡),
   `app/infra/redis.py`·`app/main.py`(풀 커넥션·lifespan 리스너 배선)
 
 ## 맥락 (Context)
@@ -49,9 +49,16 @@
      Redis 장애 시 **로컬 워커 전달만** 시도(`_fanout_dm`). 알림 publish 실패는 삼켜지고 수신자는
      `GET /notifications`로 동기화한다. 실시간 전달 실패가 **쓰기 트랜잭션을 절대 되돌리지 않는다**.
 
-4. **알림 재전달 오프로드 = Celery**
-   - `POST /notifications/{id}/dispatch`가 `deliver_notification_push`(high_priority 큐)로 재전달을
-     오프로딩. 멱등키(`celery:notif:delivered:{key}` `SET NX`)로 중복 push를 차단한다.
+4. **오프라인 배송(SNS) 오프로드 = Celery**
+   - 실시간 인앱(pub/sub)은 인라인으로 두고, **재시도·백오프가 필요한 외부 I/O인 SNS publish만**
+     알림 생성 시 `deliver_notification_sns`(high_priority 큐)로 오프로드한다 — "쓸 데(외부 배송)와
+     안 쓸 데(인라인으로 충분한 실시간 발행)"의 구분.
+   - 멱등키 `celery:notif:delivered:{key}`는 **publish 성공 후에만 마킹**한다 — 선마킹하면 실패
+     재시도가 멱등 skip으로 유실된다. 경쟁 중복 publish(at-least-once)는 SNS 구독자가 흡수.
+   - `CELERY_ENABLED=false`·브로커 장애 시 인라인 fire-and-forget으로 폴백(fail-open).
+     페이로드는 태스크 인자가 아니라 워커가 DB 행에서 재구성한다(재시도 시점에도 진실은 DB).
+   - 초기의 사용자 트리거 재전달 API(`POST /notifications/{id}/dispatch`)는 실제 UX 흐름이 없는
+     합성 경로라 제거했다(2차 감사 #22).
 
 ## 트레이드오프 (Consequences)
 
