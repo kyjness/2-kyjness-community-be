@@ -200,7 +200,7 @@ Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
 | 강아지 | `/v1/dogs/*` | `domain/dogs` | 대표견은 전용 뷰 관계 + 부분 유니크 인덱스로 1마리 불변식 보장 ([0011](docs/adr/0011-representative-dog-view-relationship.md)) |
 | 채팅(DM) | REST `/v1/chat/*` · WS `/v1/ws/chat` | `domain/chat` | WebSocket + **Redis Pub/Sub fan-out**(멀티 인스턴스), 짧은 트랜잭션으로 커넥션 풀 보호 ([0009](docs/adr/0009-realtime-delivery.md)) |
 | 알림 | SSE `/v1/notifications/stream` | `domain/notifications` | 커밋 후 로컬 큐 직접 전달 + Redis envelope 발행 → **SSE** 스트림. Redis 미구성 시에도 스트림 유지(같은 인스턴스 이벤트 수신, fail-open), DB 기록 유지 |
-| 이미지 업로드 | `/v1/media/*` | `domain/media` + `infra/storage` | 선업로드 → 본문/가입 연결. 가입 전은 **1회성 Upload Token**, 멱등 지원, 고아 이미지 sweeper ([0010](docs/adr/0010-storage-backend-strategy.md)) |
+| 이미지 업로드 | `/v1/media/*` | `domain/media` + `infra/storage` | **presigned 3단 단일 경로**(presign → S3 직접 업로드 → confirm, 서버가 파일 본문을 받지 않음). 가입 전은 **1회성 Upload Token**, 고아 이미지 sweeper ([0010](docs/adr/0010-storage-backend-strategy.md)) |
 | 신고·모더레이션 | `/v1/reports/*` · `/v1/admin/*` | `domain/reports`·`domain/admin` | 신고는 항상 Insert 누적(감사), 임계 초과 자동 블라인드. 관리자 신고 피드는 DB-side **UNION ALL** ([0012](docs/adr/0012-admin-report-feed-pagination.md)) |
 
 **횡단 규약**: 응답은 `{ code, message, data, requestId }` camelCase 통일 · 요청마다 `request_id`(ULID)

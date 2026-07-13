@@ -1,37 +1,28 @@
 # 요청 기반 클라이언트 식별자. 조회수 중복 방지 등에서 사용.
-# Redis 멱등성: 네임스페이스·fingerprint_scope_parts로 도메인 분리. 라우트 dependencies에서
-# File()보다 먼저 실행되면 multipart 파싱 전 캐시 히트 가능(request.state 캐시 응답).
+# Redis 멱등성: 네임스페이스·fingerprint_scope_parts로 도메인 분리.
 import hashlib
 import json
 import logging
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Query, Request
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import TypeAdapter, ValidationError
 from redis.asyncio import Redis
 
-from app.api.dependencies.auth import CurrentUser, get_current_user
 from app.common.codes import ApiCode
 from app.common.responses import get_request_id
 from app.common.schemas import ApiResponse
 from app.core.config import settings
-from app.domain.media.schema import ImageUploadResponse, SignupImageUploadData
 from app.domain.posts.schemas import PostIdData
 
 log = logging.getLogger(__name__)
 
 _IDEMP_POST_CREATE_ADAPTER = TypeAdapter(ApiResponse[PostIdData])
-_IDEMP_MEDIA_UPLOAD_ADAPTER = TypeAdapter(ApiResponse[ImageUploadResponse])
-_IDEMP_MEDIA_SIGNUP_ADAPTER = TypeAdapter(ApiResponse[SignupImageUploadData])
 
 _IDEMP_KEY_MIN = 8
 _IDEMP_KEY_MAX = 128
-
-# upload_image: 라우트 dependencies가 File() 전에 state에 심는 캐시 응답 속성명
-MEDIA_UPLOAD_IDEMPOTENT_RESPONSE_ATTR = "media_upload_idempotent_response"
-MEDIA_SIGNUP_IDEMPOTENT_RESPONSE_ATTR = "media_signup_idempotent_response"
 
 
 def get_client_identifier(request: Request) -> str:
@@ -264,107 +255,4 @@ async def post_create_idempotency_after_failure(
         raw_key,
         fingerprint_scope_parts=(str(user_id),),
         namespace="post:create",
-    )
-
-
-# --- POST /media/images (인증) — 라우트 dependencies에서 File() 전 실행 ---
-
-
-async def media_image_upload_idempotency_prepare(
-    request: Request,
-    purpose: Literal["profile", "post"] = Query("post", description="profile | post"),
-    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
-    user: CurrentUser = Depends(get_current_user),
-) -> None:
-    r = await idempotency_before(
-        request,
-        x_idempotency_key,
-        fingerprint_scope_parts=(str(user.id), purpose),
-        namespace="media:upload",
-        lock_ttl_sec=settings.IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS,
-        conflict_message="동일 멱등성 키로 이미지 업로드가 진행 중입니다.",
-        cache_adapter=_IDEMP_MEDIA_UPLOAD_ADAPTER,
-    )
-    if r is not None:
-        setattr(request.state, MEDIA_UPLOAD_IDEMPOTENT_RESPONSE_ATTR, r)
-
-
-async def media_upload_idempotency_after_success(
-    request: Request,
-    user_id: UUID,
-    purpose: Literal["profile", "post"],
-    raw_key: str | None,
-    response_obj: Any,
-) -> None:
-    await idempotency_after_success(
-        request,
-        raw_key,
-        fingerprint_scope_parts=(str(user_id), purpose),
-        namespace="media:upload",
-        result_ttl_sec=settings.IDEMPOTENCY_MEDIA_UPLOAD_TTL_SECONDS,
-        response_obj=response_obj,
-    )
-
-
-async def media_upload_idempotency_after_failure(
-    request: Request,
-    user_id: UUID,
-    purpose: Literal["profile", "post"],
-    raw_key: str | None,
-) -> None:
-    await idempotency_after_failure(
-        request,
-        raw_key,
-        fingerprint_scope_parts=(str(user_id), purpose),
-        namespace="media:upload",
-    )
-
-
-# --- POST /media/images/signup (비로그인) ---
-
-
-async def media_signup_upload_idempotency_prepare(
-    request: Request,
-    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
-) -> None:
-    cid = get_client_identifier(request)
-    r = await idempotency_before(
-        request,
-        x_idempotency_key,
-        fingerprint_scope_parts=("signup", cid),
-        namespace="media:signup",
-        lock_ttl_sec=settings.IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS,
-        conflict_message="동일 멱등성 키로 회원가입 이미지 업로드가 진행 중입니다.",
-        cache_adapter=_IDEMP_MEDIA_SIGNUP_ADAPTER,
-    )
-    if r is not None:
-        setattr(request.state, MEDIA_SIGNUP_IDEMPOTENT_RESPONSE_ATTR, r)
-
-
-async def media_signup_upload_idempotency_after_success(
-    request: Request,
-    raw_key: str | None,
-    response_obj: Any,
-) -> None:
-    cid = get_client_identifier(request)
-    await idempotency_after_success(
-        request,
-        raw_key,
-        fingerprint_scope_parts=("signup", cid),
-        namespace="media:signup",
-        result_ttl_sec=settings.IDEMPOTENCY_MEDIA_UPLOAD_TTL_SECONDS,
-        response_obj=response_obj,
-    )
-
-
-async def media_signup_upload_idempotency_after_failure(
-    request: Request,
-    raw_key: str | None,
-) -> None:
-    cid = get_client_identifier(request)
-    await idempotency_after_failure(
-        request,
-        raw_key,
-        fingerprint_scope_parts=("signup", cid),
-        namespace="media:signup",
     )

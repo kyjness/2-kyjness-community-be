@@ -2,85 +2,13 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from app.api.dependencies.client import _idempotency_fingerprint, _lock_redis_key
-from app.common.codes import ApiCode
 from app.core.config import settings
-from app.core.ids import parse_public_id_value
 from app.db.base_class import utc_now
 from app.domain.media.model import Image
-from app.main import app
-from httpx import AsyncClient
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.asyncio
-
-_TEST_PW = "MediaTestPW123!"
-# 최소 유효 PNG: sniff_image_type이 매직바이트로 image/png 판별(뒤는 패딩).
-_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
-
-
-def _auth_header(login_json: dict) -> dict[str, str]:
-    data = login_json.get("data", login_json)
-    token = data.get("accessToken") or data.get("access_token")
-    assert token, "accessToken 없음"
-    return {"Authorization": f"Bearer {token}"}
-
-
-def _png_files() -> dict:
-    return {"image": ("x.png", _PNG_BYTES, "image/png")}
-
-
-async def _signup_login(client: AsyncClient, email: str, nickname: str) -> dict:
-    await client.post(
-        "/v1/auth/signup", json={"email": email, "password": _TEST_PW, "nickname": nickname}
-    )
-    res = await client.post("/v1/auth/login", json={"email": email, "password": _TEST_PW})
-    assert res.status_code == 200
-    return res.json()
-
-
-async def test_media_upload_idempotency_replays_same_result(client: AsyncClient):
-    """동일 X-Idempotency-Key로 두 번 업로드 → 두 번째는 첫 응답을 재생(같은 이미지 id, 부작용 1회)."""
-    if getattr(app.state, "redis", None) is None:
-        pytest.skip("Redis 미연결: 멱등성 캐시 재생 검증 생략")
-
-    login = await _signup_login(client, "media-idem@example.com", "미디어멱등")
-    headers = {**_auth_header(login), "X-Idempotency-Key": uuid.uuid4().hex}
-
-    first = await client.post(
-        "/v1/media/images", params={"purpose": "post"}, headers=headers, files=_png_files()
-    )
-    assert first.status_code == 201, first.text
-    second = await client.post(
-        "/v1/media/images", params={"purpose": "post"}, headers=headers, files=_png_files()
-    )
-    assert second.status_code == 201, second.text
-
-    assert first.json()["data"]["id"] == second.json()["data"]["id"], (
-        "재시도가 새 업로드를 만들면 안 된다(멱등성 위반)"
-    )
-
-
-async def test_media_upload_conflict_when_key_inflight(client: AsyncClient):
-    """같은 키 처리가 진행 중(락 보유)이면 두 번째 요청은 409로 거절된다."""
-    if getattr(app.state, "redis", None) is None:
-        pytest.skip("Redis 미연결: in-flight 락 충돌 검증 생략")
-
-    login = await _signup_login(client, "media-conflict@example.com", "미디어충돌")
-    key = uuid.uuid4().hex
-    headers = {**_auth_header(login), "X-Idempotency-Key": key}
-
-    # 다른 요청이 처리 중인 상태를 재현: 동일 fingerprint의 락 키를 선점.
-    user_uuid = parse_public_id_value(login["data"]["id"])
-    fp = _idempotency_fingerprint((str(user_uuid), "post"), key)
-    await app.state.redis.set(_lock_redis_key("media:upload", fp), "1", nx=True, ex=60)
-
-    res = await client.post(
-        "/v1/media/images", params={"purpose": "post"}, headers=headers, files=_png_files()
-    )
-    assert res.status_code == 409, res.text
-    assert res.json().get("code") == ApiCode.CONFLICT.value
 
 
 async def test_cleanup_keeps_records_when_storage_delete_fails(

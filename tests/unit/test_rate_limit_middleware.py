@@ -75,3 +75,26 @@ def test_options_and_probe_paths_skip_rate_limit(client, monkeypatch):
     # probe 경로는 카운트 자체가 없다.
     assert tc.get("/livez").status_code == 200
     assert fake.eval_calls == 0
+
+
+def test_signup_upload_limit_covers_presign_and_confirm(client, monkeypatch):
+    """비인증 회원가입 업로드 한도는 presign·confirm 2단을 하나의 카운터로 조인다 —
+    글로벌 100/분만 적용되면 비로그인 IP가 presign을 대량 발급받아 pending/ 객체를 쌓는다."""
+    from app.core.middleware.rate_limit import _is_critical_path, _path_is_signup_upload
+
+    tc, fake = client
+    monkeypatch.setattr(settings, "SIGNUP_UPLOAD_RATE_LIMIT_MAX", 1)
+
+    ok = tc.post("/v1/media/images/signup/presign", json={})
+    assert ok.status_code != 429
+    limited = tc.post("/v1/media/images/signup/confirm", json={})
+    assert limited.status_code == 429, "presign과 confirm이 같은 signup_upload 카운터여야 한다"
+
+    signup_keys = [k for k in fake.counts if k.startswith("rl:signup_upload:")]
+    assert len(signup_keys) == 1 and fake.counts[signup_keys[0]] == 2
+
+    # 남용 방어 경로 — Redis 장애 시 fail-open이 아니라 메모리 폴백을 타야 한다.
+    for p in ("/v1/media/images/signup/presign", "/v1/media/images/signup/confirm"):
+        assert _path_is_signup_upload(p) and _is_critical_path(p)
+    # 직접 multipart 경로는 제거됐다 — 옛 경로가 전용 한도에 잡히면 안 된다(글로벌만).
+    assert not _path_is_signup_upload("/v1/media/images/signup")

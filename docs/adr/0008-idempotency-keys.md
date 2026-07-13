@@ -1,9 +1,11 @@
 # ADR 0008 — POST 멱등성: Idempotency-Key + 결과 캐시
 
-- **상태**: 채택됨 (Accepted)
+- **상태**: 채택됨 (Accepted) · **적용 범위 축소** — 미디어 direct 업로드 제거([0010](0010-storage-backend-strategy.md))로
+  현재 적용 대상은 `POST /posts` 하나. presigned confirm은 1회성 pending 키(승격 시 원본 삭제)가
+  자연 멱등을 제공해 이 메커니즘이 불필요하다.
 - **관련 코드**: `app/api/dependencies/client.py`(`idempotency_before`/`idempotency_after_success`/
   `idempotency_after_failure` 코어 + 도메인 래퍼), `app/domain/posts/routers/post_router.py`
-  (`POST /posts`), `app/domain/media/router.py`(`POST /media/images`·`/media/images/signup`)
+  (`POST /posts`)
 
 ## 맥락 (Context)
 
@@ -19,9 +21,9 @@
 
 1. **Opt-in 헤더** — 클라이언트가 `X-Idempotency-Key`(8~128자)를 보낼 때만 작동. 없으면 일반 처리
    (조회·비생성은 대상 아님). 키가 부실하면(`after_*`) 조용히 통과.
-2. **스코프된 fingerprint** — `sha256(namespace scope_parts + key)`. 스코프에 **사용자 id**(회원가입
-   업로드는 client-ip) + 연산 구분(purpose)을 넣어 네임스페이스(`post:create`·`media:upload`·
-   `media:signup`)별로 격리한다. 한 사용자의 키가 다른 사용자와 충돌하거나 캐시를 열람하지 못한다.
+2. **스코프된 fingerprint** — `sha256(namespace scope_parts + key)`. 스코프에 **사용자 id** +
+   연산 구분을 넣어 네임스페이스(`post:create`)별로 격리한다. 한 사용자의 키가 다른 사용자와
+   충돌하거나 캐시를 열람하지 못한다.
 3. **두 Redis 키** — 결과 캐시 `idemp:{ns}:res:{fp}`(성공 응답, TTL)와 in-flight 락
    `idemp:{ns}:lock:{fp}`(`SET NX`, 짧은 TTL).
 4. **흐름** — *before*: 결과 캐시 히트면 저장된 응답을 그대로 재생(단, `requestId`는 현재 요청 값으로
@@ -29,15 +31,13 @@
    저장 + 락 해제. *after_failure*: 락만 해제(재시도 허용).
 5. **Fail-open** — Redis 오류 시 멱등성 없이 진행한다([ADR 0005](0005-resilience-no-circuit-breaker.md)
    표준). 가용성 > 중복 방지.
-6. **멀티파트 앞단 실행** — 미디어 업로드는 멱등성 dependency를 `File()` 파싱 **전에** 두어, 캐시 히트
-   시 본문(수 MB)을 읽지 않고 즉시 재생한다.
 
 ## 트레이드오프 (Consequences)
 
 **얻은 것**
 - 안전한 클라이언트 재시도·연타 방어 — DB 유니크 제약 없이도 생성 중복을 막는다.
 - 인스턴스 간 정확 — Redis 공유라 3~10대 봉투에서 일관.
-- 저렴 — 키 2개·TTL로 끝. 업로드는 본문 재수신도 절약.
+- 저렴 — 키 2개·TTL로 끝.
 
 **치른 비용**
 - **exactly-once 아님** — 성공 커밋과 결과 저장 사이의 크래시, 또는 fail-open 창에서는 재시도가

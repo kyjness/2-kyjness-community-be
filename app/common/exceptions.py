@@ -150,11 +150,6 @@ class InvalidImageFileException(BaseProjectException):
         super().__init__(status_code=400, code=ApiCode.INVALID_IMAGE_FILE, message=message)
 
 
-class FileSizeExceededException(BaseProjectException):
-    def __init__(self, message: str | None = None):
-        super().__init__(status_code=400, code=ApiCode.FILE_SIZE_EXCEEDED, message=message)
-
-
 class InvalidFileTypeException(BaseProjectException):
     def __init__(self, message: str | None = None):
         super().__init__(status_code=400, code=ApiCode.INVALID_FILE_TYPE, message=message)
@@ -181,15 +176,6 @@ class DBErrorException(BaseProjectException):
 class InvalidRequestException(BaseProjectException):
     def __init__(self, message: str | None = None):
         super().__init__(status_code=400, code=ApiCode.INVALID_REQUEST, message=message)
-
-
-class PayloadTooLargeException(BaseProjectException):
-    def __init__(self, message: str | None = None):
-        super().__init__(
-            status_code=413,
-            code=ApiCode.PAYLOAD_TOO_LARGE,
-            message=message or "요청 본문이 허용 크기를 초과합니다.",
-        )
 
 
 class NotFoundException(BaseProjectException):

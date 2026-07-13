@@ -64,10 +64,6 @@ def _get_s3_client():
     return _s3_client
 
 
-def storage_save(key: str, content: bytes, content_type: str) -> str:
-    return _s3_save(key, content, content_type)
-
-
 def storage_delete(key: str) -> None:
     _s3_delete(key)
 
@@ -81,19 +77,6 @@ def build_url(key: str) -> str:
         f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/"
         f"{_s3_object_key(key)}"
     )
-
-
-def _s3_save(key: str, content: bytes, content_type: str) -> str:
-    client = _get_s3_client()
-    s3_key = _s3_object_key(key)
-    client.put_object(
-        Bucket=settings.S3_BUCKET_NAME,
-        Key=s3_key,
-        Body=content,
-        ContentType=content_type,
-    )
-    # 반환되는 URL은 기존 로직(build_url)을 그대로 타서 https://도메인/media/키 형태가 됩니다.
-    return build_url(key)
 
 
 def _s3_delete(key: str) -> None:

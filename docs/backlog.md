@@ -402,6 +402,16 @@ ADR 0010이 "S3 단일 경로"를 선언했지만, direct 업로드(`/media/imag
 FE 전환 시 openapi 생성 타입 재생성 포함 — FE `schema.d.ts`에 제거된 `NOTIFICATION_SSE_UNAVAILABLE` 등
 BE에서 사라진 계약이 잔존 중(③ 마감 리뷰 발견).
 
+> **수정 완료(BE)**: 검증 결과 FE는 이미 presigned 3단만 호출(direct는 런타임 사용 0건) —
+> direct 2개 엔드포인트와 전용 파이프라인 전부 제거: `save_image_for_media`(매직바이트 스니핑·
+> 청크 읽기 포함), 미디어 멱등 의존성 6개(`media:upload`·`media:signup` 네임스페이스),
+> `check_upload_content_length`(모듈째), `MAX_FILE_SIZE`·`IDEMPOTENCY_MEDIA_UPLOAD_*` 설정,
+> `FileSizeExceededException`·`PayloadTooLargeException`(413 코드는 전역 매핑용으로 유지),
+> `storage_save`. 비인증 signup 업로드 IP 한도는 살아남는 `signup/presign`·`signup/confirm`으로
+> 이전(공유 카운터, 기본값 10→20 = 업로드 1건당 2카운트 보정, #31 연계). ADR 0008 적용 범위
+> 축소·ADR 0010 구현 노트·README 갱신. **잔여(FE)**: `client.ts` 죽은 경로 참조 정리 +
+> openapi 타입 재생성 — FE 작업에서 처리.
+
 ---
 
 ### 25. 조회수 기록 경로 2벌 (GET 상세 자동 증가 + POST /view) — P2
@@ -554,6 +564,10 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
   임계 구역에 await가 없어 락 자체가 불필요하다는 지적도 함께 판단(제거 시 두 매니저 일관되게).
 - **(③ 마감 리뷰)** `chat/pubsub.py`가 채널 상수 + `publish_chat_dm` 1줄 위임만 남음 — 상수를 도메인 모듈로
   옮기고 `publish_user_envelope` 직접 호출로 모듈 제거 검토(위임 잔재 정리와 동일 패턴).
+- **(④에서 발견)** 테스트 순서 의존 결함: `tests/integration/conftest.py`의 세션 fixture
+  `relax_integration_rate_limits`가 전역 settings 한도를 영구 완화 → 풀 스위트(integration→unit 순)에서
+  `tests/unit/test_domain_metrics.py::test_rate_limit_rejection_increments_counter`(기본 login 한도 5 전제)가
+  실패한다. 단위 테스트가 한도를 명시적으로 monkeypatch하거나, 완화를 통합 스위트 스코프로 격리.
 
 ---
 

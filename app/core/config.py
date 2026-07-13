@@ -26,8 +26,6 @@ _MIN_FLOORS: dict[str, int] = {
     "CELERY_TASK_IDEMPOTENCY_TTL_SECONDS": 300,
     "IDEMPOTENCY_POST_CREATE_TTL_SECONDS": 60,
     "IDEMPOTENCY_POST_CREATE_LOCK_TTL_SECONDS": 5,
-    "IDEMPOTENCY_MEDIA_UPLOAD_TTL_SECONDS": 60,
-    "IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS": 30,
     "VIEW_BUFFER_FLUSH_INTERVAL_SECONDS": 60,
     "VIEW_FLUSH_LOCK_SECONDS": 30,
 }
@@ -101,9 +99,6 @@ class Settings(BaseSettings):
     # POST /posts 멱등성: 성공 응답 캐시 TTL, in-flight 잠금 TTL(초)
     IDEMPOTENCY_POST_CREATE_TTL_SECONDS: int = 3600
     IDEMPOTENCY_POST_CREATE_LOCK_TTL_SECONDS: int = 120
-    # POST /media/images* 멱등성
-    IDEMPOTENCY_MEDIA_UPLOAD_TTL_SECONDS: int = 3600
-    IDEMPOTENCY_MEDIA_UPLOAD_LOCK_TTL_SECONDS: int = 60
 
     # ----- Proxy·Trusted Host (Nginx/ALB 뒤 배포 시) -----
     TRUST_X_FORWARDED_FOR: bool = False
@@ -121,11 +116,11 @@ class Settings(BaseSettings):
 
     # ----- 회원가입 이미지 (토큰 TTL, IP당 업로드 rate limit) -----
     SIGNUP_IMAGE_TOKEN_TTL_SECONDS: int = 3600
+    # 비인증 presign·confirm 각각 1회 소모 — 업로드 1건 = 2카운트이므로 "10건/시간" 의도면 20.
     SIGNUP_UPLOAD_RATE_LIMIT_WINDOW: int = 3600
-    SIGNUP_UPLOAD_RATE_LIMIT_MAX: int = 10
+    SIGNUP_UPLOAD_RATE_LIMIT_MAX: int = 20
 
-    # ----- 파일 업로드 (최대 바이트, 허용 content-type) -----
-    MAX_FILE_SIZE: int = 20971520
+    # ----- 파일 업로드 (허용 content-type. 크기 상한은 presigned POST 조건이 강제) -----
     ALLOWED_IMAGE_TYPES: _CsvList = ["image/jpeg", "image/png"]
 
     # ----- 스토리지 (S3 단일 경로. dev/CI는 MinIO=S3_ENDPOINT_URL 지정, prod는 실제 S3) -----

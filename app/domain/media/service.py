@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from uuid import UUID
 
-from fastapi import UploadFile
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +21,6 @@ from app.core.ids import new_uuid7
 from app.domain.media.image_policy import (
     build_pending_file_key,
     sanitize_presign_filename,
-    save_image_for_media,
     validate_image_content_type,
     validate_purpose,
 )
@@ -275,74 +273,6 @@ class MediaService:
         except Exception as e:
             logger.warning("verify_upload_token redis error: %s", e)
             return None
-
-    @classmethod
-    async def upload_image_for_signup(
-        cls, file: UploadFile, db: AsyncSession, redis: Redis | None
-    ) -> SignupImageUploadData:
-        file_key, file_url, content_type, size = await save_image_for_media(file, purpose="signup")
-        image = None
-        try:
-            async with db.begin():
-                image = await MediaModel.create_temp_image(
-                    file_key=file_key,
-                    file_url=file_url,
-                    content_type=content_type,
-                    size=size,
-                    db=db,
-                )
-            signup_token = await cls.issue_upload_token(image.id, redis=redis)
-            return SignupImageUploadData(
-                id=image.id,
-                file_url=image.file_url,
-                signup_token=signup_token,
-            )
-        except Exception:
-            try:
-                if image is not None:
-                    async with db.begin():
-                        await MediaModel.delete_images_by_ids([image.id], db=db)
-                await asyncio.to_thread(storage_delete, file_key)
-            except Exception as rollback_e:
-                logger.warning(
-                    "Rollback storage delete failed after signup image DB error file_key=%s: %s",
-                    file_key,
-                    rollback_e,
-                )
-            raise
-
-    @classmethod
-    async def upload_image(
-        cls,
-        file: UploadFile,
-        user_id: UUID,
-        purpose: str,
-        db: AsyncSession,
-    ) -> ImageUploadResponse:
-        if purpose not in ("profile", "post"):
-            raise InvalidRequestException()
-        file_key, file_url, content_type, size = await save_image_for_media(file, purpose=purpose)
-        try:
-            async with db.begin():
-                image = await MediaModel.create_image(
-                    file_key=file_key,
-                    file_url=file_url,
-                    content_type=content_type,
-                    size=size,
-                    uploader_id=user_id,
-                    db=db,
-                )
-                return ImageUploadResponse.model_validate(image)
-        except Exception:
-            try:
-                await asyncio.to_thread(storage_delete, file_key)
-            except Exception as rollback_e:
-                logger.warning(
-                    "Rollback storage delete failed after create_image DB error file_key=%s: %s",
-                    file_key,
-                    rollback_e,
-                )
-            raise
 
     @classmethod
     async def delete_image(cls, image_id: UUID, user_id: UUID, db: AsyncSession) -> None:

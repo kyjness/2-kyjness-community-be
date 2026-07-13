@@ -58,8 +58,10 @@ def _path_is_login(path: str) -> bool:
 
 
 def _path_is_signup_upload(path: str) -> bool:
+    """비인증 회원가입 업로드 경로(presign·confirm 2단). 글로벌 100/분만으로는 비로그인
+    IP가 presign을 대량 발급받아 pending/ 객체를 쌓을 수 있어 전용 한도로 조인다."""
     p = path.rstrip("/")
-    return p == "/v1/media/images/signup" or p.endswith("/media/images/signup")
+    return p.endswith("/media/images/signup/presign") or p.endswith("/media/images/signup/confirm")
 
 
 def _is_critical_path(path: str) -> bool:

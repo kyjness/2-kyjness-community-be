@@ -63,8 +63,8 @@
   운영은 가용성·백업 부채).
 - **멀티 클라우드/스토리지 플러그인 프레임워크**: 대상이 S3 하나 → 얇은 분기로 충분.
 - **CDN·이미지 리사이즈/트랜스코딩 파이프라인**: 봉투 밖(전송 최적화·미디어 가공은 이번 범위 아님).
-- **경로 ②(직접 multipart) 즉시 제거**: 서버 수신 업로드의 단순 경로로 당분간 병행. 엔드포인트
-  일원화 여부는 별도 판단(이 ADR 범위 밖).
+- ~~**경로 ②(직접 multipart) 즉시 제거**: 서버 수신 업로드의 단순 경로로 당분간 병행.~~ →
+  **제거 완료** — 아래 구현 노트 "direct multipart 제거" 참조.
 
 ## 구현 노트 (Transition/Ops)
 
@@ -78,3 +78,9 @@
   업로드 → head → promote(copy+delete)와 put/get/delete를 MinIO에 태운다. `S3_ENDPOINT_URL` 없으면
   skip(로컬), CI는 공식 minio 컨테이너 + 버킷 생성으로 실행. presigned 주 업로드 경로가 비로소 자동
   검증된다.
+- **direct multipart 제거(경로 ② 일원화)**: FE가 presigned 3단만 사용하게 된 뒤에도 direct
+  업로드(`POST /media/images`·`/media/images/signup`)가 인증/비인증 풀셋(멱등 의존성·
+  content-length 가드·매직바이트 스니핑 포함)으로 병행 유지되고 있었다 — 호출자 없는 두 번째
+  파이프라인이자, 최대 20MB를 앱 서버 메모리로 태우는 경로. 전부 제거해 presigned 단일 경로로
+  일원화하고, 비인증 signup 업로드 rate limit(IP당)은 살아남는 경로인 `signup/presign`·
+  `signup/confirm`으로 이전했다(두 단계가 하나의 카운터를 공유 — 업로드 1건 = 2카운트).
