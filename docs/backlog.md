@@ -401,7 +401,7 @@ ADR 0010이 "S3 단일 경로"를 선언했지만, direct 업로드(`/media/imag
 
 `GET /posts/{id}`가 조회수를 자동 증가시키는데 `POST /posts/{id}/view`도 따로 있다. dedup 키가 이중 집계는 막지만 동일 기능 API가 둘.
 
-**수정 방향**: FE 사용 경로 확인 후 한쪽 제거.
+**수정 방향**: FE 사용 경로 확인 후 한쪽 제거. **(①+② 마감 리뷰)** #29로 두 경로가 dedup→버퍼→writer 폴백 안무를 중복 구현하게 됐다 — 한쪽을 제거하면 자연 해소되고, 둘 다 남길 경우 공용 헬퍼로 추출.
 
 ---
 
@@ -504,8 +504,9 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 
 ### 34. 소품 모음 (정확성·표기 드리프트) — P2
 
-- `worker/jobs/notification_delivery.py`: idempotency 키를 publish **전에** 선점 → publish 실패 재시도가 멱등 skip으로 유실. 성공 후 마킹으로 순서 교체.
-- `notifications/service.py`: SNS publish마다 boto3 client 신규 생성 + `create_task` 참조 미보관(GC 유실 가능). 모듈 client 재사용 + task 참조 보관.
+- ~~`worker/jobs/notification_delivery.py`: idempotency 키를 publish **전에** 선점~~ → **#22에서 선반영 완료**(성공 후 마킹).
+- `notifications/service.py`: 인라인 SNS 폴백이 publish마다 boto3 client 신규 생성 + `create_task` 참조 미보관(GC 유실 가능). **(①+② 마감 리뷰 보강)** SNS publish 헬퍼가 서비스(인라인)·워커 잡에 2벌 존재 — 공용 cached-client 헬퍼 하나로 합치고 `_run` 래퍼·중복 `SNS_TOPIC_ARN` 가드도 함께 제거. 인라인 폴백 경로도 워커와 같은 `celery:notif:delivered:` 멱등 스토어를 확인하면 브로커 ack 유실 시 이중 배송 창이 닫힌다.
+- **(①+② 마감 리뷰)** `worker/jobs/notification_delivery.py`: 태스크 실행마다 Redis 클라이언트 `from_url`→`aclose` — 워커 프로세스당 클라이언트 재사용으로 교체.
 - `rate_limit.py` `_SKIP_PATHS`의 `"/health"`가 실경로 `/v1/health`와 불일치.
 - `docker-compose.yml` `VIEW_CACHE_TTL_SECONDS: "0"` — dedup 끔 의도로 보이나 코드는 0→3600 폴백이라 로컬 조회수가 안 오름. 의도 정렬.
 - `docker-compose.yml` 폐기 설정 `STORAGE_BACKEND` 잔재 제거.
@@ -520,6 +521,8 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 - `comments/model.py`: `CommentsModel.get_liked_comment_ids_for_user` 단순 위임 잔재.
 - `posts/services/post_service.py`: `_VIEW_REDIS_EX_SECONDS <= 0` 분기 도달 불가(폴백이 3600 보장).
 - `api/dependencies/auth.py`: auth 서비스의 `_`프라이빗 헬퍼 3개 크로스 모듈 임포트 → 공용 모듈로 승격.
+- **(①+② 마감 리뷰)** app.state.redis 접근자가 3벌(`get_optional_redis`는 isinstance 가드, `_redis_client`·`_redis_from_scope`·라우터 bare getattr는 무가드)로 드리프트 — 공용 접근자 하나로 통일.
+- **(①+② 마감 리뷰)** 단위 테스트의 FakeRedis·FakeDB류가 4개 파일에 각자 구현 — conftest 공용 픽스처로 승격.
 
 ---
 

@@ -62,6 +62,17 @@ celery_app.conf.update(
     task_time_limit=settings.CELERY_TASK_TIME_LIMIT,
     broker_transport_options={
         "visibility_timeout": settings.CELERY_BROKER_VISIBILITY_TIMEOUT,
+        # enqueue(.delay)가 요청 경로에서 호출되므로, 블랙홀 브로커에 소켓이 매달리면
+        # 그 시간만큼 댓글/좋아요 응답이 지연된다. 연결·I/O를 짧게 자르고 재시도로 넘긴다.
+        "socket_timeout": 5,
+        "socket_connect_timeout": 5,
+    },
+    # publish 실패 시 빠른 소폭 재시도 후 포기 — 호출부(_dispatch_sns_publish)가 인라인 폴백을 가진다.
+    task_publish_retry_policy={
+        "max_retries": 2,
+        "interval_start": 0,
+        "interval_step": 0.2,
+        "interval_max": 0.5,
     },
     result_expires=settings.CELERY_RESULT_EXPIRES_SECONDS,
 )

@@ -90,6 +90,9 @@
         redis 탐색이 항상 None이던 결함을 `scope["app"]` 기반으로 교체해 **분산 rate limit 복원**
   - [x] #28 XFF 신뢰 — 원시 헤더 파싱 제거, 검증된 scope["client"]만 사용(조회수 조작 벡터 차단)
   - [x] #29 record_post_view 경량화 — EXISTS 가시성 확인 + reader/writer 세션 분리(폴백만 writer)
+  - [x] 마감: `/code-review`(①+② 범위, 정확성 2건 반영 — ① 프로덕션 가드에 프록시 신뢰
+        필수화: 복원된 IP rate limit이 ALB 뒤에서 프록시 IP로 수렴하는 자기-DoS 차단,
+        ② Celery enqueue 소켓 타임아웃·publish 재시도 정책 명시. 정리 4건은 #25·#34·#35로 이연)
 - [ ] **③ 실시간 견고화**: #23 SSE 팬아웃 통일 · #30 pubsub 재연결 · #32 WS 남용 방어
 - [ ] **④ 미디어 정리**: #24 업로드 단일화 · #31 presign 한도·pending GC
 - [ ] **⑤ 마무리**: #25 조회수 경로 단일화 · #33 트렌딩 timeout · #34 소품 · #35 죽은 코드 · #26 ORM 배치 · #36 결정 문서화

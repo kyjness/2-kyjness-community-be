@@ -231,6 +231,14 @@ def validate_settings_for_environment() -> None:
         errors.append(
             "S3_BUCKET_NAME·AWS_ACCESS_KEY_ID·AWS_SECRET_ACCESS_KEY가 모두 설정돼야 합니다."
         )
+    # rate limit·조회수 dedup은 클라이언트 IP 단위인데, 운영 전제(ALB/Nginx 뒤)에서 XFF를
+    # 신뢰하지 않으면 모든 트래픽이 소수 프록시 IP로 수렴한다 — 전역 한도가 사이트 전체를
+    # 429로 조이고(자기-DoS) 익명 조회수 dedup도 프록시 단위로 붕괴한다.
+    if not settings.TRUST_X_FORWARDED_FOR or not settings.TRUSTED_PROXY_IPS:
+        errors.append(
+            "TRUST_X_FORWARDED_FOR=true와 TRUSTED_PROXY_IPS(프록시 대역)가 설정돼야 합니다 — "
+            "IP 기반 rate limit·조회수 dedup이 프록시 IP로 수렴하는 것을 방지."
+        )
 
     if errors:
         raise ValueError(
