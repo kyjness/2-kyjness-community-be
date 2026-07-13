@@ -113,14 +113,25 @@ def _patch_db(monkeypatch, on_delta):
     monkeypatch.setattr("app.db.session.get_connection", _fake_get_connection)
 
 
-async def test_dedup_blocks_repeat_viewer():
+async def test_dedup_blocks_repeat_viewer(monkeypatch):
     """같은 viewer_key는 TTL 창 안에서 두 번째부터 조회수 증가를 막는다(SET NX)."""
+    monkeypatch.setattr(ps, "_VIEW_REDIS_EX_SECONDS", 3600)  # 환경(.env TTL 0) 무관하게 dedup 켬
     r = FakeRedis()
     pid = uuid.uuid4()
     assert await ps._consume_view_if_new_redis(pid, "u:1", r) is True
     assert await ps._consume_view_if_new_redis(pid, "u:1", r) is False
     # 다른 viewer는 독립적으로 허용
     assert await ps._consume_view_if_new_redis(pid, "u:2", r) is True
+
+
+async def test_dedup_disabled_when_ttl_zero(monkeypatch):
+    """TTL 0 = dedup 끔(compose 로컬 편의 의도) — 같은 viewer의 반복 조회도 매번 집계."""
+    monkeypatch.setattr(ps, "_VIEW_REDIS_EX_SECONDS", 0)
+    r = FakeRedis()
+    pid = uuid.uuid4()
+    assert await ps._consume_view_if_new_redis(pid, "u:1", r) is True
+    assert await ps._consume_view_if_new_redis(pid, "u:1", r) is True
+    assert r.kv == {}  # dedup 키를 만들지 않는다(Redis 무접촉)
 
 
 async def test_buffer_accumulates_pending():
@@ -280,6 +291,7 @@ def _patch_detail_load(monkeypatch, post):
 
 async def test_apply_view_increment_contract(monkeypatch):
     """안무 계약: dedup 차단→False, 버퍼 흡수→False(DB 무접촉), 버퍼 실패→True(writer 직접)."""
+    monkeypatch.setattr(ps, "_VIEW_REDIS_EX_SECONDS", 3600)  # 환경(.env TTL 0) 무관하게 dedup 켬
     r = FakeRedis()
     pid = uuid.uuid4()
     incremented: list[uuid.UUID] = []

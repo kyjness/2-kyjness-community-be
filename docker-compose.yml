@@ -91,8 +91,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       # 인증 (로컬 전용 더미 — 배포 시 SSM 주입)
       JWT_SECRET_KEY: local-dev-only-secret-change-me-0123456789
-      # 스토리지 (로컬 MinIO)
-      STORAGE_BACKEND: s3
+      # 스토리지 (로컬 MinIO — S3 단일 경로, ADR 0010)
       S3_BUCKET_NAME: puppytalk
       S3_ENDPOINT_URL: http://minio:9000
       AWS_ACCESS_KEY_ID: minioadmin
@@ -101,7 +100,7 @@ services:
       S3_PUBLIC_BASE_URL: http://localhost:9000/puppytalk
       # 로컬 편의
       DEBUG: "true"
-      VIEW_CACHE_TTL_SECONDS: "0"
+      VIEW_CACHE_TTL_SECONDS: "0" # dedup 끔 — 새로고침만으로 조회수 증가 확인
     command: >
       sh -c "alembic upgrade head &&
              exec gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000"

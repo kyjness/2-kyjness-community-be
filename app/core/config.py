@@ -157,7 +157,7 @@ class Settings(BaseSettings):
     # ----- 조회수 Write-behind (Redis HINCRBY → 주기적 DB flush) -----
     VIEW_BUFFER_FLUSH_INTERVAL_SECONDS: int = 300
     VIEW_FLUSH_LOCK_SECONDS: int = 120
-    # 조회수 dedup 키 TTL(SET NX EX). 0 이하면 post_service에서 3600으로 폴백.
+    # 조회수 dedup 키 TTL(SET NX EX). 0 이하 = dedup 끔(같은 viewer도 매 조회 집계).
     VIEW_CACHE_TTL_SECONDS: int = 3600
 
     @field_validator(

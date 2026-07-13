@@ -34,9 +34,8 @@ redis.call('RENAME', KEYS[1], KEYS[2])
 return 1
 """
 
-_VIEW_REDIS_EX_SECONDS = (
-    settings.VIEW_CACHE_TTL_SECONDS if settings.VIEW_CACHE_TTL_SECONDS > 0 else 3600
-)
+# 0 이하 = dedup 끔(같은 viewer도 매 조회 집계 — 로컬/데모에서 증가 즉시 확인용).
+_VIEW_REDIS_EX_SECONDS = settings.VIEW_CACHE_TTL_SECONDS
 
 _HASHTAG_ALLOWED_RE = re.compile(r"[^0-9a-z가-힣_]")
 
