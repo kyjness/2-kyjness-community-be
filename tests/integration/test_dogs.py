@@ -109,7 +109,8 @@ async def test_partial_unique_index_rejects_second_representative(db_session):
     # API는 set_representative로 대표견을 1개로 정규화하므로 2개를 만들 수 없다.
     # DB 부분 유니크 인덱스가 최후 방어선임을 직접 검증한다: 같은 owner에 대표견 2개 → IntegrityError.
     from app.db.base_class import utc_now
-    from app.domain.users.model import DogProfile, User
+    from app.domain.dogs.model import DogProfile
+    from app.domain.users.model import User
 
     now = utc_now()
     user = User(

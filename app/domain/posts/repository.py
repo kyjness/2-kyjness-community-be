@@ -10,7 +10,8 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.common.exceptions import InvalidRequestException
 from app.db.base_class import utc_now
-from app.domain.users.model import DogProfile, User, UserBlock
+from app.domain.dogs.model import DogProfile
+from app.domain.users.model import User, UserBlock
 
 from .model import Category, Hashtag, Post, PostImage, post_hashtags
 

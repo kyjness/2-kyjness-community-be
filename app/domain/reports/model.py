@@ -1,15 +1,49 @@
-# 신고 테이블 접근. Report ORM은 app.users.model에 정의됨.
+# 신고 도메인 ORM(Report)과 쿼리 클래스.
+# User 참조는 문자열 관계("User")만 사용 — users.model을 런타임 임포트하지 않는다(순환 차단).
 
 from collections import defaultdict
 from datetime import datetime
+from datetime import datetime as DateTimeType
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.common.enums import TargetType
-from app.db.base_class import utc_now
-from app.domain.users.model import Report
+from app.core.ids import new_uuid7
+from app.db.base_class import PG_UUID, Base, utc_now
+
+if TYPE_CHECKING:
+    from app.domain.users.model import User
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    __table_args__ = (
+        # 관리자 신고 집계·delete_by_target는 모두 WHERE target_type AND target_id (AND deleted_at
+        # IS NULL)로 조회한다. 모든 read 경로가 미삭제만 보므로 부분 인덱스로 살아있는 신고만 커버.
+        Index(
+            "ix_reports_target",
+            "target_type",
+            "target_id",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
+    reporter_id: Mapped[UUID] = mapped_column(
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_id: Mapped[UUID] = mapped_column(PG_UUID, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[DateTimeType | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    reporter: Mapped["User"] = relationship("User", foreign_keys=[reporter_id], lazy="raise_on_sql")
+
 
 # PostgreSQL IN (...)·파라미터·응답 메모리 폭주 완화 (관리자 신고 목록 등 대량 ID)
 REPORT_BULK_IN_CHUNK = 200

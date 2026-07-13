@@ -3,7 +3,8 @@ from app.core.config import settings
 from app.db.base_class import utc_now
 from app.domain.comments.model import Comment
 from app.domain.posts.model import Post
-from app.domain.users.model import Report, User
+from app.domain.reports.model import Report
+from app.domain.users.model import User
 from app.main import app
 from httpx import AsyncClient
 from sqlalchemy import select, text

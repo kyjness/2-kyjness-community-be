@@ -1,24 +1,20 @@
-# 사용자 CRUD. User ORM 반환, Controller에서 Schema.model_validate(user)로 직렬화. 프로필 이미지는 profile_image_id(FK). AsyncSession.
-from datetime import date as DateType
+# 사용자 도메인 ORM(User·UserBlock)과 쿼리 클래스. 프로필 이미지는 profile_image_id(FK).
+# DogProfile·Report ORM은 각자의 도메인(dogs·reports) model.py 소유 — User.dogs 관계가
+# DogProfile 컬럼을 직접 참조하므로 여기서 런타임 임포트한다(역방향 의존 없음 → 순환 없음).
 from datetime import datetime as DateTimeType
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
-    Boolean,
-    Date,
     DateTime,
     ForeignKey,
-    Index,
     Integer,
     String,
-    Text,
     and_,
     delete,
     or_,
     select,
-    text,
     update,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,51 +23,9 @@ from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship, sele
 from app.common.enums import UserStatus
 from app.core.ids import new_uuid7
 from app.db.base_class import PG_UUID, Base, utc_now
+from app.domain.dogs.model import DogProfile
 from app.domain.media.model import Image
 from app.infra.storage import build_url
-
-
-class DogProfile(Base):
-    __tablename__ = "dog_profiles"
-    __table_args__ = (
-        # 소유자당 대표견 1마리 불변식을 DB로 승격. 명령형 set_representative뿐 아니라
-        # 어떤 경로로도 대표견이 2개가 될 수 없게 강제하고, User.representative_dog의
-        # uselist=False를 정당화한다.
-        Index(
-            "uq_dog_profiles_owner_representative",
-            "owner_id",
-            unique=True,
-            postgresql_where=text("is_representative"),
-        ),
-    )
-
-    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
-    owner_id: Mapped[UUID] = mapped_column(
-        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    breed: Mapped[str] = mapped_column(String(100), nullable=False)
-    gender: Mapped[str] = mapped_column(String(20), nullable=False)
-    birth_date: Mapped[DateType] = mapped_column(Date, nullable=False)
-    profile_image_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID, ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    is_representative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    owner: Mapped["User"] = relationship(
-        "User", back_populates="dogs", foreign_keys=[owner_id], lazy="raise_on_sql"
-    )
-    profile_image: Mapped[Image | None] = relationship(
-        "Image", foreign_keys=[profile_image_id], lazy="raise_on_sql"
-    )
-
-    @property
-    def profile_image_url(self) -> str | None:
-        if self.profile_image:
-            return build_url(self.profile_image.file_key)
-        return None
 
 
 class User(Base):
@@ -141,32 +95,6 @@ class UserBlock(Base):
 
     blocker: Mapped["User"] = relationship("User", foreign_keys=[blocker_id], lazy="raise_on_sql")
     blocked: Mapped["User"] = relationship("User", foreign_keys=[blocked_id], lazy="raise_on_sql")
-
-
-class Report(Base):
-    __tablename__ = "reports"
-    __table_args__ = (
-        # 관리자 신고 집계·delete_by_target는 모두 WHERE target_type AND target_id (AND deleted_at
-        # IS NULL)로 조회한다. 모든 read 경로가 미삭제만 보므로 부분 인덱스로 살아있는 신고만 커버.
-        Index(
-            "ix_reports_target",
-            "target_type",
-            "target_id",
-            postgresql_where=text("deleted_at IS NULL"),
-        ),
-    )
-
-    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
-    reporter_id: Mapped[UUID] = mapped_column(
-        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    target_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    target_id: Mapped[UUID] = mapped_column(PG_UUID, nullable=False)
-    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
-    deleted_at: Mapped[DateTimeType | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    reporter: Mapped["User"] = relationship("User", foreign_keys=[reporter_id], lazy="raise_on_sql")
 
 
 class UsersModel:

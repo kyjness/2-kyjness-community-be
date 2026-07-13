@@ -31,8 +31,9 @@ from sqlalchemy.orm import (
 
 from app.core.ids import new_uuid7
 from app.db.base_class import PG_UUID, Base, utc_now
+from app.domain.dogs.model import DogProfile
 from app.domain.posts.model import Post
-from app.domain.users.model import DogProfile, User, UserBlock
+from app.domain.users.model import User, UserBlock
 
 
 class CommentAuthorPermissionRow(NamedTuple):

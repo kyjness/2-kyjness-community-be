@@ -1,13 +1,78 @@
-# 강아지 프로필 CRUD. 대표 강아지 설정은 한 트랜잭션 내 원자적 처리. AsyncSession.
+# 강아지 도메인 ORM(DogProfile)과 쿼리 클래스. 대표 강아지 설정은 한 트랜잭션 내 원자적 처리.
+# User 참조는 문자열 관계("User")만 사용 — users.model을 런타임 임포트하지 않는다(순환 차단).
 
+from datetime import date as DateType
+from datetime import datetime as DateTimeType
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import bindparam, case, delete, select, update
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    bindparam,
+    case,
+    delete,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import Mapped, joinedload, mapped_column, relationship
 
-from app.db.base_class import utc_now
-from app.domain.users.model import DogProfile
+from app.core.ids import new_uuid7
+from app.db.base_class import PG_UUID, Base, utc_now
+from app.domain.media.model import Image
+from app.infra.storage import build_url
+
+if TYPE_CHECKING:
+    from app.domain.users.model import User
+
+
+class DogProfile(Base):
+    __tablename__ = "dog_profiles"
+    __table_args__ = (
+        # 소유자당 대표견 1마리 불변식을 DB로 승격. 명령형 set_representative뿐 아니라
+        # 어떤 경로로도 대표견이 2개가 될 수 없게 강제하고, User.representative_dog의
+        # uselist=False를 정당화한다.
+        Index(
+            "uq_dog_profiles_owner_representative",
+            "owner_id",
+            unique=True,
+            postgresql_where=text("is_representative"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID, primary_key=True, default=new_uuid7)
+    owner_id: Mapped[UUID] = mapped_column(
+        PG_UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    breed: Mapped[str] = mapped_column(String(100), nullable=False)
+    gender: Mapped[str] = mapped_column(String(20), nullable=False)
+    birth_date: Mapped[DateType] = mapped_column(Date, nullable=False)
+    profile_image_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID, ForeignKey("images.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_representative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[DateTimeType] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    owner: Mapped["User"] = relationship(
+        "User", back_populates="dogs", foreign_keys=[owner_id], lazy="raise_on_sql"
+    )
+    profile_image: Mapped[Image | None] = relationship(
+        "Image", foreign_keys=[profile_image_id], lazy="raise_on_sql"
+    )
+
+    @property
+    def profile_image_url(self) -> str | None:
+        if self.profile_image:
+            return build_url(self.profile_image.file_key)
+        return None
 
 
 class DogProfilesModel:

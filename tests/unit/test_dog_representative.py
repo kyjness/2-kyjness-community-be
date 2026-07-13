@@ -7,8 +7,9 @@
 import inspect
 
 from app.domain.comments.model import _comment_author_loads
+from app.domain.dogs.model import DogProfile
 from app.domain.posts.repository import _post_author_and_content_loads
-from app.domain.users.model import DogProfile, User
+from app.domain.users.model import User
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import RelationshipProperty

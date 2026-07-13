@@ -25,8 +25,9 @@ from app.domain.chat.schema import (
     ChatRoomPeerInfoData,
     ChatRoomsListData,
 )
+from app.domain.dogs.model import DogProfile
 from app.domain.media.model import Image
-from app.domain.users.model import DogProfile, User, UsersModel
+from app.domain.users.model import User, UsersModel
 from app.infra.pubsub import publish_user_envelope
 
 from .manager import CHAT_DM_FANOUT_CHANNEL, chat_connection_manager
