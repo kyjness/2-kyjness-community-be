@@ -123,11 +123,16 @@ async def check_fixed_window(
     *,
     window_sec: int,
     max_count: int,
+    fail_open: bool = False,
 ) -> tuple[bool, int]:
-    """미들웨어 밖(WS 수신 루프 등)에서 재사용하는 fixed-window 검사. (allowed, retry_after).
+    """fixed-window 검사 단일 진입점(미들웨어·WS 수신 루프 공용). (allowed, retry_after).
 
-    Redis 우선(멀티 인스턴스 공유 한도), 부재·장애 시 인스턴스 로컬 메모리 윈도로 폴백 —
-    남용 방어가 목적이라 완전 fail-open 대신 근사 한도라도 유지한다.
+    Redis 우선(멀티 인스턴스 공유 한도). Redis 부재·장애 시: `fail_open=True`면 통과
+    (글로벌 한도 — 가용성 우선), False면 인스턴스 로컬 메모리 윈도로 폴백(로그인·업로드·
+    WS 같은 남용 방어 경로 — 근사 한도라도 유지).
+
+    key는 `종류:식별자` 규약 — 첫 콜론 앞이 거부 메트릭의 limit 라벨이 되므로
+    카디널리티가 유한한 접두사를 쓸 것(login·signup_upload·global·chat 등).
     """
     allowed = True
     retry_after = 0
@@ -137,11 +142,12 @@ async def check_fixed_window(
                 redis, key, window_sec, max_count
             )
         except Exception:
-            allowed, retry_after = _check_memory_fixed_window(key, window_sec, max_count)
-    else:
+            if not fail_open:
+                allowed, retry_after = _check_memory_fixed_window(key, window_sec, max_count)
+    elif not fail_open:
         allowed, retry_after = _check_memory_fixed_window(key, window_sec, max_count)
     if not allowed:
-        # HTTP 429와 동일 계측 — WS 등 비HTTP 경로 거부도 대시보드에 잡히게.
+        # HTTP·WS 공통 계측 — 거부는 모두 이 한 곳에서 센다.
         RATE_LIMIT_REJECTIONS.labels(limit=key.split(":", 1)[0]).inc()
     return allowed, retry_after
 
@@ -209,30 +215,16 @@ class RateLimitMiddleware:
             max_count = settings.RATE_LIMIT_MAX_REQUESTS
             code = ApiCode.RATE_LIMIT_EXCEEDED
 
-        allowed = True
-        retry_after_seconds = 0
-
-        if redis is not None:
-            try:
-                allowed, retry_after_seconds = await _check_redis_fixed_window(
-                    redis, key, window, max_count
-                )
-            except Exception:
-                if _is_critical_path(path):
-                    allowed, retry_after_seconds = _check_memory_fixed_window(
-                        key, window, max_count
-                    )
-                else:
-                    allowed = True
-        else:
-            if _is_critical_path(path):
-                allowed, retry_after_seconds = _check_memory_fixed_window(key, window, max_count)
-            else:
-                allowed = True
-
+        # 정책(Redis 우선·폴백·거부 메트릭)은 check_fixed_window 한 곳 — 글로벌 한도만
+        # Redis 장애 시 fail-open, 로그인·회원가입 업로드는 메모리 폴백으로 방어 유지.
+        allowed, retry_after_seconds = await check_fixed_window(
+            redis,
+            key,
+            window_sec=window,
+            max_count=max_count,
+            fail_open=not _is_critical_path(path),
+        )
         if not allowed:
-            # key 접두사가 곧 한도 종류(login·signup_upload·global).
-            RATE_LIMIT_REJECTIONS.labels(limit=key.split(":", 1)[0]).inc()
             await _send_429(send, scope, code, retry_after_seconds)
             return
 

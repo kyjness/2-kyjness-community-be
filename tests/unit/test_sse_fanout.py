@@ -107,7 +107,7 @@ def _publish_kwargs(uid) -> dict[str, Any]:
     }
 
 
-async def test_publish_after_commit_sends_single_channel_envelope():
+async def test_publish_after_commit_sends_single_channel_envelope_with_origin():
     uid = uuid4()
     redis = _FakeRedis()
     await NotificationService.publish_after_commit(redis, **_publish_kwargs(uid))  # type: ignore[arg-type]
@@ -115,10 +115,25 @@ async def test_publish_after_commit_sends_single_channel_envelope():
     assert channel == NOTIF_SSE_FANOUT_CHANNEL
     env = json.loads(raw)
     assert env["target_user_id"] == str(uid)
+    assert env["origin"] == pubsub_mod._INSTANCE_ID  # 리스너의 자기 발행분 스킵 근거
     assert json.loads(env["payload"])["kind"] == "LIKE_POST"
 
 
-async def test_publish_after_commit_falls_back_to_local_on_redis_failure():
+async def test_publish_after_commit_delivers_locally_even_when_publish_succeeds():
+    """로컬 전달은 publish·리스너 상태에 의존하지 않는다 — 항상 직접 전달."""
+    uid = uuid4()
+    queue = await notification_sse_manager.register(uid)
+    try:
+        await NotificationService.publish_after_commit(
+            _FakeRedis(),  # type: ignore[arg-type]
+            **_publish_kwargs(uid),
+        )
+        assert queue.qsize() == 1
+    finally:
+        await notification_sse_manager.unregister(uid, queue)
+
+
+async def test_publish_after_commit_delivers_locally_when_publish_fails():
     uid = uuid4()
     queue = await notification_sse_manager.register(uid)
     try:
@@ -142,10 +157,10 @@ async def test_publish_after_commit_delivers_locally_without_redis():
         await notification_sse_manager.unregister(uid, queue)
 
 
-# --- chat 폴백 (publish 성공 여부 신호) ---
+# --- chat 팬아웃 (로컬 우선 + envelope publish) ---
 
 
-async def test_chat_fanout_falls_back_locally_when_publish_fails(monkeypatch):
+async def test_chat_fanout_sends_locally_regardless_of_publish_result(monkeypatch):
     sent: list[tuple[Any, str]] = []
 
     async def fake_send(user_id, message):
@@ -158,20 +173,11 @@ async def test_chat_fanout_falls_back_locally_when_publish_fails(monkeypatch):
     await ChatService._fanout_dm(_FakeRedis(fail=True), peer_id=peer, sender_id=sender, wire="w")  # type: ignore[arg-type]
     assert [(peer, "w"), (sender, "w")] == sent
 
-
-async def test_chat_fanout_skips_local_when_publish_succeeds(monkeypatch):
-    sent: list[Any] = []
-
-    async def fake_send(user_id, message):
-        sent.append(user_id)
-
-    monkeypatch.setattr(
-        "app.domain.chat.service.chat_connection_manager.send_personal_message", fake_send
-    )
-    redis = _FakeRedis()
-    await ChatService._fanout_dm(redis, peer_id=uuid4(), sender_id=uuid4(), wire="w")  # type: ignore[arg-type]
-    assert sent == []
-    assert len(redis.published) == 2
+    sent.clear()
+    ok_redis = _FakeRedis()
+    await ChatService._fanout_dm(ok_redis, peer_id=peer, sender_id=sender, wire="w")  # type: ignore[arg-type]
+    assert [(peer, "w"), (sender, "w")] == sent  # publish 성공이어도 로컬은 직접 전달
+    assert len(ok_redis.published) == 2
 
 
 async def test_publish_user_envelope_returns_false_without_redis():
@@ -240,6 +246,18 @@ async def test_listener_dispatches_by_channel(monkeypatch):
             "type": "message",
             "channel": "ch:notif",
             "data": json.dumps({"target_user_id": str(uid_notif), "payload": "notif"}),
+        },
+        {
+            # 자기 인스턴스 발행분 — 로컬은 발행 시 이미 직접 전달됐으므로 스킵돼야 한다
+            "type": "message",
+            "channel": "ch:chat",
+            "data": json.dumps(
+                {
+                    "origin": pubsub_mod._INSTANCE_ID,
+                    "target_user_id": str(uid_chat),
+                    "payload": "self-dup",
+                }
+            ),
         },
         {"type": "message", "channel": "ch:unknown", "data": "ignored"},
         {"type": "message", "channel": "ch:chat", "data": "not-json"},  # envelope invalid → skip

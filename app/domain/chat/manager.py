@@ -9,6 +9,11 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 log = logging.getLogger(__name__)
 
+# 수신 버퍼가 꽉 찬(죽어가는) 소켓의 send가 무한 대기하면, 이 매니저를 핸들러로 쓰는
+# 공용 pubsub 리스너 루프까지 정지한다 — 인스턴스의 실시간 전달 전체가 한 클라이언트에
+# 볼모로 잡히지 않게 상한을 두고, 초과 소켓은 끊는다.
+_SEND_TIMEOUT_SEC = 5.0
+
 
 class ConnectionManager:
     """인스턴스(워커) 단위. `user_id` → 해당 유저에 붙은 모든 WebSocket."""
@@ -38,9 +43,10 @@ class ConnectionManager:
         for ws in sockets:
             try:
                 if isinstance(message, dict):
-                    await ws.send_json(message)
+                    await asyncio.wait_for(ws.send_json(message), timeout=_SEND_TIMEOUT_SEC)
                 else:
-                    await ws.send_text(message)
+                    await asyncio.wait_for(ws.send_text(message), timeout=_SEND_TIMEOUT_SEC)
+            # TimeoutError ⊂ OSError — 타임아웃 소켓도 아래에서 disconnect 처리된다.
             except (WebSocketDisconnect, RuntimeError, OSError) as e:
                 log.debug("chat ws send skip disconnect user=%s: %s", user_id, e)
                 await self.disconnect(user_id, ws)

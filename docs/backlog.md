@@ -529,6 +529,10 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 - `rate_limit.py` `_SKIP_PATHS`의 `"/health"`가 실경로 `/v1/health`와 불일치.
 - `docker-compose.yml` `VIEW_CACHE_TTL_SECONDS: "0"` — dedup 끔 의도로 보이나 코드는 0→3600 폴백이라 로컬 조회수가 안 오름. 의도 정렬.
 - `docker-compose.yml` 폐기 설정 `STORAGE_BACKEND` 잔재 제거.
+- **(③ 마감 리뷰)** chat `_fanout_dm`이 같은 wire를 envelope 2건(peer·sender)으로 발행 — 전 인스턴스가
+  중복 파싱. envelope에 수신자 목록(`target_user_ids`)을 담아 1건으로 합치면 발행 RTT·리스너 부하 절반.
+- **(③ 마감 리뷰)** `send_dm_from_ws`의 차단 EXISTS가 peer 조회와 별도 왕복 — peer SELECT에 exists
+  서브쿼리로 합치면 메시지당 DB 왕복 1회 절감(60/분 한도 하에서는 마이너).
 
 ---
 
@@ -545,6 +549,9 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
   (③에서 test_sse_fanout·test_pubsub_reconnect·test_chat_ws_guards 3개 파일이 추가로 늘어남).
 - **(③ 마감 리뷰)** chat `ConnectionManager`·notif `SseFanoutManager`가 "유저별 집합 + asyncio.Lock" 골격을
   중복 구현 — 전달 세맨틱(WS send vs 큐 put)이 달라 억지 통합은 비권장이나, 등록/해제 골격의 공용 베이스는 검토 가치.
+  임계 구역에 await가 없어 락 자체가 불필요하다는 지적도 함께 판단(제거 시 두 매니저 일관되게).
+- **(③ 마감 리뷰)** `chat/pubsub.py`가 채널 상수 + `publish_chat_dm` 1줄 위임만 남음 — 상수를 도메인 모듈로
+  옮기고 `publish_user_envelope` 직접 호출로 모듈 제거 검토(위임 잔재 정리와 동일 패턴).
 
 ---
 

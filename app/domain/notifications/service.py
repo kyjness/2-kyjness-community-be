@@ -214,17 +214,17 @@ class NotificationService:
             ),
             ensure_ascii=False,
         )
-        # 단일 채널 envelope → 각 인스턴스의 공용 리스너가 로컬 SSE로 팬아웃(chat DM과 동형).
-        # publish 실패·Redis 부재 시 이 인스턴스의 스트림에라도 직접 전달 — 다른 인스턴스
-        # 수신자는 GET /notifications로 동기화 가능하다.
-        published = await publish_user_envelope(
+        # 같은 인스턴스의 SSE 스트림은 먼저 직접 전달 — Redis·구독 리스너 상태에 의존하지
+        # 않는다. 크로스 인스턴스는 단일 채널 envelope publish(chat DM과 동형) — 리스너가
+        # origin 비교로 자기 발행분을 건너뛰어 중복 없음. publish 실패 시 다른 인스턴스
+        # 수신자는 GET /notifications로 동기화 가능하다(at-most-once).
+        await notification_sse_manager.deliver(recipient_user_id, payload_json)
+        await publish_user_envelope(
             redis,
             NOTIF_SSE_FANOUT_CHANNEL,
             target_user_id=recipient_user_id,
             payload=payload_json,
         )
-        if not published:
-            await notification_sse_manager.deliver(recipient_user_id, payload_json)
 
         await cls._dispatch_sns_publish(
             recipient_user_id=recipient_user_id,

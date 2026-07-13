@@ -1,5 +1,6 @@
 # 1:1 DM 비즈니스 로직. 방 upsert·메시지 저장·Redis 팬아웃·커서 목록.
 
+import asyncio
 import json
 import logging
 from uuid import UUID
@@ -74,6 +75,11 @@ class ChatService:
         user_id: UUID,
         peer_id: UUID,
     ) -> ChatRoom:
+        # 방향 무관 차단 검사를 방 생성/재개 지점에 둔다 — WS 전송·REST 방 열기 등 어떤
+        # 진입점이든 여기를 지나므로 경로별로 검사를 기억할 필요가 없다. 문구는 누가
+        # 차단했는지 노출하지 않는 중립 표현.
+        if await UsersModel.block_exists_between(user_id, peer_id, db=db):
+            raise ForbiddenException(message="메시지를 보낼 수 없는 상대입니다.")
         u1, u2 = normalize_dm_user_ids(user_id, peer_id)
         now = utc_now()
         rid = new_uuid7()
@@ -113,9 +119,7 @@ class ChatService:
             peer = await UsersModel.get_user_by_id(peer_id, db=db)
             if not peer or not UserStatus.is_active_value(peer.status):
                 raise UserNotFoundException(message="상대방을 찾을 수 없습니다.")
-            # 방향 무관 차단 검사 — 메시지도 동일 문구로 응답해 누가 차단했는지 노출하지 않는다.
-            if await UsersModel.block_exists_between(sender_id, peer_id, db=db):
-                raise ForbiddenException(message="메시지를 보낼 수 없는 상대입니다.")
+            # 차단 검사는 get_or_create_room 안에서 수행된다(모든 진입점 공통).
             room = await cls.get_or_create_room(db, user_id=sender_id, peer_id=peer_id)
             msg = ChatMessage(
                 id=new_uuid7(),
@@ -150,12 +154,17 @@ class ChatService:
         sender_id: UUID,
         wire: str,
     ) -> None:
-        # publish는 내부에서 예외를 삼키고 성공 여부만 반환한다 — False면 로컬 소켓에라도
-        # 직접 전달해야 같은 인스턴스 수신자가 유실되지 않는다(다른 인스턴스는 fail-open).
-        if not await publish_chat_dm(redis, target_user_id=peer_id, payload=wire):
-            await chat_connection_manager.send_personal_message(peer_id, wire)
-        if not await publish_chat_dm(redis, target_user_id=sender_id, payload=wire):
-            await chat_connection_manager.send_personal_message(sender_id, wire)
+        # 같은 인스턴스 소켓은 먼저 직접 전달 — Redis·구독 리스너 상태에 의존하지 않는다
+        # (publish 성공이 로컬 전달을 보장하지 않는다: 소비는 별도 리스너 연결 몫이라
+        # 리스너 재연결 창에서는 성공한 publish도 로컬에 도달하지 않는다).
+        # 크로스 인스턴스는 envelope publish — 리스너가 origin 비교로 자기 발행분을
+        # 건너뛰므로 중복 전달 없음. publish 실패는 다른 인스턴스 수신자만 유실(at-most-once).
+        await chat_connection_manager.send_personal_message(peer_id, wire)
+        await chat_connection_manager.send_personal_message(sender_id, wire)
+        await asyncio.gather(
+            publish_chat_dm(redis, target_user_id=peer_id, payload=wire),
+            publish_chat_dm(redis, target_user_id=sender_id, payload=wire),
+        )
 
     @classmethod
     async def list_room_messages(

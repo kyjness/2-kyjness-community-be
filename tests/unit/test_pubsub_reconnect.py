@@ -174,6 +174,37 @@ async def test_listener_stops_promptly_during_backoff(monkeypatch):
     assert _FakeRedis.connect_count == 1  # 백오프 중 종료 — 추가 재연결 없음
 
 
+async def test_backoff_reset_fires_after_first_poll_not_subscribe(monkeypatch):
+    """구독만 되고 바로 죽는 플래핑 연결이 백오프를 리셋하지 못하게 —
+    on_healthy는 첫 get_message 성공 후에만 호출된다."""
+    healthy: list[int] = []
+
+    # 구독 성공 직후 수신 계층에서 즉사하는 연결: on_healthy 미호출
+    stop_event = _setup(monkeypatch, [_Script(get_message_error=True)])
+    with pytest.raises(ConnectionError):
+        await pubsub_mod._listen_once(
+            redis_url="redis://test",
+            handlers={"ch": _noop_handler},
+            stop_event=stop_event,
+            on_healthy=lambda: healthy.append(1),
+        )
+    assert healthy == []
+
+    # 폴이 한 번이라도 성공하면 호출
+    stop_event = _setup(monkeypatch, [_Script(stop_after=True)])
+    await pubsub_mod._listen_once(
+        redis_url="redis://test",
+        handlers={"ch": _noop_handler},
+        stop_event=stop_event,
+        on_healthy=lambda: healthy.append(1),
+    )
+    assert healthy == [1]
+
+
+async def _noop_handler(user_id, payload):
+    pass
+
+
 async def test_handler_error_does_not_drop_connection(monkeypatch):
     uid = uuid4()
     stop_event = _setup(

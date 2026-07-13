@@ -75,6 +75,20 @@ async def test_check_fixed_window_uses_memory_without_redis():
     assert not allowed
 
 
+async def test_check_fixed_window_fail_open_passes_on_redis_absence_and_failure():
+    """글로벌 한도 경로(fail_open=True)는 Redis 부재·장애 시 검사 없이 통과."""
+    key = f"t:{uuid.uuid4()}"
+    for _ in range(3):
+        allowed, _ = await check_fixed_window(None, key, window_sec=60, max_count=1, fail_open=True)
+        assert allowed
+    redis = _FakeRedis(count=1, fail=True)
+    for _ in range(3):
+        allowed, _ = await check_fixed_window(
+            cast(Any, redis), key, window_sec=60, max_count=1, fail_open=True
+        )
+        assert allowed
+
+
 # --- send_dm_from_ws 차단 검사 ---
 
 
@@ -87,30 +101,34 @@ class _NoopTx:
 
 
 class _FakeDb:
+    """차단 거부는 방 upsert 전이어야 하므로, DB 쿼리가 실행되면 즉시 실패한다."""
+
     def begin(self) -> _NoopTx:
         return _NoopTx()
+
+    async def execute(self, *args, **kwargs):
+        raise AssertionError("차단 관계에서는 방 upsert 쿼리가 실행되면 안 된다")
 
 
 def _sess(db: _FakeDb) -> AsyncSession:
     return cast(AsyncSession, db)
 
 
-async def test_send_dm_rejects_blocked_relation_before_room_creation(monkeypatch):
-    sender, peer = uuid.uuid4(), uuid.uuid4()
-
+def _patch_blocked_pair(monkeypatch, a_id, b_id):
     async def fake_get_user(user_id, *, db):
         return SimpleNamespace(status="ACTIVE")
 
     async def fake_block_exists(a, b, *, db):
-        assert {a, b} == {sender, peer}
+        assert {a, b} == {a_id, b_id}
         return True
-
-    async def fail_room(*args, **kwargs):
-        raise AssertionError("차단 관계에서 방이 생성되면 안 된다")
 
     monkeypatch.setattr(UsersModel, "get_user_by_id", fake_get_user)
     monkeypatch.setattr(UsersModel, "block_exists_between", fake_block_exists)
-    monkeypatch.setattr(ChatService, "get_or_create_room", fail_room)
+
+
+async def test_send_dm_rejects_blocked_relation_before_room_creation(monkeypatch):
+    sender, peer = uuid.uuid4(), uuid.uuid4()
+    _patch_blocked_pair(monkeypatch, sender, peer)
 
     with pytest.raises(ForbiddenException) as exc:
         await ChatService.send_dm_from_ws(
@@ -123,6 +141,15 @@ async def test_send_dm_rejects_blocked_relation_before_room_creation(monkeypatch
     assert "차단" not in (exc.value.message or "")
 
 
+async def test_rest_room_open_rejects_blocked_relation(monkeypatch):
+    """가드는 get_or_create_room 깊이에 있다 — REST 방 열기 경로도 같은 지점에서 거부."""
+    me, peer = uuid.uuid4(), uuid.uuid4()
+    _patch_blocked_pair(monkeypatch, me, peer)
+
+    with pytest.raises(ForbiddenException):
+        await ChatService.resolve_direct_room(_sess(_FakeDb()), user_id=me, peer_id=peer)
+
+
 async def test_block_exists_between_checks_both_directions():
     """방향 무관 술어인지 쿼리 구조로 고정(blocker/blocked 양방향 OR)."""
     import inspect
@@ -131,3 +158,28 @@ async def test_block_exists_between_checks_both_directions():
     assert src.count("or_") >= 1
     assert src.count("blocker_id == user_a") == 1
     assert src.count("blocker_id == user_b") == 1
+
+
+# --- 매니저 send 타임아웃 (공용 리스너 head-of-line 차단 상한) ---
+
+
+async def test_send_personal_message_disconnects_stalled_socket(monkeypatch):
+    import asyncio
+
+    from app.domain.chat import manager as manager_mod
+
+    monkeypatch.setattr(manager_mod, "_SEND_TIMEOUT_SEC", 0.01)
+    manager = manager_mod.ConnectionManager()
+    uid = uuid.uuid4()
+
+    class _StalledWs:
+        async def send_text(self, message: str) -> None:
+            await asyncio.sleep(1)
+
+        async def send_json(self, message) -> None:
+            await asyncio.sleep(1)
+
+    ws = cast(Any, _StalledWs())
+    await manager.connect(uid, ws)
+    await manager.send_personal_message(uid, "x")  # 예외 없이 타임아웃 → 소켓 해제
+    assert manager._by_user == {}
