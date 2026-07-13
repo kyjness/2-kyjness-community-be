@@ -505,6 +505,13 @@ signup 전용 한도(10/시간)가 `/media/images/signup` 정확 일치라 presi
 
 **수정 방향**: presign·confirm 경로를 signup 한도에 포함 + `pending/` prefix에 S3 lifecycle(예: 1일 만료)을 infra 요건으로 ADR 0010에 명시.
 
+> **수정 완료**: 한도는 #24 direct 제거와 함께 이전 — `_path_is_signup_upload`가
+> `signup/presign`·`signup/confirm`을 매칭(공유 카운터, 기본 20/시간 = 업로드 10건분,
+> critical path라 Redis 장애 시 메모리 폴백 유지). pending/ GC는 **S3 lifecycle 만료 1일을
+> infra 요건으로 ADR 0010 구현 노트에 명시**(prod Terraform lifecycle rule + dev/CI MinIO
+> `mc ilm` 등가 규칙) — 앱 목록 순회 GC 잡은 봉투 대비 과잉이라 하지 않음. infra 저장소
+> 작업 시 버킷 정의에 규칙 반영 필요.
+
 ---
 
 ### 32. WebSocket DM에 rate limit·차단 검사 부재 — P1

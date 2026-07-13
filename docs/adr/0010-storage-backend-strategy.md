@@ -84,3 +84,10 @@
   파이프라인이자, 최대 20MB를 앱 서버 메모리로 태우는 경로. 전부 제거해 presigned 단일 경로로
   일원화하고, 비인증 signup 업로드 rate limit(IP당)은 살아남는 경로인 `signup/presign`·
   `signup/confirm`으로 이전했다(두 단계가 하나의 카운터를 공유 — 업로드 1건 = 2카운트).
+- **pending/ 잔존물 GC = S3 lifecycle(infra 요건)**: confirm되지 않은 `pending/` 객체는 DB 행이
+  없어 앱 sweeper가 지울 수 없다(고아 이미지 sweeper는 DB 행 기준). 앱이 S3 목록 순회 GC 잡을
+  도는 대신 **`pending/` prefix에 lifecycle 만료 1일**을 버킷 요건으로 둔다 — presign TTL 15분·
+  업로드 직후 confirm이라는 계약상, 1일 넘게 pending에 머무는 객체는 전부 미완료 잔존물이다.
+  적용 지점: prod는 infra 저장소의 S3 버킷 정의(Terraform lifecycle rule), dev/CI MinIO는
+  `mc ilm rule add --expire-days 1 --prefix media/pending/` 등가 규칙. 앱 코드는 관여하지 않는다
+  (저장소 수명주기는 저장소 계층 책임 — 목록 순회 잡은 봉투 대비 과잉).
