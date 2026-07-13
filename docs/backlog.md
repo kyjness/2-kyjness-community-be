@@ -511,6 +511,12 @@ signup 전용 한도(10/시간)가 `/media/images/signup` 정확 일치라 presi
 > infra 요건으로 ADR 0010 구현 노트에 명시**(prod Terraform lifecycle rule + dev/CI MinIO
 > `mc ilm` 등가 규칙) — 앱 목록 순회 GC 잡은 봉투 대비 과잉이라 하지 않음. infra 저장소
 > 작업 시 버킷 정의에 규칙 반영 필요.
+>
+> **④ 마감 리뷰 보강**: confirm 검증(size·content-type)을 promote **앞**으로 이동(승격 후
+> 거부가 남기던 DB 행 없는 영구 객체 누수 제거, TOCTOU 재확인 실패 시 승격본 보상 삭제),
+> head 404를 ValueError→400으로 매핑(미업로드/소진 키 confirm이 500으로 새던 결함),
+> **인증 presign에 유저 단위 한도**(`media_presign:{user_id}` 100/시간 — 일회용 계정으로
+> signup 한도를 우회하는 비대칭 봉합, ADR 0003 결정 5항), dev MinIO에 `mc ilm` 규칙 배선.
 
 ---
 
@@ -550,6 +556,13 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 - `docker-compose.yml` 폐기 설정 `STORAGE_BACKEND` 잔재 제거.
 - **(③ 마감 리뷰)** chat `_fanout_dm`이 같은 wire를 envelope 2건(peer·sender)으로 발행 — 전 인스턴스가
   중복 파싱. envelope에 수신자 목록(`target_user_ids`)을 담아 1건으로 합치면 발행 RTT·리스너 부하 절반.
+- **(④ 마감 리뷰)** `storage._promote_pending_object_sync`의 head→copy→delete가 비원자 — 동시 confirm
+  2건이 모두 성공해 객체·DB 행이 일시 중복될 수 있다(중복분은 DB 행이 있어 24h 후 orphan sweeper가
+  수거). 발생 빈도·피해가 작아 수용 중 — 필요 시 pending 키 기준 Redis `SET NX` 짧은 락으로 직렬화.
+- **(④ 마감 리뷰)** rate limit 경로 매칭이 트레일링 슬래시를 rstrip으로 수용 → `/presign/` 호출은
+  Starlette 307 리다이렉트 전후로 2회 카운트(로그인에도 있던 기존 패턴, 2단계 업로드에서 영향 2배).
+  정상 클라이언트는 슬래시 없이 호출하므로 수용 — 정밀화하려면 `redirect_slashes=False` 또는 미들웨어에서
+  307 예상 경로 스킵.
 - **(③ 마감 리뷰)** `send_dm_from_ws`의 차단 EXISTS가 peer 조회와 별도 왕복 — peer SELECT에 exists
   서브쿼리로 합치면 메시지당 DB 왕복 1회 절감(60/분 한도 하에서는 마이너).
 
@@ -575,6 +588,15 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
   `relax_integration_rate_limits`가 전역 settings 한도를 영구 완화 → 풀 스위트(integration→unit 순)에서
   `tests/unit/test_domain_metrics.py::test_rate_limit_rejection_increments_counter`(기본 login 한도 5 전제)가
   실패한다. 단위 테스트가 한도를 명시적으로 monkeypatch하거나, 완화를 통합 스위트 스코프로 격리.
+- **(④ 마감 리뷰)** `api/dependencies/client.py` 멱등 코어가 다중 네임스페이스용 매개변수 표면
+  (namespace·scope_parts·cache_adapter·conflict_message·lock_ttl·success_status)을 유지하지만 소비자는
+  `post:create` 하나 — 래퍼 계층을 코어에 접거나 상수를 인라인해 한 층으로 단순화(~60줄).
+- **(④ 마감 리뷰)** rate limit의 경로 리터럴(`_path_is_login`·`_path_is_signup_upload`)이 라우터 소유
+  경로 문자열의 사본 — 라우트 개명 시 전용 한도가 조용히 글로벌로 강등되고, 미들웨어가 라우팅 전에
+  동작해 테스트도 드리프트를 못 잡는다. 공용 상수로 묶거나 라우트 dependency로 내리는 방안 검토.
+- **(④ 마감 리뷰)** `test_storage_minio.py`의 `_put_object` 헬퍼가 삭제된 storage_save를 프라이빗
+  내부로 재구현 — presigned 승격 테스트에 불변식 검증을 접고 헬퍼를 제거하는 통합 검토(독립성 유지가
+  낫다는 반론도 있어 보류).
 
 ---
 

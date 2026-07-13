@@ -93,7 +93,7 @@
   - [x] 마감: `/code-review`(①+② 범위, 정확성 2건 반영 — ① 프로덕션 가드에 프록시 신뢰
         필수화: 복원된 IP rate limit이 ALB 뒤에서 프록시 IP로 수렴하는 자기-DoS 차단,
         ② Celery enqueue 소켓 타임아웃·publish 재시도 정책 명시. 정리 4건은 #25·#34·#35로 이연)
-- [ ] **③ 실시간 견고화**
+- [x] **③ 실시간 견고화** (마감 3차 + /security-review 신규 취약점 0)
   - [x] #23 SSE 팬아웃 통일 — `app/infra/pubsub.py` 공용 리스너(전용 연결 1개, chat·notif 채널
         동시 구독) + `SseFanoutManager` 로컬 큐. SSE의 공유 풀 pubsub 점유 제거, publish 실패 시
         로컬 폴백(chat 도달불가 폴백도 복원). ADR 0009 갱신
@@ -125,7 +125,29 @@
         새던 것 억제. 문서: ADR 0009(로컬 우선+origin·send 타임아웃·백오프 근거), ADR 0003
         (WS 4번째 한도 클래스), README 503 잔재, chat/pubsub docstring. 이연: 큐 기반 소켓별
         전달·유저당 WS 연결 상한(#37 신설), 차단 시맨틱 비대칭(#36), FE openapi 재생성(#24)
-- [ ] **④ 미디어 정리**: #24 업로드 단일화 · #31 presign 한도·pending GC
+- [ ] **④ 미디어 정리**
+  - [x] #24 업로드 단일화 — FE가 presigned 3단만 호출함을 확인하고 direct multipart 2벌
+        (엔드포인트 2·멱등 의존성 6·content-length 가드·매직바이트 스니핑·`storage_save`·
+        관련 설정/예외) 전부 제거. signup IP 한도를 `signup/presign`·`signup/confirm`으로
+        이전(공유 카운터, 기본 10→20 = 2카운트/업로드 보정). ADR 0008 범위 축소·0010 갱신.
+        잔여: FE 죽은 경로 참조·openapi 타입 재생성(FE 작업)
+  - [x] #31 presign 한도·pending GC — 한도는 #24와 함께 이전, pending/ GC는 S3 lifecycle
+        만료 1일을 infra 요건으로 확정(ADR 0010, 앱 목록 순회 GC는 과잉이라 배제)
+  - [x] 마감(에이전트 /code-review 8앵글 + 검증 2배치, CONFIRMED 15·PLAUSIBLE 3·REFUTED 0):
+        ① confirm 검증(size·type)을 promote 앞으로 — 승격 후 거부가 남기던 DB 행 없는 영구
+        객체 누수 제거(sweeper·lifecycle 둘 다 못 지우는 유일 경로), TOCTOU 재확인 실패 시
+        승격본 보상 삭제 ② head 404를 400으로 매핑 — 미업로드/소진 키 confirm이 botocore
+        ClientError로 500 나던 결함 ③ 인증 presign에 유저 단위 한도(`media_presign:{user_id}`
+        100/시간, 다섯 번째 한도 클래스) — 일회용 계정으로 signup 한도를 우회하는 300배
+        비대칭 봉합, `TooManyRequestsException`(429) 신설 ④ dev MinIO에 `mc ilm` pending
+        만료 규칙 배선(문서로만 있던 GC 불변식 실체화) ⑤ 로컬 .env의 구 한도값(10) 갱신 —
+        2카운트 의미론에서 5건/시간으로 반토막 나던 조용한 드리프트 ⑥ 라우터 주석 PUT→
+        presigned POST 교정 ⑦ 도달 불가 검증(validate_purpose 트리오)·죽은 413 매핑 제거,
+        낡은 docstring 정리. 문서: ADR 0003 결정 5항(공유 카운터 트레이드오프·안 한 선택
+        명시), ADR 0008 '자연 멱등' 서술 정밀화(응답 재생 없음 트레이드오프), ADR 0010
+        non-goal(바이트 검증 안 함 근거), 인덱스 2곳 0008 범위 교정. 이연: 비원자 promote
+        동시성·트레일링 슬래시 이중 카운트(#34), 멱등 코어 단순화·경로 리터럴 드리프트·
+        테스트 그림자 헬퍼(#35)
 - [ ] **⑤ 마무리**: #25 조회수 경로 단일화 · #33 트렌딩 timeout · #34 소품 · #35 죽은 코드 · #26 ORM 배치 · #36 결정 문서화
 
 ## 완료 유닛 (커밋)

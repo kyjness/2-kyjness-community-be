@@ -2,13 +2,11 @@
 # 커스텀 예외 사용 → 전역 handler가 400 응답 처리.
 import os
 import re
-from typing import Literal
 from uuid import UUID
 
 from app.common.exceptions import (
     InvalidFileTypeException,
     InvalidImageFileException,
-    InvalidRequestException,
 )
 from app.core.config import settings
 from app.infra.storage import PENDING_KEY_PREFIX
@@ -18,14 +16,6 @@ _CONTENT_TYPE_EXT: dict[str, str] = {
     "image/png": "png",
     "image/webp": "webp",
 }
-
-ImagePurpose = Literal["signup", "profile", "post"]
-IMAGE_PURPOSES: tuple[ImagePurpose, ...] = ("signup", "profile", "post")
-
-
-def validate_purpose(purpose: ImagePurpose) -> None:
-    if purpose not in IMAGE_PURPOSES:
-        raise InvalidRequestException()
 
 
 def validate_image_content_type(content_type: str) -> str:

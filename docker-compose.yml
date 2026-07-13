@@ -54,6 +54,8 @@ services:
       - minio_data:/data
 
   # 최초 1회: 미디어 버킷 생성 + 공개 읽기(이미지 Access Denied 방지)
+  # + pending/ 만료 1일 — confirm 안 된 presign 잔존물은 DB 행이 없어 앱 sweeper가 못 지운다.
+  #   prod S3 lifecycle rule의 dev 등가(ADR 0010).
   minio-init:
     image: minio/mc:latest
     container_name: puppytalk-be-minio-init
@@ -64,6 +66,7 @@ services:
       until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
       mc mb --ignore-existing local/puppytalk;
       mc anonymous set download local/puppytalk;
+      mc ilm rule add --expire-days 1 --prefix media/pending/ local/puppytalk || true;
       exit 0;
       "
 

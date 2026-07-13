@@ -117,8 +117,18 @@ async def issue_presigned_post(
 def _head_pending_object_sync(file_key: str) -> dict[str, Any]:
     if not is_valid_pending_file_key(file_key):
         raise ValueError("invalid pending file_key")
+    from botocore.exceptions import ClientError
+
     client = _get_s3_client()
-    return client.head_object(Bucket=settings.S3_BUCKET_NAME, Key=_s3_object_key(file_key))
+    try:
+        return client.head_object(Bucket=settings.S3_BUCKET_NAME, Key=_s3_object_key(file_key))
+    except ClientError as e:
+        # 미업로드·이미 소진(승격)된 1회성 키의 404는 클라이언트 입력 오류 신호(→400 매핑) —
+        # 그 외 ClientError(권한·엔드포인트 장애)는 5xx로 남긴다.
+        status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if status == 404:
+            raise ValueError("pending object not found") from e
+        raise
 
 
 def _promote_pending_object_sync(pending_key: str, dest_purpose: str) -> tuple[str, int, str]:

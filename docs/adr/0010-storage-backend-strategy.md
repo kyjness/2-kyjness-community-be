@@ -61,6 +61,12 @@
 
 - **prod에서 MinIO 자체 운영**: prod는 관리형 S3. MinIO는 dev/CI/데모 한정(자체 스토리지 서버
   운영은 가용성·백업 부채).
+- **매직바이트(바이트 레벨) 이미지 검증**: direct 업로드 제거로 서버가 파일 본문을 받지
+  않으므로, 바이트 검증을 하려면 confirm에서 객체를 내려받아야 한다(업로드 대역폭을 앱에서
+  떼어낸 이 ADR의 목적과 상충). 방어는 presign의 Content-Type 정책 조건 + confirm의
+  head 기반 재검증 + 확장자를 Content-Type에서 강제 + 응답의 `X-Content-Type-Options:
+  nosniff`로 한정한다 — "이미지 아닌 바이트가 .png URL로 서빙될 수 있음"은 의식적
+  트레이드오프(수용: 조회 전용 공개 버킷, 스크립트 실행 없음).
 - **멀티 클라우드/스토리지 플러그인 프레임워크**: 대상이 S3 하나 → 얇은 분기로 충분.
 - **CDN·이미지 리사이즈/트랜스코딩 파이프라인**: 봉투 밖(전송 최적화·미디어 가공은 이번 범위 아님).
 - ~~**경로 ②(직접 multipart) 즉시 제거**: 서버 수신 업로드의 단순 경로로 당분간 병행.~~ →
@@ -88,6 +94,7 @@
   없어 앱 sweeper가 지울 수 없다(고아 이미지 sweeper는 DB 행 기준). 앱이 S3 목록 순회 GC 잡을
   도는 대신 **`pending/` prefix에 lifecycle 만료 1일**을 버킷 요건으로 둔다 — presign TTL 15분·
   업로드 직후 confirm이라는 계약상, 1일 넘게 pending에 머무는 객체는 전부 미완료 잔존물이다.
-  적용 지점: prod는 infra 저장소의 S3 버킷 정의(Terraform lifecycle rule), dev/CI MinIO는
-  `mc ilm rule add --expire-days 1 --prefix media/pending/` 등가 규칙. 앱 코드는 관여하지 않는다
-  (저장소 수명주기는 저장소 계층 책임 — 목록 순회 잡은 봉투 대비 과잉).
+  적용 지점: prod는 infra 저장소의 S3 버킷 정의(Terraform lifecycle rule), dev는
+  `docker-compose.yml`의 minio-init가 `mc ilm rule add --expire-days 1 --prefix
+  media/pending/`로 배선. 앱 코드는 관여하지 않는다(저장소 수명주기는 저장소 계층 책임 —
+  목록 순회 잡은 봉투 대비 과잉).

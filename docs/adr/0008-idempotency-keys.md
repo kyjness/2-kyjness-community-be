@@ -1,8 +1,11 @@
 # ADR 0008 — POST 멱등성: Idempotency-Key + 결과 캐시
 
 - **상태**: 채택됨 (Accepted) · **적용 범위 축소** — 미디어 direct 업로드 제거([0010](0010-storage-backend-strategy.md))로
-  현재 적용 대상은 `POST /posts` 하나. presigned confirm은 1회성 pending 키(승격 시 원본 삭제)가
-  자연 멱등을 제공해 이 메커니즘이 불필요하다.
+  현재 적용 대상은 `POST /posts` 하나. presigned confirm은 1회성 pending 키(승격 시 원본
+  삭제)가 **중복 부작용을 차단**(at-most-once)하므로 이 메커니즘 없이도 중복 생성은 없다.
+  단, 결과 캐시가 주던 **성공 응답 재생은 없다** — confirm 성공 후 응답이 유실되면 재시도는
+  400으로 실패하고 클라이언트는 presign부터 다시 시작해야 한다(업로드 1건 재시도 비용 수용,
+  글 중복 생성 같은 데이터 훼손이 없어 트레이드오프로 허용).
 - **관련 코드**: `app/api/dependencies/client.py`(`idempotency_before`/`idempotency_after_success`/
   `idempotency_after_failure` 코어 + 도메인 래퍼), `app/domain/posts/routers/post_router.py`
   (`POST /posts`)

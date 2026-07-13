@@ -58,7 +58,7 @@
 | 0005 | 복원력 — fail-open 표준 & **Circuit Breaker 미채택(non-goal)** | 횡단 | Elaboration |
 | 0006 | 관측성 — 구조화 로그 + 얇은 메트릭 & **트레이싱 백엔드 미채택** | 횡단 | Elaboration |
 | 0007 | 조회수 집계 — Redis 버퍼링 + 비동기 Flush(분산락·Lua CAS) | 도메인(posts) | Construction |
-| 0008 | POST 멱등성 — Idempotency-Key + 결과 캐시 | 도메인(posts·media) | Construction |
+| 0008 | POST 멱등성 — Idempotency-Key + 결과 캐시 | 도메인(posts) | Construction |
 | 0009 | 실시간 전달 — WebSocket·SSE × Redis Pub/Sub | 도메인(chat·notifications) | Construction |
 | 0010 | 스토리지 백엔드 — S3 API 단일 경로 + dev MinIO 패리티(local 폐기) | 도메인(media)·Ops | Construction |
 

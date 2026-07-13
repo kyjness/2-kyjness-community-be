@@ -1,6 +1,6 @@
 # 미디어 라우터. Router → Service. 예외는 전역 handler 처리.
-# 업로드는 presigned 3단(presign → S3 직접 PUT → confirm) 단일 경로 — 서버가 파일 본문을
-# 받지 않으므로 업로드 대역폭·메모리가 앱 인스턴스를 거치지 않는다.
+# 업로드는 presigned 3단(presign → S3 presigned POST 직접 업로드 → confirm) 단일 경로 —
+# 서버가 파일 본문을 받지 않으므로 업로드 대역폭·메모리가 앱 인스턴스를 거치지 않는다.
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request
@@ -13,6 +13,9 @@ from app.api.dependencies import (
     get_master_db,
 )
 from app.common import ApiCode, ApiResponse, PublicId, api_response
+from app.common.exceptions import TooManyRequestsException
+from app.core.config import settings
+from app.core.middleware.rate_limit import check_fixed_window
 from app.domain.media.schema import (
     ConfirmSignupUploadRequest,
     ConfirmUploadRequest,
@@ -36,6 +39,18 @@ async def presign_image_upload(
     body: PresignUploadRequest,
     user: CurrentUser = Depends(get_current_user),
 ):
+    # 인증 presign은 IP 미들웨어(글로벌 100/분)만으로는 pending/ 대량 적재를 못 막는다 —
+    # WS DM과 동형으로 유저 단위 한도(Redis 공유, 장애 시 메모리 폴백). confirm은 유효한
+    # 1회성 pending 키가 선행돼야 하므로 비용 원점인 presign만 조인다.
+    redis: Redis | None = getattr(request.app.state, "redis", None)
+    allowed, retry_after = await check_fixed_window(
+        redis,
+        f"media_presign:{user.id}",
+        window_sec=settings.MEDIA_PRESIGN_RATE_LIMIT_WINDOW,
+        max_count=settings.MEDIA_PRESIGN_RATE_LIMIT_MAX,
+    )
+    if not allowed:
+        raise TooManyRequestsException(retry_after_seconds=retry_after)
     data = await MediaService.issue_presigned_upload(body)
     return api_response(request, code=ApiCode.OK, data=data)
 

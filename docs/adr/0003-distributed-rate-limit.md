@@ -2,7 +2,8 @@
 
 - **상태**: 채택됨 (Accepted)
 - **관련 코드**: `app/core/middleware/rate_limit.py`(`RateLimitMiddleware`,
-  `check_fixed_window`, `count_rejection`), `app/api/v1/chat/ws.py`(WS 유저 단위 한도)
+  `check_fixed_window`, `count_rejection`), `app/api/v1/chat/ws.py`(WS 유저 단위 한도),
+  `app/domain/media/router.py`(인증 presign 유저 단위 한도)
 
 ## 맥락 (Context)
 
@@ -17,7 +18,8 @@ Rate limit이 필요하다: 로그인 brute-force, 회원가입 이미지 업로
 
 1. **원자 카운트** — Lua로 `INCR` → (첫 요청 시)`EXPIRE` → `TTL`을 한 번에. 네트워크 왕복 1회,
    경합 없는 원자 증가.
-2. **Fixed-window** — IP+경로 기준 고정 창(로그인/업로드/전역 각기 다른 한도).
+2. **Fixed-window** — IP 기준 고정 창, 경로 클래스별 한도(로그인/업로드/전역 — signup
+   업로드는 presign·confirm 2경로가 카운터 하나를 공유, 결정 5항).
 3. **스마트 fail-open** — Redis 장애 시: **중요 경로(로그인·회원가입 업로드)만** 인메모리 fixed-window로
    폴백(OOM 방지 eviction 포함), 나머지 경로는 **통과**(가용성 우선).
 4. **WS DM = 네 번째 한도 클래스**(2차 감사 #32) — WS는 HTTP 미들웨어를 타지 않으므로
@@ -27,6 +29,20 @@ Rate limit이 필요하다: 로그인 brute-force, 회원가입 이미지 업로
    거부 후 retry_after 동안 Redis 왕복 없이 로컬 즉시 거부(스팸의 공유 Redis 부하 증폭
    차단), 연속 거부 누계 30회면 1008 종료. 거부 계측은 억제 창 포함 전부
    `count_rejection`으로 `RATE_LIMIT_REJECTIONS{limit="chat"}`에 잡힌다.
+5. **미디어 presign 한도 재편**(2차 감사 #24·#31, direct 업로드 제거와 함께) —
+   - **비인증(signup)**: 한도 대상 경로를 `signup/presign`·`signup/confirm`으로 이전.
+     두 단계가 `signup_upload:{ip}` **카운터 하나를 공유**하고 업로드 1건 = 2카운트라
+     기본값을 10→20으로 보정. *안 한 선택*: 단계별 분리 카운터(`signup_presign:` /
+     `signup_confirm:`) — 의미론은 더 정밀하지만(presign 전용 예산 고정) 한도 클래스·설정
+     키가 2배로 늘고, 1일 pending lifecycle 전제에서 20 presign/h의 잔존 상한(~200MB/h/IP)은
+     수용 범위라 공유 카운터의 단순함을 택했다. 실패 재시도가 예산을 더 소모하는 비용은
+     명시적 트레이드오프로 수용.
+   - **인증 presign**: 글로벌(IP 100/분)만으로는 pending/ 대량 적재를 못 막고, 가입이 열려
+     있어 비인증 한도를 일회용 계정으로 우회할 수 있다 — WS DM과 동형으로 라우트에서
+     **유저 단위**(`media_presign:{user_id}`, 기본 100/시간) `check_fixed_window` 검사
+     (다섯 번째 한도 클래스). confirm은 유효한 1회성 pending 키가 선행돼야 하므로 비용
+     원점인 presign만 조인다. 초과는 `TooManyRequestsException`(429, 미들웨어와 동일한
+     `retry_after_seconds` data 규격).
 
 ## 트레이드오프 (Consequences)
 

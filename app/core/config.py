@@ -113,6 +113,9 @@ class Settings(BaseSettings):
     # WS는 HTTP 미들웨어를 타지 않는다 — DM 수신 루프에서 유저 단위로 적용.
     CHAT_WS_RATE_LIMIT_WINDOW: int = 60
     CHAT_WS_RATE_LIMIT_MAX_MESSAGES: int = 60
+    # 인증 presign 유저 단위 한도 — IP 글로벌만으로는 pending/ 대량 적재를 못 막는다.
+    MEDIA_PRESIGN_RATE_LIMIT_WINDOW: int = 3600
+    MEDIA_PRESIGN_RATE_LIMIT_MAX: int = 100
 
     # ----- 회원가입 이미지 (토큰 TTL, IP당 업로드 rate limit) -----
     SIGNUP_IMAGE_TOKEN_TTL_SECONDS: int = 3600

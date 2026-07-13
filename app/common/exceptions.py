@@ -178,6 +178,19 @@ class InvalidRequestException(BaseProjectException):
         super().__init__(status_code=400, code=ApiCode.INVALID_REQUEST, message=message)
 
 
+class TooManyRequestsException(BaseProjectException):
+    """라우트/서비스 계층 rate limit 초과(429). 미들웨어 429와 동일한 data 규격
+    (retry_after_seconds)으로 클라이언트가 두 경로를 구분 없이 처리한다."""
+
+    def __init__(self, *, retry_after_seconds: int = 0, message: str | None = None):
+        super().__init__(
+            status_code=429,
+            code=ApiCode.RATE_LIMIT_EXCEEDED,
+            message=message,
+            data={"retry_after_seconds": retry_after_seconds},
+        )
+
+
 class NotFoundException(BaseProjectException):
     def __init__(
         self,

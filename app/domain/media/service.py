@@ -22,7 +22,6 @@ from app.domain.media.image_policy import (
     build_pending_file_key,
     sanitize_presign_filename,
     validate_image_content_type,
-    validate_purpose,
 )
 from app.domain.media.model import Image, MediaModel
 from app.domain.media.schema import (
@@ -35,6 +34,7 @@ from app.domain.media.schema import (
 )
 from app.infra.storage import (
     build_url,
+    head_pending_object,
     is_valid_pending_file_key,
     issue_presigned_post,
     promote_pending_object,
@@ -145,13 +145,34 @@ class MediaService:
         key = file_key.strip().lstrip("/")
         if not is_valid_pending_file_key(key):
             raise InvalidRequestException(message="Invalid or expired pending file_key.")
+        # 검증은 promote(영구 경로 copy + pending 삭제) 앞에서 — 승격 후 거부는 DB 행 없는
+        # 영구 객체를 남겨, DB 행 기준 sweeper도 pending/ 전용 lifecycle도 지우지 못한다.
+        try:
+            meta = await head_pending_object(key)
+        except ValueError as e:
+            raise InvalidImageFileException(message="Uploaded object is missing or invalid.") from e
+        size = int(meta.get("ContentLength") or 0)
+        if expected_size is not None and expected_size != size:
+            raise InvalidImageFileException(message="Reported size does not match stored object.")
+        validate_image_content_type(str(meta.get("ContentType") or ""))
         try:
             dest_key, size, content_type = await promote_pending_object(key, purpose)
         except ValueError as e:
             raise InvalidImageFileException(message="Uploaded object is missing or invalid.") from e
-        if expected_size is not None and expected_size != size:
-            raise InvalidImageFileException(message="Reported size does not match stored object.")
-        validate_image_content_type(content_type)
+        # presign URL(15분)이 살아 있는 동안 head~promote 사이 재업로드로 위 검증을 우회할 수
+        # 있어 승격 결과를 재확인한다 — 실패 시 승격본을 지워 누수 없이 거부.
+        try:
+            if expected_size is not None and expected_size != size:
+                raise InvalidImageFileException(
+                    message="Reported size does not match stored object."
+                )
+            validate_image_content_type(content_type)
+        except Exception:
+            try:
+                await asyncio.to_thread(storage_delete, dest_key)
+            except Exception:
+                logger.warning("승격 후 검증 실패분 삭제 실패 dest_key=%s", dest_key)
+            raise
         return dest_key, build_url(dest_key), content_type, size
 
     @classmethod
@@ -161,7 +182,7 @@ class MediaService:
         user_id: UUID,
         db: AsyncSession,
     ) -> ImageUploadResponse:
-        validate_purpose(body.purpose)
+        # purpose 값 검증은 스키마의 Literal["profile", "post"]가 담당한다.
         dest_key, file_url, content_type, size = await cls._confirm_pending_key(
             body.file_key,
             purpose=body.purpose,
