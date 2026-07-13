@@ -125,7 +125,7 @@
         새던 것 억제. 문서: ADR 0009(로컬 우선+origin·send 타임아웃·백오프 근거), ADR 0003
         (WS 4번째 한도 클래스), README 503 잔재, chat/pubsub docstring. 이연: 큐 기반 소켓별
         전달·유저당 WS 연결 상한(#37 신설), 차단 시맨틱 비대칭(#36), FE openapi 재생성(#24)
-- [ ] **④ 미디어 정리**
+- [x] **④ 미디어 정리** (마감 + /security-review 신규 취약점 0)
   - [x] #24 업로드 단일화 — FE가 presigned 3단만 호출함을 확인하고 direct multipart 2벌
         (엔드포인트 2·멱등 의존성 6·content-length 가드·매직바이트 스니핑·`storage_save`·
         관련 설정/예외) 전부 제거. signup IP 한도를 `signup/presign`·`signup/confirm`으로
