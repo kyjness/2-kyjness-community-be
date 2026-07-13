@@ -131,6 +131,13 @@ app = FastAPI(
     openapi_url=f"{_prefix}/openapi.json",
 )
 
+# LIFO: 먼저 등록할수록 안쪽(라우트에 가깝다), 마지막 등록이 가장 바깥 껍질.
+#
+# RateLimit은 최안쪽 — 429가 CORS·metrics·access_log를 "거쳐 나가야" 브라우저가
+# CORS 에러 대신 429+Retry-After를 읽고, RED 메트릭·접근로그에도 잡힌다. 429는 라우트
+# 매칭 전에 끊기므로 메트릭 path 라벨은 __unmatched__로 집계된다(카디널리티 보호 유지).
+# 클라이언트 IP는 더 바깥의 ProxyHeaders가 scope에 반영한 뒤라 키 산정에 문제 없다.
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -140,15 +147,12 @@ app.add_middleware(
 )
 if settings.TRUSTED_HOSTS != ["*"]:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.TRUSTED_HOSTS)
-
-# LIFO: 마지막 add_middleware가 요청 진입 시 가장 먼저 실행.
-# RequestIdMiddleware를 최하단에 등록 → 가장 바깥쪽 껍질이 되어 요청 시 맨 먼저 request_id 발급.
-# GZip은 안쪽(코드상 상단)에 두어 IP·Request ID 흐름을 건드리지 않고 응답만 압축.
+# RequestIdMiddleware가 가장 바깥 → 요청 진입 즉시 request_id 발급(에러 응답 포함 전 구간 전파).
+# GZip은 관측 미들웨어보다 바깥에 두어 압축 시간이 duration 측정을 오염시키지 않게 한다.
 app.middleware("http")(security_headers_middleware)
 app.middleware("http")(access_log_middleware)
 app.middleware("http")(metrics_middleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
-app.add_middleware(RateLimitMiddleware)
 app.add_middleware(ProxyHeadersMiddleware)
 app.add_middleware(RequestIdMiddleware)
 

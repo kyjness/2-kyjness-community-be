@@ -423,6 +423,15 @@ ADR 0010이 "S3 단일 경로"를 선언했지만, direct 업로드(`/media/imag
 
 **수정 방향**: RateLimit을 관측·CORS 미들웨어 안쪽으로 재배치(또는 `_send_429`에 CORS 헤더 부착). 순서 주석 갱신.
 
+> **수정 완료 + 심화(수정 중 발견)**: 재배치 검증 중 `_get_app_with_state`가 미들웨어 체인을
+> `.app`으로 순회하는 방식이 **항상 None을 반환**함을 런타임으로 확인 — 체인의 어떤 노드도
+> `.state`를 갖지 않아 **Redis 분산 rate limit이 전 구간 조용히 비활성**이었다(전역 한도 무동작,
+> 로그인·가입 한도는 인스턴스별 메모리 폴백만). 탐색을 Starlette 표준 `scope["app"]` 기반
+> `_redis_from_scope`로 교체해 복원. 배치는 RateLimit을 최안쪽으로 이동 — 429가 CORS(브라우저가
+> Retry-After를 읽음)·RED 메트릭(`path=__unmatched__`로 집계, 카디널리티 보호 유지)·접근로그·
+> X-Request-ID를 거쳐 나간다. FakeRedis + TestClient로 두 불변식(스코프 탐색 동작·429 관측 통과)
+> 회귀 고정.
+
 ---
 
 ### 28. `get_client_identifier`가 X-Forwarded-For 무검증 신뢰 (조회수 조작 벡터) — P0

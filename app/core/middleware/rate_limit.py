@@ -32,13 +32,16 @@ return {c, ttl}
 """
 
 
-def _get_app_with_state(app: Any) -> Any:
-    """미들웨어 체인에서 .state를 가진 앱(FastAPI 등)을 찾음."""
-    while app is not None:
-        if hasattr(app, "state"):
-            return app
-        app = getattr(app, "app", None)
-    return None
+def _redis_from_scope(scope: Scope) -> Redis | None:
+    """Starlette가 매 요청 scope["app"]에 심는 앱 인스턴스에서 redis를 얻는다.
+
+    미들웨어 체인 객체를 .app으로 거슬러 올라가는 방식은 어떤 노드도 .state를
+    갖지 않아 항상 None이 나온다(분산 rate limit이 조용히 비활성화되는 결함).
+    """
+    app = scope.get("app")
+    if app is None:
+        return None
+    return getattr(app.state, "redis", None)
 
 
 def get_client_ip_from_scope(scope: Scope) -> str:
@@ -159,8 +162,7 @@ class RateLimitMiddleware:
             return
 
         ip = get_client_ip_from_scope(scope)
-        state_app = _get_app_with_state(self.app)
-        redis: Redis | None = getattr(state_app.state, "redis", None) if state_app else None
+        redis: Redis | None = _redis_from_scope(scope)
 
         if _path_is_login(path):
             key = f"login:{ip}"
