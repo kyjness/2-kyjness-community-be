@@ -78,6 +78,16 @@
   - [x] 로그: 구조화 JSON(prod)·console(dev)·`request_id` 상관이 이미 구현(`logging_config.py`) — 수집(stdout→CloudWatch)은 ECS awslogs(infra) 몫
   - [x] 도메인 메트릭: `rate_limit_rejections_total{limit}`·`cache_events_total{cache,result}`·`view_buffer_flushed_views_total` 추가(default registry로 `/metrics` 노출). 운영 봉투 가정을 실측
 
+## 2차 감사 (2026-07-13) — backlog #22~#36
+
+전면 재감사 산출물. 항목 상세는 [`backlog.md`](backlog.md) 2차 감사 섹션. 권장 순서대로 진행:
+
+- [ ] **① #22** Celery 실배선 or 제거 (설계 서사 정합성 — 착수 시 채택안 결정)
+- [ ] **② 핫패스·정확성**: #27 미들웨어 순서 · #28 XFF 신뢰 · #29 record_post_view 경량화
+- [ ] **③ 실시간 견고화**: #23 SSE 팬아웃 통일 · #30 pubsub 재연결 · #32 WS 남용 방어
+- [ ] **④ 미디어 정리**: #24 업로드 단일화 · #31 presign 한도·pending GC
+- [ ] **⑤ 마무리**: #25 조회수 경로 단일화 · #33 트렌딩 timeout · #34 소품 · #35 죽은 코드 · #26 ORM 배치 · #36 결정 문서화
+
 ## 완료 유닛 (커밋)
 | 단위 | 커밋 |
 |------|------|

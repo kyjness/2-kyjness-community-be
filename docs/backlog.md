@@ -353,6 +353,164 @@ res = await db.execute(stmt)
 
 ---
 
+## 2차 전면 감사 (2026-07-13) — #22~#36
+
+> Construction/Transition 완료 후 전체 코드 재감사에서 나온 항목. 기준은 [`00`](00-operating-envelope-and-scope.md)의
+> 운영 봉투와 "정당화된 복잡도" 원칙. 진행 순서는 [ROADMAP](ROADMAP.md) 2차 감사 섹션.
+
+### 22. Celery 파이프라인이 실경로에 미배선 (장식화) — P1
+
+**파일**: `app/core/celery.py`, `app/worker/*`, `app/domain/notifications/router.py`
+
+프로덕션 코드에서 태스크를 enqueue하는 곳이 `POST /notifications/{id}/dispatch`(사용자가 자기 알림 재전달을 큐잉하는 합성 API) 하나뿐이다. 실제 알림 배송은 서비스에서 인라인 Redis publish + fire-and-forget SNS(`to_thread`)로 수행되어, ADR 0009의 "Celery 오프로드"와 실코드가 불일치한다. 현 상태는 스택 전체(celery.py·async_bridge·worker/·큐 라우팅·설정 13개)가 사실상 전시물이다.
+
+**수정 방향**: (a) SNS publish·오프라인 배송을 Celery로 실배선하고 dispatch 엔드포인트 제거, 또는 (b) Celery 전체 제거 + "쓰기 초당 수십 규모에선 인라인 발행으로 충분"을 ADR로 기록. 채택안은 착수 시 결정.
+
+---
+
+### 23. SSE 알림 pubsub가 공유 풀 연결 점유 (풀 고갈 → 전면 fail-open) — P1
+
+**파일**: `app/domain/notifications/service.py` (`sse_subscribe`)
+
+SSE 연결마다 `app.state.redis` 공유 풀(128)에서 pubsub 연결을 점유한다. 동시 SSE가 풀 한도에 근접하면 rate limit·인증 상태 캐시·조회수 버퍼가 연결 고갈로 일제히 fail-open된다(수천 DAU 전제에서 현실적). chat은 동일 문제를 단일 채널 + 인스턴스당 전용 구독 1개 + 로컬 팬아웃으로 이미 풀었다 — 같은 문제를 두 패턴으로 유지 중.
+
+**수정 방향**: 알림도 chat 동형으로 통일(인스턴스당 전용 연결 구독 1개 → 로컬 SSE 클라이언트 팬아웃). ADR 0009 갱신.
+
+---
+
+### 24. 업로드 경로 2벌 공존 (direct multipart + presigned) — P2
+
+**파일**: `app/domain/media/router.py`, `app/domain/media/image_policy.py`
+
+ADR 0010이 "S3 단일 경로"를 선언했지만, direct 업로드(`/media/images`, `/media/images/signup`)와 presigned 3단(presign→S3 직접→confirm)이 인증/비인증 각각 풀셋으로 공존한다(엔드포인트 6개, 파이프라인 2벌). direct는 최대 20MB를 서버 메모리로 태운다.
+
+**수정 방향**: presigned로 단일화하고 direct 제거(FE 전환 포함). direct를 유지한다면 사유를 ADR 0010에 추가.
+
+---
+
+### 25. 조회수 기록 경로 2벌 (GET 상세 자동 증가 + POST /view) — P2
+
+**파일**: `app/domain/posts/routers/post_router.py`
+
+`GET /posts/{id}`가 조회수를 자동 증가시키는데 `POST /posts/{id}/view`도 따로 있다. dedup 키가 이중 집계는 막지만 동일 기능 API가 둘.
+
+**수정 방향**: FE 사용 경로 확인 후 한쪽 제거.
+
+---
+
+### 26. ORM 클래스 소속 도메인 불일치 — P3
+
+**파일**: `app/domain/users/model.py` 외
+
+`Report`·`DogProfile` ORM이 `users/model.py`에 정의되어 있고 reports/·dogs/ 도메인엔 쿼리 클래스만 있다. 또 posts만 `repository.py + services/ + routers/` 분리이고 나머지 도메인은 `model.py`가 ORM+쿼리 이중 역할.
+
+**수정 방향**: ORM 배치 규약을 하나로 통일(각 도메인 model.py 복귀 또는 `app/db/models/` 집결). 대규모 이동이라 순서 마지막.
+
+---
+
+### 27. 429 응답이 CORS·메트릭·접근로그 바깥에서 종료 — P1
+
+**파일**: `app/main.py`(미들웨어 등록 순서), `app/core/middleware/rate_limit.py`
+
+등록 순서상 RateLimit이 CORS/metrics/access_log보다 바깥 껍질이다. 브라우저 FE는 429를 CORS 에러로 수신해 `retry_after_seconds`를 읽지 못하고, 429가 RED 메트릭(`http_requests_total`)·접근로그에서 누락된다 — "rate limit 발동을 실측한다"(ADR 0006)와 모순.
+
+**수정 방향**: RateLimit을 관측·CORS 미들웨어 안쪽으로 재배치(또는 `_send_429`에 CORS 헤더 부착). 순서 주석 갱신.
+
+---
+
+### 28. `get_client_identifier`가 X-Forwarded-For 무검증 신뢰 (조회수 조작 벡터) — P0
+
+**파일**: `app/api/dependencies/client.py`
+
+`ProxyHeadersMiddleware`가 신뢰 프록시 검증 후 `scope["client"]`를 갱신하는데, 이 함수는 원시 XFF 헤더를 우선한다. 요청마다 위조 XFF를 넣으면 viewer_key가 매번 달라져 조회수(→트렌딩 랭킹)를 무한 부풀릴 수 있고, signup 업로드 멱등 스코프도 위조된다.
+
+**수정 방향**: 검증 완료 값(`request.client.host`)만 사용.
+
+---
+
+### 29. `record_post_view` 존재확인이 풀 eager-load + master 세션 — P1
+
+**파일**: `app/domain/posts/services/post_service.py`, `post_router.py`
+
+가장 뜨거운 쓰기 엔드포인트가 존재/가시성 확인용으로 상세 eager-load 4종(`get_post_by_id`)을 실행하고, 라우터가 master 세션을 준다. 조회 폭주 1순위 봉투와 정면 배치.
+
+**수정 방향**: `post_is_visible`(EXISTS 1쿼리) + slave 세션으로 교체.
+
+---
+
+### 30. chat pubsub 리스너 재연결 부재 — P1
+
+**파일**: `app/domain/chat/pubsub.py` (`run_chat_subscribe_listener`)
+
+기동 시 `ping()` 실패나 루프 밖 예외 1회면 리스너 태스크가 조용히 종료되고, 해당 인스턴스의 크로스 인스턴스 DM 수신이 프로세스 재시작까지 죽는다(내부 `get_message` 예외만 재시도).
+
+**수정 방향**: 백오프 재연결 루프로 감싸기 — 멀티 인스턴스 3~10대·99.9% 전제에서 정당한 복잡도.
+
+---
+
+### 31. presign 남용 방어·pending/ 객체 GC 부재 — P1
+
+**파일**: `app/core/middleware/rate_limit.py`, `app/infra/storage.py`, ADR 0010
+
+signup 전용 한도(10/시간)가 `/media/images/signup` 정확 일치라 presign/confirm 경로엔 미적용(글로벌 100/분만). confirm되지 않은 `pending/` S3 객체는 DB 행이 없어 어떤 sweeper도 지우지 못한다 → 비로그인 IP당 분당 100회 presign×10MB 업로드가 영구 잔존 가능.
+
+**수정 방향**: presign·confirm 경로를 signup 한도에 포함 + `pending/` prefix에 S3 lifecycle(예: 1일 만료)을 infra 요건으로 ADR 0010에 명시.
+
+---
+
+### 32. WebSocket DM에 rate limit·차단 검사 부재 — P1
+
+**파일**: `app/core/middleware/rate_limit.py`(ws scope 통과), `app/domain/chat/service.py`
+
+rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 WS 접속 1회로 무제한 DB 쓰기+팬아웃이 가능하다. `send_dm_from_ws`는 UserBlock을 확인하지 않아 차단한 상대에게서 DM이 온다.
+
+**수정 방향**: WS 수신 루프에 유저 단위 한도(Redis fixed-window 재사용) + 차단 관계 검사 추가.
+
+---
+
+### 33. 트렌딩 캐시 wait-timeout이 빈 목록 반환 — P2
+
+**파일**: `app/infra/cache.py`, `trending_post_service.py` (`on_wait_timeout=[]`)
+
+락 경합으로 2초 대기 후 타임아웃되면 사용자에게 빈 인기글이 내려간다. 가용성 우선이라 해도 "틀린 데이터"보다 loader(DB) 폴백이 봉투에 부합(대기자 수만큼의 쿼리는 감내 가능).
+
+**수정 방향**: timeout 시 loader 폴백으로 변경, 또는 현행 유지 근거를 ADR 0004에 명시.
+
+---
+
+### 34. 소품 모음 (정확성·표기 드리프트) — P2
+
+- `worker/jobs/notification_delivery.py`: idempotency 키를 publish **전에** 선점 → publish 실패 재시도가 멱등 skip으로 유실. 성공 후 마킹으로 순서 교체.
+- `notifications/service.py`: SNS publish마다 boto3 client 신규 생성 + `create_task` 참조 미보관(GC 유실 가능). 모듈 client 재사용 + task 참조 보관.
+- `rate_limit.py` `_SKIP_PATHS`의 `"/health"`가 실경로 `/v1/health`와 불일치.
+- `docker-compose.yml` `VIEW_CACHE_TTL_SECONDS: "0"` — dedup 끔 의도로 보이나 코드는 0→3600 폴백이라 로컬 조회수가 안 오름. 의도 정렬.
+- `docker-compose.yml` 폐기 설정 `STORAGE_BACKEND` 잔재 제거.
+
+---
+
+### 35. 죽은 코드 일괄 — P3
+
+- `core/exception_handlers.py`: MySQL 잔재(errno 1062/1451/1452, `"key 'email'"` 메시지 파싱) — PostgreSQL 전용 스택에서 도달 불가. pgcode·constraint_name 기반으로 정리.
+- `db/base_class.py`: `Base.update()`·`soft_delete()` 호출처 없음.
+- `likes/service.py`: `except IntegrityError` 분기 — create가 `ON CONFLICT DO NOTHING`이라 도달 불가(도달 시 별도 커넥션까지 여는 무거운 처리).
+- `comments/model.py`: `CommentsModel.get_liked_comment_ids_for_user` 단순 위임 잔재.
+- `posts/services/post_service.py`: `_VIEW_REDIS_EX_SECONDS <= 0` 분기 도달 불가(폴백이 3600 보장).
+- `api/dependencies/auth.py`: auth 서비스의 `_`프라이빗 헬퍼 3개 크로스 모듈 임포트 → 공용 모듈로 승격.
+
+---
+
+### 36. 제품 결정 문서화 — P3
+
+코드 수정이 아니라 "의도"를 남기는 항목.
+
+- refresh 토큰 유저당 단일 키 = 단일 세션 정책(두 번째 기기 로그인 시 첫 기기 refresh 무효) 명시.
+- WS 인증 토큰 쿼리스트링(`?token=`) 노출 트레이드오프.
+- 트렌딩 `window_hours` 1~48 클라이언트 제어 → 캐시 키 분화. FE 사용값(24) 고정 검토.
+- `get_current_user_optional`은 status 캐시 미적용(필수 인증 경로와 비대칭) — 의도 확인.
+- 고아 해시태그 행 미GC(무해) 인지.
+
+---
+
 ## 요약표
 
 | 우선순위 | # | 항목 | 파일 |
@@ -378,3 +536,18 @@ res = await db.execute(stmt)
 | **P3** | 19 | `get_room_peer_info` 채팅방 중복 조회 | `app/domain/chat/service.py` |
 | **P3** | 20 | `from __future__ import annotations` 불일치 | 전역 |
 | **P2** | 21 | 대댓글 배치 로드 상한 없음(대댓글 페이지네이션 부재) | `app/domain/comments/model.py` |
+| **P1** | 22 | Celery 실경로 미배선(장식화) | `app/core/celery.py`, `app/worker/*` |
+| **P1** | 23 | SSE pubsub 공유 풀 점유 → 풀 고갈 시 전면 fail-open | `app/domain/notifications/service.py` |
+| **P2** | 24 | 업로드 경로 2벌(direct + presigned) | `app/domain/media/router.py` |
+| **P2** | 25 | 조회수 기록 경로 2벌(GET 자동 + POST /view) | `app/domain/posts/routers/post_router.py` |
+| **P3** | 26 | ORM 클래스 소속 도메인 불일치 | `app/domain/users/model.py` 외 |
+| **P1** | 27 | 429가 CORS·메트릭·접근로그 바깥에서 종료 | `app/main.py` |
+| **P0** | 28 | XFF 무검증 신뢰 → 조회수 조작 벡터 | `app/api/dependencies/client.py` |
+| **P1** | 29 | record_post_view 풀 eager-load + master | `app/domain/posts/services/post_service.py` |
+| **P1** | 30 | chat pubsub 리스너 재연결 부재 | `app/domain/chat/pubsub.py` |
+| **P1** | 31 | presign 남용 방어·pending/ GC 부재 | `rate_limit.py`, `storage.py`, ADR 0010 |
+| **P1** | 32 | WS DM rate limit·차단 검사 부재 | `rate_limit.py`, `chat/service.py` |
+| **P2** | 33 | 트렌딩 wait-timeout 빈 목록 반환 | `app/infra/cache.py` |
+| **P2** | 34 | 소품 모음(멱등 순서·SNS client·경로 표기 등) | 여러 파일 |
+| **P3** | 35 | 죽은 코드 일괄(MySQL 잔재 등) | 여러 파일 |
+| **P3** | 36 | 제품 결정 문서화(단일 세션 refresh 등) | docs |
