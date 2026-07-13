@@ -37,9 +37,16 @@ from app.domain.auth.schema import (
     LoginSuccessData,
     SignUpRequest,
 )
+from app.domain.auth.user_status_cache import (
+    USER_STATUS_CACHE_TTL_SECONDS,
+    invalidate_user_status_cache,
+    set_user_status_cache_best_effort,
+    user_status_cache_key,
+)
 from app.domain.media.model import MediaModel
 from app.domain.media.service import MediaService
 from app.domain.users.model import UsersModel
+from app.infra.redis import bulk_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -70,24 +77,6 @@ def _user_refresh_key(user_id: UUID) -> str:
     return f"{_USER_REFRESH_KEY_PREFIX}{user_id}"
 
 
-_USER_STATUS_CACHE_PREFIX = "user:status:"
-# 짧은 TTL: 정지/탈퇴 반영 지연과 스테일 허용 폭의 트레이드오프(분산 무효화와 함께 사용).
-_USER_STATUS_CACHE_TTL_SECONDS = 240
-
-
-def _user_status_cache_key(user_id: UUID) -> str:
-    return f"{_USER_STATUS_CACHE_PREFIX}{user_id}"
-
-
-def _redis_bulk_to_str(value: Any) -> str | None:
-    """Redis GET 결과(bytes/str)를 비교용 문자열로 통일한다."""
-    if value is None:
-        return None
-    if isinstance(value, (bytes, bytearray)):
-        return value.decode("utf-8")
-    return str(value)
-
-
 async def _refresh_rotation_sequential(
     redis_client: Any,
     *,
@@ -103,7 +92,7 @@ async def _refresh_rotation_sequential(
     """
     try:
         raw = await redis_client.get(user_key)
-        if _redis_bulk_to_str(raw) != incoming_digest:
+        if bulk_to_str(raw) != incoming_digest:
             return False
         await redis_client.set(user_key, new_digest, ex=ttl_seconds)
         return True
@@ -134,7 +123,7 @@ async def _try_refresh_rotation_redis(
         except Exception as e:
             logger.warning("refresh get digest failed user_id=%s err=%s", user_id, e)
             return False
-        return _redis_bulk_to_str(raw) == incoming_digest
+        return bulk_to_str(raw) == incoming_digest
 
     try:
         rc = await redis_client.eval(
@@ -165,37 +154,6 @@ async def _try_refresh_rotation_redis(
         return False
 
 
-async def invalidate_user_status_cache(redis_client: Redis | None, user_id: UUID) -> None:
-    """
-    ``users.status`` 변경(정지·해제·탈퇴 등) 후 refresh용 캐시를 제거한다.
-
-    Redis 장애 시 로그만 남기고 무시해 본편 트랜잭션을 막지 않는다.
-    """
-    if redis_client is None:
-        return
-    r = cast(Any, redis_client)
-    try:
-        await r.delete(_user_status_cache_key(user_id))
-    except Exception as e:
-        logger.warning("user status cache DEL failed user_id=%s err=%s", user_id, e)
-
-
-async def _set_user_status_cache_best_effort(
-    redis_client: Any,
-    user_id: UUID,
-    status_value: str,
-) -> None:
-    """로그인 등 확실히 ACTIVE인 시점에 캐시를 채워 첫 refresh DB 조회를 줄인다."""
-    try:
-        await redis_client.set(
-            _user_status_cache_key(user_id),
-            status_value,
-            ex=_USER_STATUS_CACHE_TTL_SECONDS,
-        )
-    except Exception as e:
-        logger.warning("user status cache SET failed user_id=%s err=%s", user_id, e)
-
-
 async def _ensure_user_may_refresh(
     redis_client: Any,
     user_id: UUID,
@@ -206,7 +164,7 @@ async def _ensure_user_may_refresh(
 
     캐시 값은 ``UserStatus`` 문자열(ACTIVE|SUSPENDED|WITHDRAWN). ACTIVE만 통과, 그 외·무효는 401.
     """
-    key = _user_status_cache_key(user_id)
+    key = user_status_cache_key(user_id)
     cached_raw: Any | None
     try:
         cached_raw = await redis_client.get(key)
@@ -215,7 +173,7 @@ async def _ensure_user_may_refresh(
         cached_raw = None
 
     if cached_raw is not None:
-        cached = _redis_bulk_to_str(cached_raw)
+        cached = bulk_to_str(cached_raw)
         if cached == UserStatus.ACTIVE.value:
             return
         raise UnauthorizedException(message=UserStatus.inactive_message_ko(cached))
@@ -227,7 +185,7 @@ async def _ensure_user_may_refresh(
         status_val = str(user.status)
 
     try:
-        await redis_client.set(key, status_val, ex=_USER_STATUS_CACHE_TTL_SECONDS)
+        await redis_client.set(key, status_val, ex=USER_STATUS_CACHE_TTL_SECONDS)
     except Exception as e:
         logger.warning("user status cache SET after DB fail-open user_id=%s err=%s", user_id, e)
 
@@ -335,7 +293,7 @@ class AuthService:
                 refresh_token_digest(refresh_token),
                 ex=refresh_ttl_seconds,
             )
-            await _set_user_status_cache_best_effort(r, payload.id, UserStatus.ACTIVE.value)
+            await set_user_status_cache_best_effort(r, payload.id, UserStatus.ACTIVE.value)
         return (payload, refresh_token)
 
     @classmethod

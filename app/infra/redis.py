@@ -9,6 +9,15 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 
+def bulk_to_str(value: Any) -> str | None:
+    """Redis GET 결과(bytes/str)를 비교용 문자열로 통일한다."""
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8")
+    return str(value)
+
+
 async def init_redis(app) -> None:
     app.state.redis = None
     if not settings.REDIS_URL:

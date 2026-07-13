@@ -6,6 +6,7 @@ pgcode(23505 unique·23503 FK)와 psycopg diag의 제약명으로 응답 코드�
 
 import json
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from app.core.exception_handlers import register_exception_handlers
@@ -28,7 +29,7 @@ def _request() -> Request:
 async def _handle(exc: IntegrityError):
     app = FastAPI()
     register_exception_handlers(app)
-    handler = app.exception_handlers[IntegrityError]
+    handler = cast(Any, app.exception_handlers[IntegrityError])  # 등록된 async 핸들러
     resp = await handler(_request(), exc)
     return resp.status_code, json.loads(bytes(resp.body))["code"]
 

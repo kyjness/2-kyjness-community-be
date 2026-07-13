@@ -14,12 +14,12 @@ from app.common.exceptions import ForbiddenException, UnauthorizedException
 from app.core.ids import jwt_sub_to_uuid
 from app.core.security import access_jti_blacklist_redis_key, verify_access_token
 from app.db import utc_now
-from app.domain.auth.service import (
-    _redis_bulk_to_str,
-    _set_user_status_cache_best_effort,
-    _user_status_cache_key,
+from app.domain.auth.user_status_cache import (
+    set_user_status_cache_best_effort,
+    user_status_cache_key,
 )
 from app.domain.users.model import UsersModel
+from app.infra.redis import bulk_to_str
 
 from .db import get_slave_db
 
@@ -125,8 +125,8 @@ async def get_current_user(
     cached_status: str | None = None
     if redis_client is not None:
         try:
-            cached_raw = await cast(Any, redis_client).get(_user_status_cache_key(user_id))
-            cached_status = _redis_bulk_to_str(cached_raw)
+            cached_raw = await cast(Any, redis_client).get(user_status_cache_key(user_id))
+            cached_status = bulk_to_str(cached_raw)
         except Exception as e:
             logger.warning("user status cache GET fail-open user_id=%s err=%s", user_id, e)
             cached_status = None
@@ -141,7 +141,7 @@ async def get_current_user(
         result = CurrentUser.model_validate(user)
 
     if redis_client is not None and cached_status is None:
-        await _set_user_status_cache_best_effort(redis_client, user_id, status_val)
+        await set_user_status_cache_best_effort(redis_client, user_id, status_val)
 
     if not UserStatus.is_active_value(status_val):
         raise ForbiddenException(message=UserStatus.inactive_message_ko(status_val))
