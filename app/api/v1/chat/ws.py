@@ -55,14 +55,9 @@ async def chat_dm_websocket(websocket: WebSocket) -> None:
     try:
         while True:
             raw = await websocket.receive_text()
-            try:
-                parsed = parse_incoming_message(raw)
-            except ValidationError as e:
-                payload = validation_error_to_ws_error(e)
-                await websocket.send_text(json.dumps(payload, ensure_ascii=False))
-                continue
             # WS는 HTTP rate limit 미들웨어 밖 — 접속 1회로 무제한 DB 쓰기+팬아웃이
-            # 가능하므로 유저 단위 한도를 수신 루프에서 직접 검사한다.
+            # 가능하므로 유저 단위 한도를 수신 루프에서 직접 검사한다. parse보다 먼저:
+            # 잘못된 프레임 스팸(검증 비용+에러 응답 루프)도 같은 한도에 잡혀야 한다.
             allowed, retry_after = await check_fixed_window(
                 _redis_from_websocket(websocket),
                 f"chat:ws:{user_id}",
@@ -75,6 +70,12 @@ async def chat_dm_websocket(websocket: WebSocket) -> None:
                     message=f"메시지 전송이 너무 잦습니다. {retry_after}초 후 다시 시도하세요.",
                 ).model_dump(mode="json", by_alias=True)
                 await websocket.send_text(json.dumps(err, ensure_ascii=False))
+                continue
+            try:
+                parsed = parse_incoming_message(raw)
+            except ValidationError as e:
+                payload = validation_error_to_ws_error(e)
+                await websocket.send_text(json.dumps(payload, ensure_ascii=False))
                 continue
             try:
                 async with AsyncSessionLocal() as db:

@@ -541,7 +541,10 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 - `posts/services/post_service.py`: `_VIEW_REDIS_EX_SECONDS <= 0` 분기 도달 불가(폴백이 3600 보장).
 - `api/dependencies/auth.py`: auth 서비스의 `_`프라이빗 헬퍼 3개 크로스 모듈 임포트 → 공용 모듈로 승격.
 - **(①+② 마감 리뷰)** app.state.redis 접근자가 3벌(`get_optional_redis`는 isinstance 가드, `_redis_client`·`_redis_from_scope`·라우터 bare getattr는 무가드)로 드리프트 — 공용 접근자 하나로 통일.
-- **(①+② 마감 리뷰)** 단위 테스트의 FakeRedis·FakeDB류가 4개 파일에 각자 구현 — conftest 공용 픽스처로 승격.
+- **(①+② 마감 리뷰)** 단위 테스트의 FakeRedis·FakeDB류가 4개 파일에 각자 구현 — conftest 공용 픽스처로 승격
+  (③에서 test_sse_fanout·test_pubsub_reconnect·test_chat_ws_guards 3개 파일이 추가로 늘어남).
+- **(③ 마감 리뷰)** chat `ConnectionManager`·notif `SseFanoutManager`가 "유저별 집합 + asyncio.Lock" 골격을
+  중복 구현 — 전달 세맨틱(WS send vs 큐 put)이 달라 억지 통합은 비권장이나, 등록/해제 골격의 공용 베이스는 검토 가치.
 
 ---
 

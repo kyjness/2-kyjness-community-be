@@ -129,12 +129,21 @@ async def check_fixed_window(
     Redis 우선(멀티 인스턴스 공유 한도), 부재·장애 시 인스턴스 로컬 메모리 윈도로 폴백 —
     남용 방어가 목적이라 완전 fail-open 대신 근사 한도라도 유지한다.
     """
+    allowed = True
+    retry_after = 0
     if redis is not None:
         try:
-            return await _check_redis_fixed_window(redis, key, window_sec, max_count)
+            allowed, retry_after = await _check_redis_fixed_window(
+                redis, key, window_sec, max_count
+            )
         except Exception:
-            pass  # _check_redis_fixed_window가 경고 로그를 남긴다
-    return _check_memory_fixed_window(key, window_sec, max_count)
+            allowed, retry_after = _check_memory_fixed_window(key, window_sec, max_count)
+    else:
+        allowed, retry_after = _check_memory_fixed_window(key, window_sec, max_count)
+    if not allowed:
+        # HTTP 429와 동일 계측 — WS 등 비HTTP 경로 거부도 대시보드에 잡히게.
+        RATE_LIMIT_REJECTIONS.labels(limit=key.split(":", 1)[0]).inc()
+    return allowed, retry_after
 
 
 async def _send_429(send: Send, scope: Scope, code: ApiCode, retry_after_seconds: int) -> None:
