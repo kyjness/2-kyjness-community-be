@@ -113,19 +113,6 @@ class InvalidPostIdFormatException(BaseProjectException):
         super().__init__(status_code=400, code=ApiCode.INVALID_POSTID_FORMAT, message=message)
 
 
-# --- Likes: 응답에 likeCount, isLiked 등 데이터 전달 ---
-class AlreadyLikedException(BaseProjectException):
-    """이미 좋아요한 상태(UniqueViolation 등). data에 likeCount, isLiked 등 담아 전달."""
-
-    def __init__(self, data: dict | None = None, message: str | None = None):
-        super().__init__(
-            status_code=200,
-            code=ApiCode.ALREADY_LIKED,
-            message=message,
-            data=data,
-        )
-
-
 # --- Media / Image ---
 class ImageNotFoundException(BaseProjectException):
     def __init__(self, message: str | None = None):

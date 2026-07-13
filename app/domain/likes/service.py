@@ -1,32 +1,23 @@
-# Likes 도메인 서비스. Full-Async. IntegrityError(23505) 시 AlreadyLikedException으로 변환.
+# Likes 도메인 서비스. Full-Async. 중복 좋아요는 ON CONFLICT DO NOTHING(inserted=False)으로 처리.
 # 하나의 요청당 하나의 async with db.begin()으로 묶어 Race Condition 방지.
 
 from uuid import UUID
 
 from redis.asyncio import Redis
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.common.enums import NotificationKind
 from app.common.exceptions import (
-    AlreadyLikedException,
     CommentNotFoundException,
     ConcurrentUpdateException,
     PostNotFoundException,
 )
-from app.db import get_connection
 from app.domain.comments.model import CommentLikesModel, CommentsModel
 from app.domain.likes.model import PostLikesModel
 from app.domain.notifications.model import NotificationsModel
 from app.domain.notifications.service import NotificationService
 from app.domain.posts.repository import PostsModel
-
-
-def _is_unique_violation(exc: IntegrityError) -> bool:
-    orig = getattr(exc, "orig", None)
-    pgcode = getattr(orig, "pgcode", None) if orig else None
-    return pgcode == "23505"
 
 
 class LikeService:
@@ -76,15 +67,6 @@ class LikeService:
                     like_count = await PostsModel.get_like_count(post_id, db=db)
                 inserted_out = inserted
                 like_count_out = like_count
-            except IntegrityError as e:
-                if _is_unique_violation(e):
-                    async with get_connection() as db2:
-                        async with db2.begin():
-                            like_count = await PostsModel.get_like_count(post_id, db=db2)
-                    raise AlreadyLikedException(
-                        data={"likeCount": like_count, "isLiked": True},
-                    ) from e
-                raise
             except StaleDataError as e:
                 raise ConcurrentUpdateException() from e
         if notify is not None:
@@ -158,15 +140,6 @@ class LikeService:
                     like_count = await CommentsModel.get_like_count(comment_id, db=db)
                 inserted_out = inserted
                 like_count_out = like_count
-            except IntegrityError as e:
-                if _is_unique_violation(e):
-                    async with get_connection() as db2:
-                        async with db2.begin():
-                            like_count = await CommentsModel.get_like_count(comment_id, db=db2)
-                    raise AlreadyLikedException(
-                        data={"likeCount": like_count, "isLiked": True},
-                    ) from e
-                raise
             except StaleDataError as e:
                 raise ConcurrentUpdateException() from e
         if notify is not None:

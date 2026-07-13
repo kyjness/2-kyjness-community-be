@@ -308,14 +308,6 @@ class CommentsModel:
         return r.scalar_one_or_none() is not None
 
     @classmethod
-    async def get_liked_comment_ids_for_user(
-        cls, user_id: UUID, comment_ids: list[UUID], db: AsyncSession
-    ) -> set[UUID]:
-        if not comment_ids:
-            return set()
-        return await CommentLikesModel.get_liked_comment_ids_for_user(user_id, comment_ids, db=db)
-
-    @classmethod
     async def get_like_count(cls, comment_id: UUID, db: AsyncSession) -> int:
         result = await db.execute(select(Comment.like_count).where(Comment.id == comment_id))
         row = result.scalar_one_or_none()

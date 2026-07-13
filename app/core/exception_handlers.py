@@ -131,12 +131,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def integrity_error_handler(request: Request, exc: IntegrityError):
+        # PostgreSQL 전용 매핑: pgcode(23505 unique·23503 FK) + psycopg diag의 제약명.
+        # 에러 메시지 문자열 파싱은 로케일·드라이버 포맷에 취약해 쓰지 않는다.
         orig = getattr(exc, "orig", None)
-        errno = (orig.args[0] if orig and getattr(orig, "args", None) else 0) or 0
         pgcode = getattr(orig, "pgcode", None) if orig else None
-        err_msg = (orig.args[1] if orig and len(getattr(orig, "args", ())) > 1 else str(exc)) or ""
-        is_duplicate_key = errno == 1062 or pgcode == "23505"
-        if is_duplicate_key:
+        diag = getattr(orig, "diag", None) if orig else None
+        constraint = (getattr(diag, "constraint_name", None) or "").lower()
+        if pgcode == "23505":
             logger.warning(
                 "%s",
                 json.dumps(
@@ -144,20 +145,19 @@ def register_exception_handlers(app: FastAPI) -> None:
                         "event": "db_integrity_duplicate",
                         "request_id": get_request_id(request),
                         "path": request.url.path,
-                        "pgcode": pgcode,
+                        "constraint": constraint,
                     },
                     ensure_ascii=False,
                 ),
             )
-            msg_lower = err_msg.lower() if isinstance(err_msg, str) else ""
-            if "email" in msg_lower or "key 'email'" in msg_lower:
+            if "email" in constraint:
                 return JSONResponse(
                     status_code=409,
                     content=_error_payload(
                         ApiCode.EMAIL_ALREADY_EXISTS.value, "", None, request=request
                     ),
                 )
-            if "nickname" in msg_lower or "key 'nickname'" in msg_lower:
+            if "nickname" in constraint:
                 return JSONResponse(
                     status_code=409,
                     content=_error_payload(
@@ -168,13 +168,13 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status_code=409,
                 content=_error_payload(ApiCode.CONFLICT.value, "", None, request=request),
             )
-        if errno in (1451, 1452):
-            _log_error_structured(request, "db_integrity_fk", exc, errno=errno)
+        if pgcode == "23503":
+            _log_error_structured(request, "db_integrity_fk", exc, constraint=constraint)
             return JSONResponse(
                 status_code=409,
                 content=_error_payload(ApiCode.CONSTRAINT_ERROR.value, "", None, request=request),
             )
-        _log_error_structured(request, "db_integrity_other", exc, errno=errno, pgcode=pgcode)
+        _log_error_structured(request, "db_integrity_other", exc, pgcode=pgcode)
         return JSONResponse(
             status_code=400,
             content=_error_payload(ApiCode.INVALID_REQUEST.value, "", None, request=request),
