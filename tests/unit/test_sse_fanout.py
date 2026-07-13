@@ -21,19 +21,9 @@ from app.domain.notifications.stream import (
 from app.infra import pubsub as pubsub_mod
 from app.infra.pubsub import publish_user_envelope, run_user_fanout_listener
 
+from tests.unit.fakes import FakeRedis
+
 pytestmark = pytest.mark.asyncio
-
-
-class _FakeRedis:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.fail = fail
-        self.published: list[tuple[str, str]] = []
-
-    async def publish(self, channel: str, message: str) -> int:
-        if self.fail:
-            raise ConnectionError("redis down")
-        self.published.append((channel, message))
-        return 1
 
 
 # --- SseFanoutManager ---
@@ -109,7 +99,7 @@ def _publish_kwargs(uid) -> dict[str, Any]:
 
 async def test_publish_after_commit_sends_single_channel_envelope_with_origin():
     uid = uuid4()
-    redis = _FakeRedis()
+    redis = FakeRedis()
     await NotificationService.publish_after_commit(redis, **_publish_kwargs(uid))  # type: ignore[arg-type]
     [(channel, raw)] = redis.published
     assert channel == NOTIF_SSE_FANOUT_CHANNEL
@@ -125,7 +115,7 @@ async def test_publish_after_commit_delivers_locally_even_when_publish_succeeds(
     queue = await notification_sse_manager.register(uid)
     try:
         await NotificationService.publish_after_commit(
-            _FakeRedis(),  # type: ignore[arg-type]
+            FakeRedis(),  # type: ignore[arg-type]
             **_publish_kwargs(uid),
         )
         assert queue.qsize() == 1
@@ -138,7 +128,7 @@ async def test_publish_after_commit_delivers_locally_when_publish_fails():
     queue = await notification_sse_manager.register(uid)
     try:
         await NotificationService.publish_after_commit(
-            _FakeRedis(fail=True),  # type: ignore[arg-type]
+            FakeRedis(fail_publish=True),  # type: ignore[arg-type]
             **_publish_kwargs(uid),
         )
         payload = queue.get_nowait()
@@ -170,11 +160,13 @@ async def test_chat_fanout_sends_locally_regardless_of_publish_result(monkeypatc
         "app.domain.chat.service.chat_connection_manager.send_personal_message", fake_send
     )
     peer, sender = uuid4(), uuid4()
-    await ChatService._fanout_dm(_FakeRedis(fail=True), peer_id=peer, sender_id=sender, wire="w")  # type: ignore[arg-type]
+    await ChatService._fanout_dm(
+        FakeRedis(fail_publish=True), peer_id=peer, sender_id=sender, wire="w"
+    )  # type: ignore[arg-type]
     assert [(peer, "w"), (sender, "w")] == sent
 
     sent.clear()
-    ok_redis = _FakeRedis()
+    ok_redis = FakeRedis()
     await ChatService._fanout_dm(ok_redis, peer_id=peer, sender_id=sender, wire="w")  # type: ignore[arg-type]
     assert [(peer, "w"), (sender, "w")] == sent  # publish 성공이어도 로컬은 직접 전달
     # 같은 wire의 peer·sender는 envelope 1건에 수신자 목록으로 — 건별 발행은 RTT·파싱 2배.
@@ -193,7 +185,7 @@ async def test_chat_fanout_dedups_self_dm(monkeypatch):
         "app.domain.chat.service.chat_connection_manager.send_personal_message", fake_send
     )
     me = uuid4()
-    redis = _FakeRedis()
+    redis = FakeRedis()
     await ChatService._fanout_dm(redis, peer_id=me, sender_id=me, wire="w")  # type: ignore[arg-type]
     assert sent == [(me, "w")]
     [(_, raw)] = redis.published

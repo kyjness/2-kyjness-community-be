@@ -17,6 +17,8 @@ from app.domain.posts.services.trending_post_service import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.unit.fakes import FakeDB
+
 
 def _hit(**labels) -> float:
     return metrics.CACHE_EVENTS.labels(**labels)._value.get()
@@ -30,21 +32,6 @@ class _HitRedis:
 
     async def get(self, key):
         return self._payload
-
-
-class _FakeBegin:
-    async def __aenter__(self):
-        return None
-
-    async def __aexit__(self, *a):
-        return False
-
-
-class _FakeDB:
-    """차단 오버레이는 db.begin() 안에서 조회한다(세션 autobegin=False 재현). begin만 흉내낸다."""
-
-    def begin(self):
-        return _FakeBegin()
 
 
 def _pool(*items: _TrendingCacheItem) -> bytes:
@@ -82,7 +69,7 @@ def test_block_overlay_filters_blocked_authors(monkeypatch):
 
     result = asyncio.run(
         TrendingPostService.get_trending_posts(
-            db=cast(AsyncSession, _FakeDB()),
+            db=cast(AsyncSession, FakeDB()),
             redis_client=redis,
             limit=10,
             current_user_id=uuid4(),

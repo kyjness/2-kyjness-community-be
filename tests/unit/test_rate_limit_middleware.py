@@ -9,19 +9,18 @@ import pytest
 from app.core.config import settings
 from app.core.middleware.metrics import REQUESTS_TOTAL
 from app.main import app
-from redis.asyncio import Redis
 from starlette.testclient import TestClient
+
+from tests.unit.fakes import FakeRedis as SharedFakeRedis
 
 _UNMATCHED = "__unmatched__"
 
 
-class FakeRedis(Redis):
-    """rate limit Lua(INCR+EXPIRE+TTL)만 흉내내는 인메모리 가짜.
-
-    get_app_redis의 isinstance(Redis) 가드를 통과하도록 Redis를 상속하되,
-    __init__을 덮어써 실연결(풀 생성)은 만들지 않는다."""
+class FakeRedis(SharedFakeRedis):
+    """rate limit Lua(INCR+EXPIRE+TTL) 의미론만 교체한 가짜."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.eval_calls = 0
         self.counts: dict[str, int] = {}
 

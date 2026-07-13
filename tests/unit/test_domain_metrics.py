@@ -50,8 +50,14 @@ def test_cache_hit_increments_counter():
     assert after - before == 1
 
 
-def test_rate_limit_rejection_increments_counter():
+def test_rate_limit_rejection_increments_counter(monkeypatch):
     # redis 미연결 + critical path(login)는 메모리 리미터로 폴백 → 한도 초과 시 429.
+    # 한도를 명시해 순서 의존 제거 — 통합 conftest가 세션 스코프로 한도를 완화하므로
+    # 풀 스위트(integration→unit)에서는 기본값 전제가 깨진다.
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "LOGIN_RATE_LIMIT_MAX_ATTEMPTS", 5)
+
     async def _dummy_app(scope, receive, send):
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b""})

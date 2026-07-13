@@ -16,6 +16,8 @@ from app.domain.notifications.service import NotificationService
 from app.infra import sns as sns_mod
 from app.worker.jobs import notification_delivery as job
 
+from tests.unit.fakes import FakeRedis
+
 pytestmark = pytest.mark.asyncio
 
 _KIND = NotificationKind.COMMENT_ON_POST
@@ -115,20 +117,6 @@ async def test_dispatch_noop_without_topic(monkeypatch):
 # ---- 공용 멱등 스토어 fake ----
 
 
-class _FakeRedisClient:
-    def __init__(self, preloaded: dict[str, str] | None = None) -> None:
-        self.kv = dict(preloaded or {})
-        self.set_calls: list[str] = []
-
-    async def get(self, key):
-        return self.kv.get(key)
-
-    async def set(self, key, val, ex=None):
-        self.kv[key] = val
-        self.set_calls.append(key)
-        return True
-
-
 class _FakeRow:
     def __init__(self, nid, uid) -> None:
         self.id = nid
@@ -178,7 +166,7 @@ def _patch_publish(monkeypatch, target_mod, published: list[str], fail: bool = F
 
 async def test_job_marks_idempotent_only_after_publish_success(monkeypatch):
     uid, nid = _ids()
-    client = _FakeRedisClient()
+    client = FakeRedis()
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
     monkeypatch.setattr(job, "_redis_client", client)
     _patch_job_db(monkeypatch, _FakeRow(nid, uid))
@@ -196,7 +184,7 @@ async def test_job_marks_idempotent_only_after_publish_success(monkeypatch):
 
 async def test_job_does_not_mark_idempotent_when_publish_fails(monkeypatch):
     uid, nid = _ids()
-    client = _FakeRedisClient()
+    client = FakeRedis()
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
     monkeypatch.setattr(job, "_redis_client", client)
     _patch_job_db(monkeypatch, _FakeRow(nid, uid))
@@ -214,7 +202,7 @@ async def test_job_does_not_mark_idempotent_when_publish_fails(monkeypatch):
 
 async def test_job_skips_when_already_delivered(monkeypatch):
     uid, nid = _ids()
-    client = _FakeRedisClient(preloaded={f"{sns_mod.DELIVERED_KEY_PREFIX}sns:test-key": "1"})
+    client = FakeRedis(preloaded={f"{sns_mod.DELIVERED_KEY_PREFIX}sns:test-key": "1"})
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
     monkeypatch.setattr(job, "_redis_client", client)
 
@@ -247,7 +235,7 @@ async def test_inline_fallback_skips_when_worker_already_delivered(monkeypatch):
     """브로커 ack 유실 교차 경로: 워커가 먼저 배송했으면 인라인 폴백은 publish하지 않는다."""
     recipient, nid = _ids()
     key = f"{sns_mod.DELIVERED_KEY_PREFIX}sns:{uuid_to_base62(nid)}"
-    client = _FakeRedisClient(preloaded={key: "1"})
+    client = FakeRedis(preloaded={key: "1"})
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
 
     published: list[str] = []
@@ -260,7 +248,7 @@ async def test_inline_fallback_skips_when_worker_already_delivered(monkeypatch):
 async def test_inline_fallback_marks_same_store_after_publish(monkeypatch):
     """인라인 폴백도 publish 성공 후 워커와 같은 키에 마킹 — 이후 워커 재실행이 skip된다."""
     recipient, nid = _ids()
-    client = _FakeRedisClient()
+    client = FakeRedis()
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
 
     published: list[str] = []

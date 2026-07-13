@@ -17,20 +17,25 @@ from app.domain.chat.service import ChatService
 from app.domain.users.model import UsersModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.unit.fakes import FakeRedis as SharedFakeRedis
+
 pytestmark = pytest.mark.asyncio
 
 
 # --- check_fixed_window (공개 헬퍼) ---
 
 
-class _FakeRedis:
+class _FakeRedis(SharedFakeRedis):
+    """fixed-window eval이 고정 [count, ttl]을 반환하는(또는 실패하는) 가짜."""
+
     def __init__(self, count: int, ttl: int = 30, fail: bool = False) -> None:
+        super().__init__()
         self._count = count
         self._ttl = ttl
         self._fail = fail
         self.calls: list[tuple] = []
 
-    async def eval(self, script: str, numkeys: int, key: str, window: int):
+    async def eval(self, script: str, numkeys: int, key: str, window: int):  # pyright: ignore[reportIncompatibleMethodOverride]
         if self._fail:
             raise ConnectionError("redis down")
         self.calls.append((key, window))
