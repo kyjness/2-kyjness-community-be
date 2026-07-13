@@ -35,9 +35,9 @@ MEDIA_SIGNUP_IDEMPOTENT_RESPONSE_ATTR = "media_signup_idempotent_response"
 
 
 def get_client_identifier(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip() or "0.0.0.0"
+    """프록시 검증이 끝난 scope["client"]만 사용한다(신뢰 프록시 뒤에서는 ProxyHeadersMiddleware가
+    이미 실제 IP로 갱신). 원시 X-Forwarded-For를 직접 읽으면 임의 위조가 가능해 조회수 dedup
+    (viewer_key)·signup 멱등 스코프를 요청마다 우회할 수 있다 — rate limit 키 산정과 동일 규약."""
     client = request.scope.get("client") or ("0.0.0.0", 0)
     return (client[0] or "0.0.0.0").strip()
 

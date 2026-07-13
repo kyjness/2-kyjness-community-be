@@ -442,6 +442,10 @@ ADR 0010이 "S3 단일 경로"를 선언했지만, direct 업로드(`/media/imag
 
 **수정 방향**: 검증 완료 값(`request.client.host`)만 사용.
 
+> **수정 완료**: 원시 XFF 파싱 분기를 제거하고 `scope["client"]`(신뢰 프록시 뒤에서는
+> ProxyHeadersMiddleware가 이미 실제 IP로 갱신)만 사용 — rate limit 키 산정과 동일 규약으로
+> 통일. 위조 XFF 무시·프록시 갱신값 준수를 단위 테스트로 고정.
+
 ---
 
 ### 29. `record_post_view` 존재확인이 풀 eager-load + master 세션 — P1
