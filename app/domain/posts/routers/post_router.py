@@ -83,28 +83,6 @@ async def get_posts(
     )
 
 
-@router.post("/{post_id}/view", status_code=200, response_model=ApiResponse[None])
-async def record_view(
-    request: Request,
-    post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
-    client_id: str = Depends(get_client_identifier),
-    db: AsyncSession = Depends(get_slave_db),
-    writer_db: AsyncSession = Depends(get_master_db),
-    current_user: CurrentUser | None = Depends(get_current_user_optional),
-):
-    viewer_key = f"u:{current_user.id}" if current_user else f"ip:{client_id}"
-    redis = getattr(request.app.state, "redis", None)
-    await PostService.record_post_view(
-        post_id,
-        viewer_key,
-        db=db,
-        current_user_id=current_user.id if current_user else None,
-        redis_client=redis,
-        writer_db=writer_db,
-    )
-    return api_response(request, code=ApiCode.OK, data=None)
-
-
 @router.get("/{post_id}", status_code=200, response_model=ApiResponse[PostResponse])
 async def get_post(
     request: Request,

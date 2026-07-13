@@ -106,6 +106,28 @@ async def _try_view_increment_in_buffer(post_id: UUID, redis_client: Any | None)
         return False
 
 
+async def _apply_view_increment(
+    post_id: UUID,
+    viewer_key: str,
+    redis_client: Any | None,
+    writer_db: AsyncSession,
+) -> bool:
+    """조회수 증가 안무: dedup → 버퍼 누적 → (버퍼 불가 시) writer 직접 증가 폴백.
+
+    반환 = writer DB에 직접 +1했는가. 버퍼에 흡수된 증가분은 flush 전까지 DB에 없으므로,
+    호출자가 응답 view_count를 보정할 때 pending(버퍼 잔량)과 이 반환값을 함께 쓴다."""
+    if not await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
+        return False
+    if await _try_view_increment_in_buffer(post_id, redis_client):
+        return False
+    async with writer_db.begin():
+        try:
+            await PostsModel.increment_view_count(post_id, db=writer_db)
+        except StaleDataError as e:
+            raise ConcurrentUpdateException() from e
+    return True
+
+
 class PostService:
     @classmethod
     async def create_post(
@@ -173,36 +195,6 @@ class PostService:
         return result, has_more
 
     @classmethod
-    async def record_post_view(
-        cls,
-        post_id: UUID,
-        viewer_key: str,
-        db: AsyncSession,
-        current_user_id: UUID | None = None,
-        redis_client: Any | None = None,
-        *,
-        writer_db: AsyncSession,
-    ) -> None:
-        """조회수 기록 핫패스. 가시성은 EXISTS 1쿼리로 reader에서 확인한다 —
-        상세 eager-load(작성자·대표견·이미지·해시태그)를 여기서 끌어오면 초당 수백~수천
-        조회 전제에서 가장 무거운 읽기가 가장 뜨거운 쓰기 경로에 얹힌다.
-        writer는 Redis 버퍼 실패 시 직접 increment 폴백에만 쓴다(get_post_detail과 동형)."""
-        async with db.begin():
-            if not await PostsModel.post_is_visible(
-                post_id, db=db, current_user_id=current_user_id
-            ):
-                raise PostNotFoundException()
-        if not await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
-            return
-        if await _try_view_increment_in_buffer(post_id, redis_client):
-            return
-        async with writer_db.begin():
-            try:
-                await PostsModel.increment_view_count(post_id, db=writer_db)
-            except StaleDataError as e:
-                raise ConcurrentUpdateException() from e
-
-    @classmethod
     async def get_post_detail(
         cls,
         post_id: UUID,
@@ -229,16 +221,10 @@ class PostService:
                 data = PostResponse.model_validate(post)
 
         extra_db = 0
-        if writer_db is not None and await _consume_view_if_new_redis(
-            post_id, viewer_key, redis_client
+        if writer_db is not None and await _apply_view_increment(
+            post_id, viewer_key, redis_client, writer_db
         ):
-            if not await _try_view_increment_in_buffer(post_id, redis_client):
-                async with writer_db.begin():
-                    try:
-                        await PostsModel.increment_view_count(post_id, db=writer_db)
-                    except StaleDataError as e:
-                        raise ConcurrentUpdateException() from e
-                extra_db = 1
+            extra_db = 1
 
         pending = await _get_buffer_pending(redis_client, post_id)
         return data.model_copy(update={"view_count": data.view_count + pending + extra_db})

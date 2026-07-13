@@ -5,6 +5,8 @@ dedup(NX) · 버퍼 누적 · flush delta 반영 · 실패 시 drain 재병합 �
 """
 
 import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -232,7 +234,7 @@ async def test_flush_does_not_release_foreign_lock(monkeypatch):
     assert r.kv.get(ps.VIEW_FLUSH_LOCK_KEY) == "other-worker"
 
 
-# ---- record_post_view 핫패스 (#29) ----
+# ---- 조회수 증가 안무(_apply_view_increment) + GET 상세 경로 ----
 
 
 class _RecordingDB(_FakeDB):
@@ -251,59 +253,76 @@ def _sess(db) -> AsyncSession:
     return cast(AsyncSession, db)
 
 
-def _patch_visibility(monkeypatch, visible: bool, calls: list | None = None):
-    async def _visible(cls, post_id, *, db, current_user_id=None):
-        if calls is not None:
-            calls.append(post_id)
-        return visible
-
-    monkeypatch.setattr(ps.PostsModel, "post_is_visible", classmethod(_visible))
-
-
-async def test_record_view_checks_visibility_without_full_load(monkeypatch):
-    """가시성은 EXISTS(post_is_visible)로만 확인 — 상세 eager-load 경로를 타면 실패."""
-    r = FakeRedis()
-    pid = uuid.uuid4()
-    seen: list[uuid.UUID] = []
-    _patch_visibility(monkeypatch, True, seen)
-
-    async def _forbidden_full_load(cls, *a, **kw):
-        raise AssertionError(
-            "record_post_view는 get_post_by_id(상세 eager-load)를 호출하면 안 된다"
-        )
-
-    monkeypatch.setattr(ps.PostsModel, "get_post_by_id", classmethod(_forbidden_full_load))
-
-    reader, writer = _RecordingDB(), _RecordingDB()
-    await ps.PostService.record_post_view(
-        pid, "u:1", _sess(reader), redis_client=r, writer_db=_sess(writer)
+def _fake_post(pid: uuid.UUID, view_count: int = 0):
+    """PostResponse.model_validate(from_attributes)가 통과하는 최소 게시글 객체."""
+    return SimpleNamespace(
+        id=pid,
+        title="t",
+        content="c",
+        view_count=view_count,
+        like_count=0,
+        comment_count=0,
+        author=None,
+        files=[],
+        category_id=None,
+        hashtags=[],
+        version=1,
+        created_at=datetime.now(UTC),
     )
 
-    assert seen == [pid]
+
+def _patch_detail_load(monkeypatch, post):
+    async def _load(cls, post_id, *, db, current_user_id=None):
+        return post
+
+    monkeypatch.setattr(ps.PostsModel, "get_post_by_id", classmethod(_load))
+
+
+async def test_apply_view_increment_contract(monkeypatch):
+    """안무 계약: dedup 차단→False, 버퍼 흡수→False(DB 무접촉), 버퍼 실패→True(writer 직접)."""
+    r = FakeRedis()
+    pid = uuid.uuid4()
+    incremented: list[uuid.UUID] = []
+
+    async def _inc(cls, post_id, db):
+        incremented.append(post_id)
+        return True
+
+    monkeypatch.setattr(ps.PostsModel, "increment_view_count", classmethod(_inc))
+
+    writer = _RecordingDB()
+    # 첫 조회: 버퍼가 흡수 → DB 직접 증가 없음(False)
+    assert await ps._apply_view_increment(pid, "u:1", r, _sess(writer)) is False
     assert await ps._get_buffer_pending(r, pid) == 1
-    # Redis 버퍼가 흡수했으므로 writer 트랜잭션은 열리지 않는다(reader만 사용).
-    assert writer.begin_count == 0
-    assert reader.begin_count == 1
+    # 같은 viewer 재조회: dedup 차단 → 버퍼도 DB도 무접촉(False)
+    assert await ps._apply_view_increment(pid, "u:1", r, _sess(writer)) is False
+    assert await ps._get_buffer_pending(r, pid) == 1
+    assert writer.begin_count == 0 and incremented == []
+    # Redis 불능: dedup fail-open + 버퍼 실패 → writer 직접 증가(True)
+    assert await ps._apply_view_increment(pid, "u:2", None, _sess(writer)) is True
+    assert incremented == [pid]
+    assert writer.begin_count == 1
 
 
-async def test_record_view_raises_when_not_visible(monkeypatch):
+async def test_get_post_detail_raises_when_not_found(monkeypatch):
     from app.common.exceptions import PostNotFoundException
 
-    _patch_visibility(monkeypatch, False)
+    _patch_detail_load(monkeypatch, None)
     with pytest.raises(PostNotFoundException):
-        await ps.PostService.record_post_view(
+        await ps.PostService.get_post_detail(
             uuid.uuid4(),
-            "u:1",
             _sess(_RecordingDB()),
+            viewer_key="u:1",
             redis_client=FakeRedis(),
             writer_db=_sess(_RecordingDB()),
         )
 
 
-async def test_record_view_falls_back_to_writer_when_buffer_unavailable(monkeypatch):
-    """Redis 버퍼 실패(fail-open) 시에만 writer 세션으로 직접 increment."""
+async def test_get_post_detail_falls_back_to_writer_and_reflects_increment(monkeypatch):
+    """Redis 버퍼 실패(fail-open) 시 writer 세션으로 직접 increment하고,
+    그 증가분(extra_db)이 응답 view_count에 즉시 반영된다."""
     pid = uuid.uuid4()
-    _patch_visibility(monkeypatch, True)
+    _patch_detail_load(monkeypatch, _fake_post(pid, view_count=10))
     incremented: list[tuple[uuid.UUID, object]] = []
 
     async def _inc(cls, post_id, db):
@@ -313,9 +332,26 @@ async def test_record_view_falls_back_to_writer_when_buffer_unavailable(monkeypa
     monkeypatch.setattr(ps.PostsModel, "increment_view_count", classmethod(_inc))
 
     reader, writer = _RecordingDB(), _RecordingDB()
-    await ps.PostService.record_post_view(
-        pid, "u:1", _sess(reader), redis_client=None, writer_db=_sess(writer)
+    data = await ps.PostService.get_post_detail(
+        pid, _sess(reader), viewer_key="u:1", redis_client=None, writer_db=_sess(writer)
     )
 
     assert incremented == [(pid, writer)]  # 폴백 쓰기는 반드시 writer로
     assert writer.begin_count == 1
+    assert data.view_count == 11  # DB 직접 증가분이 응답에 즉시 반영
+
+
+async def test_get_post_detail_reflects_buffer_pending(monkeypatch):
+    """버퍼에 흡수된 증가분은 DB에 없지만 응답 view_count에는 pending으로 반영된다."""
+    r = FakeRedis()
+    pid = uuid.uuid4()
+    _patch_detail_load(monkeypatch, _fake_post(pid, view_count=10))
+
+    reader, writer = _RecordingDB(), _RecordingDB()
+    data = await ps.PostService.get_post_detail(
+        pid, _sess(reader), viewer_key="u:1", redis_client=r, writer_db=_sess(writer)
+    )
+
+    assert await ps._get_buffer_pending(r, pid) == 1
+    assert writer.begin_count == 0  # 버퍼가 흡수 — writer 무접촉
+    assert data.view_count == 11  # base 10 + pending 1
