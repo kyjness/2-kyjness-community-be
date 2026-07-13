@@ -65,7 +65,6 @@ class TrendingPostService:
             adapter=_POOL_ADAPTER,
             loader=loader,
             cache_name="trending_posts",
-            on_wait_timeout=[],
         )
 
         # 차단 오버레이: 내가 차단한 저자의 글을 캐시된 풀에서 제거한 뒤 limit만큼 자른다.

@@ -92,6 +92,44 @@ def test_block_overlay_filters_blocked_authors(monkeypatch):
     assert titles == ["정상글"]  # 차단 저자 글은 사후 필터로 제거
 
 
+def test_lock_wait_timeout_falls_back_to_loader(monkeypatch):
+    """락 경합 + 대기 내 캐시 미충전이면 빈 값이 아니라 loader(DB) 폴백이어야 한다(#33)."""
+    from app.infra import cache as cache_mod
+    from pydantic import TypeAdapter
+
+    class _ContendedRedis:
+        """다른 워커가 락을 쥔 채 캐시를 끝내 채우지 않는 상황."""
+
+        async def get(self, key):
+            return None
+
+        async def set(self, key, val, nx=False, ex=None):
+            return None  # 락 선점 실패
+
+    monkeypatch.setattr(cache_mod, "_WAIT_MAX_SECONDS", 0.02)
+    monkeypatch.setattr(cache_mod, "_WAIT_INTERVAL_SECONDS", 0.01)
+
+    loader_calls: list[int] = []
+
+    async def loader() -> list[int]:
+        loader_calls.append(1)
+        return [7]
+
+    result = asyncio.run(
+        cache_mod.get_or_compute_json(
+            redis=_ContendedRedis(),
+            key="cache:test",
+            lock_key="cache:test:lock",
+            ttl_seconds=60,
+            adapter=TypeAdapter(list[int]),
+            loader=loader,
+            cache_name="trending_posts",
+        )
+    )
+    assert result == [7]  # 빈 목록이 아니라 loader 결과
+    assert loader_calls == [1]
+
+
 def test_redis_none_uses_loader(monkeypatch):
     items = [_TrendingCacheItem(id=uuid4(), title="폴백", author_id=None)]
 

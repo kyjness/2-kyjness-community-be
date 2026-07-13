@@ -40,5 +40,4 @@ class HashtagService:
             adapter=_TRENDING_LIST_ADAPTER,
             loader=loader,
             cache_name="trending_hashtags",
-            on_wait_timeout=[],
         )

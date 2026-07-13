@@ -48,14 +48,15 @@ async def get_or_compute_json(
     adapter: TypeAdapter[T],
     loader: Callable[[], Awaitable[T]],
     cache_name: str,
-    on_wait_timeout: T,
 ) -> T:
     """캐시 히트면 즉시 반환, 미스면 분산 락 아래 loader로 재계산·기록. Redis 부재/오류는 loader 폴백.
 
     - ``adapter``: 캐시 값의 직렬화 계약(TypeAdapter).
     - ``loader``: 캐시 미스 시 실제 계산(대개 DB 조회) 코루틴.
     - ``cache_name``: `cache_events_total{cache}` 라벨(hit/miss 계측).
-    - ``on_wait_timeout``: 다른 워커의 재계산을 기다리다 시간 초과 시 반환할 값(예: 빈 리스트).
+
+    락 대기 타임아웃도 loader 폴백이다 — 빈 값 반환은 "틀린 데이터"라 대기자 수만큼의
+    DB 쿼리(운영 봉투 내)를 감내하는 쪽을 택한다(ADR 0004).
     """
     if redis is None:
         return await loader()
@@ -88,7 +89,7 @@ async def get_or_compute_json(
                     return decoded2
             except Exception:
                 break
-        return on_wait_timeout
+        return await loader()
 
     try:
         result = await loader()
