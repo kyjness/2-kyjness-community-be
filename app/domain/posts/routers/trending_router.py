@@ -18,22 +18,17 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 async def get_trending_posts(
     request: Request,
     limit: int = Query(10, ge=1, le=10, description="인기글 최대 개수 (최대 10)"),
-    window_hours: int = Query(
-        24,
-        ge=1,
-        le=48,
-        description="시간 감쇠 집계 창(시간). 인덱스 범위 스캔용 상한 48h.",
-    ),
     category_id: int | None = Query(None, ge=1, description="카테고리 ID 필터"),
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
+    # 집계 창은 서버 고정 24h(서비스 기본값) — 클라이언트 제어(1~48h)는 소비자 없이
+    # 캐시 키만 값별로 분화시키는 표면이라 제거했다(ADR 0004).
     redis = get_app_redis(request.app)
     result = await TrendingPostService.get_trending_posts(
         db=db,
         redis_client=redis,
         limit=limit,
-        window_hours=window_hours,
         category_id=category_id,
         current_user_id=current_user.id if current_user else None,
     )

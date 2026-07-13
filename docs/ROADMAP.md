@@ -148,7 +148,22 @@
         non-goal(바이트 검증 안 함 근거), 인덱스 2곳 0008 범위 교정. 이연: 비원자 promote
         동시성·트레일링 슬래시 이중 카운트(#34), 멱등 코어 단순화·경로 리터럴 드리프트·
         테스트 그림자 헬퍼(#35)
-- [ ] **⑤ 마무리**: #25 조회수 경로 단일화 · #33 트렌딩 timeout · #34 소품 · #35 죽은 코드 · #26 ORM 배치 · #36 결정 문서화
+- [ ] **⑤ 마무리** (구현 완료 — 마감 /code-review 대기)
+  - [x] #25 조회수 경로 단일화 — FE 미사용 `POST /view` 제거, dedup→버퍼→폴백 안무를
+        `_apply_view_increment` 헬퍼로 통일, 테스트를 GET 증가 경로로 이전·확장
+  - [x] #33 트렌딩 timeout — 락 대기 타임아웃을 빈 목록 대신 loader(DB) 폴백으로,
+        `on_wait_timeout` 제거(ADR 0004 정정 기록)
+  - [x] #34 소품 — SNS 배송 `infra/sns.py` 통일(인라인 폴백도 멱등 스토어 공유·이중 배송 창
+        봉합)·워커 Redis 재사용·`_SKIP_PATHS` /v1/health 교정·view TTL 0=dedup 끔 존중·
+        `STORAGE_BACKEND` 잔재 제거·envelope 수신자 목록 1건 발행. 수용 3건은 backlog 기록 유지
+  - [x] #35 죽은 코드 — MySQL 잔재→pgcode 매핑·미호출 메서드·도달 불가 분기 제거, auth 헬퍼
+        공개 승격, redis 접근자 `get_app_redis` 단일화, 멱등 코어 post:create 인라인(-56줄),
+        경로 리터럴 상수화+드리프트 가드, 테스트 페이크 공용화(`tests/unit/fakes.py`)+풀 스위트
+        순서 의존 해소. 보류 2건은 backlog 기록 유지
+  - [x] #26 ORM 배치 — `DogProfile`→dogs·`Report`→reports model.py 복귀(테이블 불변,
+        문자열 관계+TYPE_CHECKING으로 순환 차단, configure_mappers 검증)
+  - [x] #36 결정 반영·문서화 — 트렌딩 `window_hours` 제거·24h 고정(ADR 0004), 단일 세션·
+        WS 토큰 쿼리스트링·차단 비대칭은 ADR 0013 신설로 확정
 
 ## 완료 유닛 (커밋)
 | 단위 | 커밋 |

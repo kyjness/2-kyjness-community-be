@@ -422,6 +422,12 @@ BE에서 사라진 계약이 잔존 중(③ 마감 리뷰 발견).
 
 **수정 방향**: FE 사용 경로 확인 후 한쪽 제거. **(①+② 마감 리뷰)** #29로 두 경로가 dedup→버퍼→writer 폴백 안무를 중복 구현하게 됐다 — 한쪽을 제거하면 자연 해소되고, 둘 다 남길 경우 공용 헬퍼로 추출.
 
+
+> **수정 완료(posts 도메인)**: FE 실사용 확인 — GET 상세만 호출, `POST /view`는 호출처 0건
+> (openapi 생성 타입에만 존재). POST 엔드포인트·`record_post_view` 제거, dedup→버퍼→writer 폴백
+> 안무를 `_apply_view_increment` 공용 헬퍼로 추출해 `get_post_detail`이 사용. 테스트 자산은 전부
+> POST 쪽에 있었으므로 무테스트였던 GET 증가 경로로 이전·확장(안무 계약·404·writer 폴백+응답
+> 즉시 반영·버퍼 pending 반영). `post_is_visible`은 comments·likes가 사용해 유지.
 ---
 
 ### 26. ORM 클래스 소속 도메인 불일치 — P3
@@ -544,6 +550,11 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 
 **수정 방향**: timeout 시 loader 폴백으로 변경, 또는 현행 유지 근거를 ADR 0004에 명시.
 
+
+> **수정 완료(infra)**: `on_wait_timeout` 매개변수 제거 — 락 대기 타임아웃·대기 중 Redis 오류
+> 모두 loader(DB) 폴백으로 통일(소비자 2곳 갱신). 빈 값은 "틀린 데이터"이고 대기자 수만큼의
+> 쿼리는 봉투 내 감내 가능(ADR 0004에 정정 근거 기록). 락 경합+캐시 미충전 시 loader 호출
+> 테스트 추가.
 ---
 
 ### 34. 소품 모음 (정확성·표기 드리프트) — P2
@@ -566,6 +577,16 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 - **(③ 마감 리뷰)** `send_dm_from_ws`의 차단 EXISTS가 peer 조회와 별도 왕복 — peer SELECT에 exists
   서브쿼리로 합치면 메시지당 DB 왕복 1회 절감(60/분 한도 하에서는 마이너).
 
+
+> **수정 완료(수용 3건 제외)**: ① SNS publish를 `app/infra/sns.py`로 통일 — 프로세스 캐시
+> 클라이언트 + 멱등 스토어(already/mark_delivered)를 서비스 인라인 폴백과 워커 잡이 공유해
+> 브로커 ack 유실 교차 경로의 이중 배송 창 봉합, `create_task` 참조는 모듈 set+done-callback
+> 보관, `_run` 래퍼·중복 가드·region 폴백 제거 ② 워커 Redis 클라이언트 태스크당
+> from_url→aclose를 프로세스당 재사용으로 ③ `_SKIP_PATHS` "/health"→실경로(/v1/health) 교정
+> (#35 경로 상수화 커밋에 흡수) ④ compose `VIEW_CACHE_TTL_SECONDS=0` 의도를 코드가 존중
+> (0→3600 폴백 제거 = dedup 끔) ⑤ `STORAGE_BACKEND` 잔재 제거 ⑥ `_fanout_dm` envelope 2건 →
+> 수신자 목록(`target_user_ids`) 1건(파서는 구포맷 스칼라 수용 — 롤링 배포 창).
+> **수용 유지(기록대로)**: 비원자 promote·트레일링 슬래시 이중 카운트·차단 EXISTS 왕복 통합.
 ---
 
 ### 35. 죽은 코드 일괄 — P3
@@ -598,6 +619,19 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
   내부로 재구현 — presigned 승격 테스트에 불변식 검증을 접고 헬퍼를 제거하는 통합 검토(독립성 유지가
   낫다는 반론도 있어 보류).
 
+
+> **수정 완료(보류 2건 제외)**: MySQL 잔재 예외 파싱 → pgcode(23505/23503)+psycopg diag 제약명
+> 기반 재작성(+매핑 테스트) · `Base.update/soft_delete` 제거 · likes `except IntegrityError`
+> 2분기+`_is_unique_violation`+고아 `AlreadyLikedException` 제거 · 위임 잔재
+> `get_liked_comment_ids_for_user` 제거 · `_VIEW_REDIS_EX_SECONDS <= 0` 분기는 "TTL 0 = dedup
+> 끔"으로 도달 가능해져 해소(#34④) · auth 프라이빗 헬퍼 3개 → `auth/user_status_cache.py` 공개
+> 모듈 + `infra/redis.bulk_to_str` 승격 · app.state.redis 접근자 3벌+bare getattr ~18곳 →
+> `get_app_redis` 단일 창구 · FakeRedis/FakeDB류 → `tests/unit/fakes.py` 공용화(6파일 이전) ·
+> chat/pubsub 위임 모듈 제거(#34⑥ 커밋에 흡수) · 통합 conftest 한도 완화의 풀 스위트 순서 의존
+> → unit 테스트가 한도 명시 monkeypatch · 멱등 코어 다중 네임스페이스 표면 → post:create 전용
+> 인라인(-56줄) · rate limit 경로 리터럴 → `app/common/paths.py` 상수 + 라우트 테이블 대조
+> 드리프트 가드 테스트.
+> **보류 유지(기록대로)**: 매니저 공용 베이스/락 통합, `_put_object` 테스트 헬퍼 통합.
 ---
 
 ### 36. 제품 결정 문서화 — P3
@@ -611,6 +645,12 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
   기존 room_id 기반 목록·기록·읽음은 동작(과거 대화 열람 허용) — 의도된 비대칭인지 결정하고 문서화.
   FE는 direct-open 403을 "차단한 상대" UX로 처리해야 함.
 
+
+> **수정 완료**: 트렌딩 `window_hours` 클라이언트 제어는 문서화 대신 **제거·서버 고정 24h**로
+> 결정(FE 사용값 24 하나 — 소비자 없는 표면이 캐시 키 분화+무거운 쿼리 남용 벡터, ADR 0004).
+> 단일 세션(refresh 유저당 단일 키)·WS 토큰 쿼리스트링 트레이드오프·차단 시맨틱 비대칭(새 대화
+> 403, 과거 열람 허용 — FE의 direct-open 403 처리 계약 포함)은
+> [ADR 0013](adr/0013-product-behavior-decisions.md)으로 확정.
 ---
 
 ### 37. 실시간 전달 심화 (③ 마감 리뷰 이연) — P2
