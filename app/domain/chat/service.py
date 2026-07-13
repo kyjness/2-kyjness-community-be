@@ -1,6 +1,5 @@
 # 1:1 DM 비즈니스 로직. 방 upsert·메시지 저장·Redis 팬아웃·커서 목록.
 
-import asyncio
 import json
 import logging
 from uuid import UUID
@@ -28,9 +27,9 @@ from app.domain.chat.schema import (
 )
 from app.domain.media.model import Image
 from app.domain.users.model import DogProfile, User, UsersModel
+from app.infra.pubsub import publish_user_envelope
 
-from .manager import chat_connection_manager
-from .pubsub import publish_chat_dm
+from .manager import CHAT_DM_FANOUT_CHANNEL, chat_connection_manager
 
 log = logging.getLogger(__name__)
 
@@ -157,13 +156,14 @@ class ChatService:
         # 같은 인스턴스 소켓은 먼저 직접 전달 — Redis·구독 리스너 상태에 의존하지 않는다
         # (publish 성공이 로컬 전달을 보장하지 않는다: 소비는 별도 리스너 연결 몫이라
         # 리스너 재연결 창에서는 성공한 publish도 로컬에 도달하지 않는다).
-        # 크로스 인스턴스는 envelope publish — 리스너가 origin 비교로 자기 발행분을
-        # 건너뛰므로 중복 전달 없음. publish 실패는 다른 인스턴스 수신자만 유실(at-most-once).
-        await chat_connection_manager.send_personal_message(peer_id, wire)
-        await chat_connection_manager.send_personal_message(sender_id, wire)
-        await asyncio.gather(
-            publish_chat_dm(redis, target_user_id=peer_id, payload=wire),
-            publish_chat_dm(redis, target_user_id=sender_id, payload=wire),
+        # 크로스 인스턴스는 수신자 목록을 담은 envelope 1건 — 리스너가 origin 비교로 자기
+        # 발행분을 건너뛰므로 중복 전달 없음. publish 실패는 다른 인스턴스 수신자만
+        # 유실(at-most-once).
+        targets = [peer_id] if peer_id == sender_id else [peer_id, sender_id]
+        for uid in targets:
+            await chat_connection_manager.send_personal_message(uid, wire)
+        await publish_user_envelope(
+            redis, CHAT_DM_FANOUT_CHANNEL, target_user_ids=targets, payload=wire
         )
 
     @classmethod

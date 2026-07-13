@@ -234,7 +234,7 @@ class NotificationService:
         await publish_user_envelope(
             redis,
             NOTIF_SSE_FANOUT_CHANNEL,
-            target_user_id=recipient_user_id,
+            target_user_ids=[recipient_user_id],
             payload=payload_json,
         )
 

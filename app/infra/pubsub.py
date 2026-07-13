@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -53,16 +53,23 @@ async def publish_user_envelope(
     redis: Redis | None,
     channel: str,
     *,
-    target_user_id: UUID,
+    target_user_ids: Sequence[UUID],
     payload: str,
 ) -> bool:
     """envelope PUBLISH(크로스 인스턴스 전달). 성공 여부를 반환한다 — 예외는 여기서
     삼키므로 반환값이 유일한 실패 신호. 같은 인스턴스 수신자는 발행 전에 로컬 매니저로
-    직접 전달돼 있어야 한다(publish 실패는 다른 인스턴스 수신자만 유실, at-most-once)."""
-    if redis is None or not payload:
+    직접 전달돼 있어야 한다(publish 실패는 다른 인스턴스 수신자만 유실, at-most-once).
+
+    수신자가 여럿이면(같은 wire를 받는 DM의 peer·sender) 목록으로 한 번에 발행한다 —
+    envelope N건은 발행 RTT와 전 인스턴스의 파싱을 N배로 만든다."""
+    if redis is None or not payload or not target_user_ids:
         return False
     env = json.dumps(
-        {"origin": _instance_id(), "target_user_id": str(target_user_id), "payload": payload},
+        {
+            "origin": _instance_id(),
+            "target_user_ids": [str(u) for u in target_user_ids],
+            "payload": payload,
+        },
         ensure_ascii=False,
     )
     try:
@@ -74,17 +81,23 @@ async def publish_user_envelope(
         return False
 
 
-def parse_user_envelope(raw: str) -> tuple[UUID, str, str | None] | None:
-    """(target_user_id, payload, origin). payload가 문자열이 아니면 규약 위반 — 버린다."""
+def parse_user_envelope(raw: str) -> tuple[list[UUID], str, str | None] | None:
+    """(target_user_ids, payload, origin). payload가 문자열이 아니면 규약 위반 — 버린다.
+
+    구포맷 스칼라 `target_user_id`도 수용한다 — 롤링 배포 창에서 구버전 인스턴스가
+    발행한 envelope를 신버전 리스너가 버리지 않게(둘 다 at-most-once 세맨틱 안)."""
     try:
         data = json.loads(raw)
-        uid = UUID(str(data["target_user_id"]))
+        if "target_user_ids" in data:
+            uids = [UUID(str(u)) for u in data["target_user_ids"]]
+        else:
+            uids = [UUID(str(data["target_user_id"]))]
         payload = data["payload"]
         if not isinstance(payload, str):
             log.warning("pubsub envelope payload가 str이 아님", exc_info=False)
             return None
         origin = data.get("origin")
-        return uid, payload, origin if isinstance(origin, str) else None
+        return uids, payload, origin if isinstance(origin, str) else None
     except Exception:
         log.warning("pubsub envelope invalid", exc_info=False)
         return None
@@ -103,13 +116,14 @@ async def _dispatch_message(msg: Any, handlers: dict[str, UserEnvelopeHandler]) 
     parsed = parse_user_envelope(raw)
     if parsed is None:
         return
-    target_user_id, payload, origin = parsed
+    target_user_ids, payload, origin = parsed
     if origin == _instance_id():
         return  # 자기 발행분 — 로컬 수신자는 발행 시점에 이미 직접 전달됨
-    try:
-        await handler(target_user_id, payload)
-    except Exception:
-        log.exception("local fanout 실패 channel=%s user=%s", channel, target_user_id)
+    for target_user_id in target_user_ids:
+        try:
+            await handler(target_user_id, payload)
+        except Exception:
+            log.exception("local fanout 실패 channel=%s user=%s", channel, target_user_id)
 
 
 async def _listen_once(

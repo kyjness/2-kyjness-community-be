@@ -84,8 +84,7 @@ async def lifespan(app: FastAPI):
         # app.state.redis(부팅 핑 성공)에 게이트하지 않는다 — 리스너는 자기 연결을
         # 백오프로 재시도하므로, 배포 중 Redis 순단이 크로스 인스턴스 실시간 전달을
         # 프로세스 수명 내내 비활성화해서는 안 된다.
-        from app.domain.chat.manager import chat_connection_manager
-        from app.domain.chat.pubsub import CHAT_DM_FANOUT_CHANNEL
+        from app.domain.chat.manager import CHAT_DM_FANOUT_CHANNEL, chat_connection_manager
         from app.domain.notifications.stream import (
             NOTIF_SSE_FANOUT_CHANNEL,
             notification_sse_manager,

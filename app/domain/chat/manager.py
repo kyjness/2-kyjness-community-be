@@ -9,6 +9,10 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 log = logging.getLogger(__name__)
 
+# DM 분산 브로드캐스트 채널 — 알림 puppytalk:channel:notif:sse 와 네임스페이스 분리.
+# 단일 채널 + envelope(수신자 UUID) 규약, 구독·디스패치는 app.infra.pubsub 공용 리스너.
+CHAT_DM_FANOUT_CHANNEL = "puppytalk:channel:chat:dm"
+
 # 수신 버퍼가 꽉 찬(죽어가는) 소켓의 send가 무한 대기하면, 이 매니저를 핸들러로 쓰는
 # 공용 pubsub 리스너 루프까지 정지한다 — 인스턴스의 실시간 전달 전체가 한 클라이언트에
 # 볼모로 잡히지 않게 상한을 두고, 초과 소켓은 끊는다.

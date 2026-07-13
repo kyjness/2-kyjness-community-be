@@ -89,7 +89,7 @@ def _envelope_msg(channel: str, uid, payload: str) -> dict[str, Any]:
     return {
         "type": "message",
         "channel": channel,
-        "data": json.dumps({"target_user_id": str(uid), "payload": payload}),
+        "data": json.dumps({"target_user_ids": [str(uid)], "payload": payload}),
     }
 
 

@@ -114,7 +114,7 @@ async def test_publish_after_commit_sends_single_channel_envelope_with_origin():
     [(channel, raw)] = redis.published
     assert channel == NOTIF_SSE_FANOUT_CHANNEL
     env = json.loads(raw)
-    assert env["target_user_id"] == str(uid)
+    assert env["target_user_ids"] == [str(uid)]
     assert env["origin"] == pubsub_mod._instance_id()  # 리스너의 자기 발행분 스킵 근거
     assert json.loads(env["payload"])["kind"] == "LIKE_POST"
 
@@ -177,11 +177,31 @@ async def test_chat_fanout_sends_locally_regardless_of_publish_result(monkeypatc
     ok_redis = _FakeRedis()
     await ChatService._fanout_dm(ok_redis, peer_id=peer, sender_id=sender, wire="w")  # type: ignore[arg-type]
     assert [(peer, "w"), (sender, "w")] == sent  # publish 성공이어도 로컬은 직접 전달
-    assert len(ok_redis.published) == 2
+    # 같은 wire의 peer·sender는 envelope 1건에 수신자 목록으로 — 건별 발행은 RTT·파싱 2배.
+    [(_, raw)] = ok_redis.published
+    assert json.loads(raw)["target_user_ids"] == [str(peer), str(sender)]
+
+
+async def test_chat_fanout_dedups_self_dm(monkeypatch):
+    """peer == sender(자기 자신 DM 방어선)면 로컬 전달·envelope 수신자 모두 1회."""
+    sent: list[tuple[Any, str]] = []
+
+    async def fake_send(user_id, message):
+        sent.append((user_id, message))
+
+    monkeypatch.setattr(
+        "app.domain.chat.service.chat_connection_manager.send_personal_message", fake_send
+    )
+    me = uuid4()
+    redis = _FakeRedis()
+    await ChatService._fanout_dm(redis, peer_id=me, sender_id=me, wire="w")  # type: ignore[arg-type]
+    assert sent == [(me, "w")]
+    [(_, raw)] = redis.published
+    assert json.loads(raw)["target_user_ids"] == [str(me)]
 
 
 async def test_publish_user_envelope_returns_false_without_redis():
-    assert await publish_user_envelope(None, "ch", target_user_id=uuid4(), payload="p") is False
+    assert await publish_user_envelope(None, "ch", target_user_ids=[uuid4()], payload="p") is False
 
 
 async def test_instance_id_regenerates_per_process(monkeypatch):
@@ -245,13 +265,18 @@ async def test_listener_dispatches_by_channel(monkeypatch):
     stop_event = asyncio.Event()
     uid_chat, uid_notif = uuid4(), uuid4()
     _FakeListenerRedis.stop_event = stop_event
+    uid_chat2 = uuid4()
     _FakeListenerRedis.messages = [
         {
+            # 수신자 목록 envelope 1건 → 수신자별로 핸들러 호출
             "type": "message",
             "channel": "ch:chat",
-            "data": json.dumps({"target_user_id": str(uid_chat), "payload": "dm"}),
+            "data": json.dumps(
+                {"target_user_ids": [str(uid_chat), str(uid_chat2)], "payload": "dm"}
+            ),
         },
         {
+            # 구포맷 스칼라 target_user_id — 롤링 배포 창의 구버전 발행분도 수용해야 한다
             "type": "message",
             "channel": "ch:notif",
             "data": json.dumps({"target_user_id": str(uid_notif), "payload": "notif"}),
@@ -263,7 +288,7 @@ async def test_listener_dispatches_by_channel(monkeypatch):
             "data": json.dumps(
                 {
                     "origin": pubsub_mod._instance_id(),
-                    "target_user_id": str(uid_chat),
+                    "target_user_ids": [str(uid_chat)],
                     "payload": "self-dup",
                 }
             ),
@@ -286,7 +311,7 @@ async def test_listener_dispatches_by_channel(monkeypatch):
         handlers={"ch:chat": chat_handler, "ch:notif": notif_handler},
         stop_event=stop_event,
     )
-    assert received["chat"] == [(uid_chat, "dm")]
+    assert received["chat"] == [(uid_chat, "dm"), (uid_chat2, "dm")]
     assert received["notif"] == [(uid_notif, "notif")]
     assert _FakeListenerRedis.last is not None
     assert _FakeListenerRedis.last.pubsub_obj.closed  # teardown 보장

@@ -4,7 +4,6 @@
 - **관련 코드**:
   `app/api/v1/chat/ws.py`(WebSocket `/ws/chat`),
   `app/domain/chat/manager.py`(워커-로컬 `ConnectionManager`),
-  `app/domain/chat/pubsub.py`(chat DM 채널·publish),
   `app/domain/chat/service.py`(`send_dm_from_ws`·`_fanout_dm`),
   `app/domain/notifications/router.py`(SSE `/notifications/stream`),
   `app/domain/notifications/service.py`(`publish_after_commit`·`sse_subscribe`),
@@ -38,8 +37,11 @@
      유휴 연결 유지.
 
 2. **멀티 인스턴스 fanout = Redis Pub/Sub, 채팅·알림 공용 패턴**
-   - **단일 채널 + envelope `{origin, target_user_id, payload}`** — 채팅
+   - **단일 채널 + envelope `{origin, target_user_ids, payload}`** — 채팅
      `puppytalk:channel:chat:dm`, 알림 `puppytalk:channel:notif:sse`(네임스페이스만 분리).
+     같은 wire를 받는 수신자들(DM의 peer·sender)은 **목록으로 envelope 1건**에 담는다 —
+     건별 발행은 발행 RTT와 전 인스턴스 파싱을 수신자 수만큼 증폭한다. 파서는 구포맷
+     스칼라 `target_user_id`도 수용한다(롤링 배포 창, at-most-once 세맨틱 안).
    - **로컬 우선 전달**: 발행자는 같은 인스턴스 수신자에게 **로컬 매니저로 먼저 직접
      전달한 뒤** publish한다. publish 성공은 "Redis에 넘김"일 뿐 로컬 도달을 보장하지
      않기 때문(소비는 별도 리스너 연결 몫 — 리스너 재연결 창에서는 성공한 publish도
@@ -47,7 +49,7 @@
      preload-then-fork에서도 워커별 고유)이 자기 것이면 건너뛰어 중복을 막는다.
      부수 효과로 로컬 수신 지연에서 Redis 왕복이 빠진다.
    - **인스턴스당 전용 Redis 연결 1개**가 두 채널을 함께 구독(`run_user_fanout_listener`,
-     lifespan 기동)하고, envelope의 `target_user_id`를 **로컬 매니저**로 넘긴다 — 채팅은
+     lifespan 기동)하고, envelope의 `target_user_ids`를 **로컬 매니저**로 넘긴다 — 채팅은
      `ConnectionManager`(WS 소켓), 알림은 `SseFanoutManager`(SSE 스트림별 bounded 큐).
    - SSE 스트림(`sse_subscribe`)은 Redis를 만지지 않고 **로컬 큐 대기**만 한다. 초기 설계의
      "연결마다 유저별 채널 구독"은 SSE 동시 연결 수만큼 공유 풀(128) pubsub을 점유해, 풀 한도
@@ -94,7 +96,7 @@
 **치른 비용**
 - **at-most-once**: Pub/Sub는 fire-and-forget이라 수신자가 오프라인이거나 워커가 publish 순간
   재시작 중이면 그 실시간 이벤트는 유실된다 — DB가 진실이고 클라가 GET으로 재동기하므로 수용.
-- **단일 채널의 워커별 필터링**: 모든 워커가 모든 envelope를 수신해 `target_user_id`로
+- **단일 채널의 워커별 필터링**: 모든 워커가 모든 envelope를 수신해 `target_user_ids`로
   거른다(워커 수 × 메시지 수). 운영 봉투 내에서는 수용하되, 초고fanout 시 채널 샤딩이 탈출구다.
 - **느린 SSE 클라이언트의 이벤트 드롭**: 로컬 큐(100)가 차면 신규 이벤트를 버린다 —
   백프레셔로 전체 팬아웃을 지연시키는 것보다 낫고, 클라는 목록 API로 재동기한다.
