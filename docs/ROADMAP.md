@@ -97,7 +97,8 @@
   - [x] #23 SSE 팬아웃 통일 — `app/infra/pubsub.py` 공용 리스너(전용 연결 1개, chat·notif 채널
         동시 구독) + `SseFanoutManager` 로컬 큐. SSE의 공유 풀 pubsub 점유 제거, publish 실패 시
         로컬 폴백(chat 도달불가 폴백도 복원). ADR 0009 갱신
-  - [ ] #30 pubsub 재연결(백오프) — 공용 리스너 한 곳에 적용
+  - [x] #30 pubsub 재연결 — 공용 리스너에 지수 백오프(0.5s→30s, 구독 성공 시 리셋) 재연결.
+        수신 계층 예외도 죽은 연결 무한 재시도 대신 재연결로 탈출, stop_event는 백오프 중 즉시 종료
   - [ ] #32 WS 남용 방어(유저 단위 rate limit + UserBlock 검사)
 - [ ] **④ 미디어 정리**: #24 업로드 단일화 · #31 presign 한도·pending GC
 - [ ] **⑤ 마무리**: #25 조회수 경로 단일화 · #33 트렌딩 timeout · #34 소품 · #35 죽은 코드 · #26 ORM 배치 · #36 결정 문서화

@@ -18,6 +18,11 @@ log = logging.getLogger(__name__)
 
 _MESSAGE_POLL_TIMEOUT_SEC = 1.0
 
+# 리스너가 죽으면 해당 인스턴스의 크로스 인스턴스 실시간 전달이 프로세스 재시작까지
+# 전멸한다(멀티 인스턴스·99.9% 전제에서 미수용) — 연결 실패·수신 오류는 백오프 재연결.
+_RECONNECT_BACKOFF_INITIAL_SEC = 0.5
+_RECONNECT_BACKOFF_MAX_SEC = 30.0
+
 # (target_user_id, payload) → 로컬 전달. payload는 클라이언트에 그대로 보낼 텍스트.
 UserEnvelopeHandler = Callable[[UUID, str], Awaitable[None]]
 
@@ -59,16 +64,39 @@ def parse_user_envelope(raw: str) -> tuple[UUID, str] | None:
         return None
 
 
-async def run_user_fanout_listener(
+async def _dispatch_message(msg: Any, handlers: dict[str, UserEnvelopeHandler]) -> None:
+    if msg.get("type") != "message":
+        return
+    channel = msg.get("channel")
+    if isinstance(channel, bytes):
+        channel = channel.decode("utf-8")
+    handler = handlers.get(channel) if isinstance(channel, str) else None
+    if handler is None:
+        return
+    raw = msg.get("data")
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    if not isinstance(raw, str) or not raw:
+        return
+    parsed = parse_user_envelope(raw)
+    if parsed is None:
+        return
+    target_user_id, payload = parsed
+    try:
+        await handler(target_user_id, payload)
+    except Exception:
+        log.exception("local fanout 실패 channel=%s user=%s", channel, target_user_id)
+
+
+async def _listen_once(
     *,
     redis_url: str,
     handlers: dict[str, UserEnvelopeHandler],
     stop_event: asyncio.Event,
+    on_subscribed: Callable[[], None],
 ) -> None:
-    """백그라운드: 전용 Redis 연결 1개로 `handlers`의 모든 채널을 구독하고,
-    수신 envelope를 채널별 핸들러로 로컬 팬아웃한다."""
-    if not redis_url or not handlers:
-        return
+    """연결 1회분: 접속→구독→폴링. 연결·수신 계층 예외는 밖으로 던져 재연결을 유도하고,
+    핸들러·envelope 오류는 삼킨다(메시지 1건 문제로 연결을 버리지 않는다)."""
     client: Any = None
     pubsub: Any = None
     try:
@@ -77,46 +105,16 @@ async def run_user_fanout_listener(
         await client.ping()
         pubsub = client.pubsub()
         await pubsub.subscribe(*handlers)
+        on_subscribed()
         log.info("user fanout pubsub subscribed channels=%s", sorted(handlers))
         while not stop_event.is_set():
-            try:
-                msg = await pubsub.get_message(
-                    ignore_subscribe_messages=True,
-                    timeout=_MESSAGE_POLL_TIMEOUT_SEC,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                log.exception("pubsub get_message 실패, 잠시 대기 후 재시도")
-                await asyncio.sleep(0.5)
-                continue
+            msg = await pubsub.get_message(
+                ignore_subscribe_messages=True,
+                timeout=_MESSAGE_POLL_TIMEOUT_SEC,
+            )
             if msg is None:
                 continue
-            if msg.get("type") != "message":
-                continue
-            channel = msg.get("channel")
-            if isinstance(channel, bytes):
-                channel = channel.decode("utf-8")
-            handler = handlers.get(channel) if isinstance(channel, str) else None
-            if handler is None:
-                continue
-            raw = msg.get("data")
-            if isinstance(raw, bytes):
-                raw = raw.decode("utf-8")
-            if not isinstance(raw, str) or not raw:
-                continue
-            parsed = parse_user_envelope(raw)
-            if parsed is None:
-                continue
-            target_user_id, payload = parsed
-            try:
-                await handler(target_user_id, payload)
-            except Exception:
-                log.exception("local fanout 실패 channel=%s user=%s", channel, target_user_id)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        log.exception("pubsub listener 종료 예외")
+            await _dispatch_message(msg, handlers)
     finally:
         if pubsub is not None:
             try:
@@ -132,3 +130,41 @@ async def run_user_fanout_listener(
                 await client.aclose()
             except Exception:
                 log.exception("pubsub redis aclose 실패")
+
+
+async def run_user_fanout_listener(
+    *,
+    redis_url: str,
+    handlers: dict[str, UserEnvelopeHandler],
+    stop_event: asyncio.Event,
+) -> None:
+    """백그라운드: 전용 Redis 연결 1개로 `handlers`의 모든 채널을 구독하고,
+    수신 envelope를 채널별 핸들러로 로컬 팬아웃한다. 연결이 끊기면 백오프 재연결."""
+    if not redis_url or not handlers:
+        return
+    backoff = _RECONNECT_BACKOFF_INITIAL_SEC
+
+    def _reset_backoff() -> None:
+        nonlocal backoff
+        backoff = _RECONNECT_BACKOFF_INITIAL_SEC
+
+    while not stop_event.is_set():
+        try:
+            await _listen_once(
+                redis_url=redis_url,
+                handlers=handlers,
+                stop_event=stop_event,
+                on_subscribed=_reset_backoff,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("pubsub 리스너 연결 유실, %.1fs 후 재연결", backoff)
+        if stop_event.is_set():
+            break
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=backoff)
+            break
+        except TimeoutError:
+            pass
+        backoff = min(backoff * 2, _RECONNECT_BACKOFF_MAX_SEC)
