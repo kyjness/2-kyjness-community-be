@@ -17,8 +17,18 @@ from app.domain.notifications.model import Notification, NotificationsModel
 from app.domain.notifications.schema import NotificationItem
 from app.domain.notifications.stream import NOTIF_SSE_FANOUT_CHANNEL, notification_sse_manager
 from app.infra.pubsub import publish_user_envelope
+from app.infra.sns import already_delivered, mark_delivered, publish_sns
 
 log = logging.getLogger(__name__)
+
+# fire-and-forget SNS 태스크의 강참조 보관 — 이벤트 루프는 태스크를 약참조하므로
+# 참조를 안 잡아두면 완료 전 GC로 조용히 사라질 수 있다.
+_sns_inline_tasks: set[asyncio.Task[None]] = set()
+
+
+def _sns_idempotency_key(notification_id: UUID) -> str:
+    """결정적 멱등키 — Celery enqueue와 인라인 폴백이 같은 키를 써서 이중 배송 창을 닫는다."""
+    return f"sns:{uuid_to_base62(notification_id)}"
 
 
 class NotificationService:
@@ -78,16 +88,10 @@ class NotificationService:
             "message": NotificationService._sns_summary_for_kind(kind),
         }
 
-    @staticmethod
-    def _sns_publish_sync(topic_arn: str, message_json: str, region: str) -> None:
-        import boto3
-
-        client = boto3.client("sns", region_name=region)
-        client.publish(TopicArn=topic_arn, Message=message_json)
-
     @classmethod
     async def _dispatch_sns_publish(
         cls,
+        redis: Redis | None,
         *,
         recipient_user_id: UUID,
         notification_id: UUID,
@@ -112,7 +116,7 @@ class NotificationService:
                     cast(Any, deliver_notification_sns).delay,
                     notification_id=uuid_to_base62(notification_id),
                     user_id=uuid_to_base62(recipient_user_id),
-                    idempotency_key=f"sns:{uuid_to_base62(notification_id)}",
+                    idempotency_key=_sns_idempotency_key(notification_id),
                 )
                 return
             except Exception:
@@ -121,6 +125,7 @@ class NotificationService:
                     notification_id,
                 )
         cls._schedule_sns_publish(
+            redis,
             recipient_user_id=recipient_user_id,
             notification_id=notification_id,
             kind=kind,
@@ -132,6 +137,7 @@ class NotificationService:
     @classmethod
     def _schedule_sns_publish(
         cls,
+        redis: Redis | None,
         *,
         recipient_user_id: UUID,
         notification_id: UUID,
@@ -140,15 +146,14 @@ class NotificationService:
         post_id: UUID | None,
         comment_id: UUID | None,
     ) -> None:
-        if not settings.SNS_TOPIC_ARN:
-            return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
 
-        async def _run() -> None:
-            await cls._publish_sns_task(
+        task = loop.create_task(
+            cls._publish_sns_task(
+                redis,
                 recipient_user_id=recipient_user_id,
                 notification_id=notification_id,
                 kind=kind,
@@ -156,12 +161,14 @@ class NotificationService:
                 post_id=post_id,
                 comment_id=comment_id,
             )
-
-        loop.create_task(_run())
+        )
+        _sns_inline_tasks.add(task)
+        task.add_done_callback(_sns_inline_tasks.discard)
 
     @classmethod
     async def _publish_sns_task(
         cls,
+        redis: Redis | None,
         *,
         recipient_user_id: UUID,
         notification_id: UUID,
@@ -171,7 +178,6 @@ class NotificationService:
         comment_id: UUID | None,
     ) -> None:
         topic = settings.SNS_TOPIC_ARN
-        region = settings.AWS_REGION or "ap-northeast-2"
         payload = cls.build_sns_payload(
             recipient_user_id=recipient_user_id,
             notification_id=notification_id,
@@ -182,7 +188,13 @@ class NotificationService:
         )
         message_json = json.dumps(payload, ensure_ascii=False)
         try:
-            await asyncio.to_thread(cls._sns_publish_sync, topic, message_json, region)
+            # 워커 잡과 같은 멱등 스토어·키 — 브로커 ack 유실로 enqueue와 인라인 폴백이 둘 다
+            # 실행돼도(교차 경로) 한쪽만 배송된다. publish 성공 후에만 마킹(워커와 동일 순서).
+            idemp_key = _sns_idempotency_key(notification_id)
+            if await already_delivered(redis, idemp_key):
+                return
+            await publish_sns(topic, message_json)
+            await mark_delivered(redis, idemp_key, settings.CELERY_TASK_IDEMPOTENCY_TTL_SECONDS)
         except Exception:
             log.exception(
                 "알림 SNS publish 실패(인앱·DB는 유지). recipient=%s topic=%s",
@@ -227,6 +239,7 @@ class NotificationService:
         )
 
         await cls._dispatch_sns_publish(
+            redis,
             recipient_user_id=recipient_user_id,
             notification_id=notification_id,
             kind=kind,
