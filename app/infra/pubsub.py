@@ -12,6 +12,8 @@
 import asyncio
 import json
 import logging
+import os
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -26,9 +28,22 @@ _MESSAGE_POLL_TIMEOUT_SEC = 1.0
 # 전멸한다(멀티 인스턴스·99.9% 전제에서 미수용) — 연결 실패·수신 오류는 백오프 재연결.
 _RECONNECT_BACKOFF_INITIAL_SEC = 0.5
 _RECONNECT_BACKOFF_MAX_SEC = 30.0
+# 백오프 리셋 기준: 연결이 이 시간 이상 생존해야 '건강'으로 본다(아래 _listen_once 참조).
+_HEALTHY_UPTIME_SEC = 5.0
 
 # envelope origin — 리스너가 자기 발행분을 식별해 건너뛴다.
-_INSTANCE_ID = str(uuid4())
+# import 시점 상수로 두면 preload-then-fork(gunicorn --preload)에서 전 워커가 같은 값을
+# 물려받아 형제 워커의 envelope까지 '자기 것'으로 오인·유실한다 — pid 기준 지연 생성.
+_instance_id_state: dict[str, Any] = {"pid": None, "id": ""}
+
+
+def _instance_id() -> str:
+    pid = os.getpid()
+    if _instance_id_state["pid"] != pid:
+        _instance_id_state["pid"] = pid
+        _instance_id_state["id"] = str(uuid4())
+    return _instance_id_state["id"]
+
 
 # (target_user_id, payload) → 로컬 전달. payload는 클라이언트에 그대로 보낼 텍스트.
 UserEnvelopeHandler = Callable[[UUID, str], Awaitable[None]]
@@ -47,7 +62,7 @@ async def publish_user_envelope(
     if redis is None or not payload:
         return False
     env = json.dumps(
-        {"origin": _INSTANCE_ID, "target_user_id": str(target_user_id), "payload": payload},
+        {"origin": _instance_id(), "target_user_id": str(target_user_id), "payload": payload},
         ensure_ascii=False,
     )
     try:
@@ -89,7 +104,7 @@ async def _dispatch_message(msg: Any, handlers: dict[str, UserEnvelopeHandler]) 
     if parsed is None:
         return
     target_user_id, payload, origin = parsed
-    if origin == _INSTANCE_ID:
+    if origin == _instance_id():
         return  # 자기 발행분 — 로컬 수신자는 발행 시점에 이미 직접 전달됨
     try:
         await handler(target_user_id, payload)
@@ -107,8 +122,9 @@ async def _listen_once(
     """연결 1회분: 접속→구독→폴링. 연결·수신 계층 예외는 밖으로 던져 재연결을 유도하고,
     핸들러·envelope 오류는 삼킨다(메시지 1건 문제로 연결을 버리지 않는다).
 
-    `on_healthy`는 구독 직후가 아니라 **첫 폴이 성공한 뒤** 호출한다 — 구독만 되고 바로
-    죽는 플래핑 연결이 백오프를 계속 초기값으로 되돌려 0.5s 고정 재연결 루프에 빠지는 것 방지.
+    `on_healthy`는 구독 직후가 아니라 **연결이 _HEALTHY_UPTIME_SEC 이상 생존한 뒤**
+    호출한다 — 구독(또는 첫 폴)만 통과하고 수 초 안에 죽는 플래핑 연결이 백오프를
+    계속 초기값으로 되돌려 0.5s 고정 재연결 루프에 빠지는 것 방지.
     """
     client: Any = None
     pubsub: Any = None
@@ -119,13 +135,14 @@ async def _listen_once(
         pubsub = client.pubsub()
         await pubsub.subscribe(*handlers)
         log.info("user fanout pubsub subscribed channels=%s", sorted(handlers))
+        connected_at = time.monotonic()
         healthy_signaled = False
         while not stop_event.is_set():
             msg = await pubsub.get_message(
                 ignore_subscribe_messages=True,
                 timeout=_MESSAGE_POLL_TIMEOUT_SEC,
             )
-            if not healthy_signaled:
+            if not healthy_signaled and time.monotonic() - connected_at >= _HEALTHY_UPTIME_SEC:
                 on_healthy()
                 healthy_signaled = True
             if msg is None:

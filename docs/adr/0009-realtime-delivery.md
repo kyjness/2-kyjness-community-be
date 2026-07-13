@@ -38,8 +38,14 @@
      유휴 연결 유지.
 
 2. **멀티 인스턴스 fanout = Redis Pub/Sub, 채팅·알림 공용 패턴**
-   - **단일 채널 + envelope `{target_user_id, payload}`** — 채팅 `puppytalk:channel:chat:dm`,
-     알림 `puppytalk:channel:notif:sse`(네임스페이스만 분리).
+   - **단일 채널 + envelope `{origin, target_user_id, payload}`** — 채팅
+     `puppytalk:channel:chat:dm`, 알림 `puppytalk:channel:notif:sse`(네임스페이스만 분리).
+   - **로컬 우선 전달**: 발행자는 같은 인스턴스 수신자에게 **로컬 매니저로 먼저 직접
+     전달한 뒤** publish한다. publish 성공은 "Redis에 넘김"일 뿐 로컬 도달을 보장하지
+     않기 때문(소비는 별도 리스너 연결 몫 — 리스너 재연결 창에서는 성공한 publish도
+     로컬에 도달하지 않는다). 리스너는 envelope `origin`(프로세스별 지연 생성 ID,
+     preload-then-fork에서도 워커별 고유)이 자기 것이면 건너뛰어 중복을 막는다.
+     부수 효과로 로컬 수신 지연에서 Redis 왕복이 빠진다.
    - **인스턴스당 전용 Redis 연결 1개**가 두 채널을 함께 구독(`run_user_fanout_listener`,
      lifespan 기동)하고, envelope의 `target_user_id`를 **로컬 매니저**로 넘긴다 — 채팅은
      `ConnectionManager`(WS 소켓), 알림은 `SseFanoutManager`(SSE 스트림별 bounded 큐).
@@ -50,11 +56,22 @@
      구독 루프는 오래 블록되므로 풀을 점유하면 안 된다.
 
 3. **fail-open 복원력** ([ADR 0005](0005-resilience-no-circuit-breaker.md) 정합)
-   - Redis가 없거나(`None`) publish/subscribe가 실패해도 **DB·인앱 데이터는 유지**된다.
-     publish 헬퍼는 예외를 삼키고 **성공 여부를 반환**하며, 실패 시 채팅·알림 모두 **같은
-     인스턴스의 수신자에게는 로컬 매니저로 직접 전달**한다(다른 인스턴스 수신자는
-     `GET /notifications`·재접속으로 동기화). 실시간 전달 실패가 **쓰기 트랜잭션을 절대
-     되돌리지 않는다**. 알림 SSE 엔드포인트도 Redis 부재 시 503이 아니라 스트림을 유지한다.
+   - Redis가 없거나(`None`) publish/subscribe가 실패해도 **DB·인앱 데이터·로컬 전달은
+     유지**된다(로컬 우선 전달이 Redis에 의존하지 않으므로). publish 실패 시 유실되는
+     것은 **다른 인스턴스 수신자의 실시간 이벤트뿐**이며 `GET /notifications`·재접속으로
+     동기화한다. 실시간 전달 실패가 **쓰기 트랜잭션을 절대 되돌리지 않는다**.
+     알림 SSE 엔드포인트도 Redis 부재 시 503이 아니라 스트림을 유지한다.
+   - **리스너 백오프 재연결**: 접속 실패·수신 계층 예외 1회로 리스너가 죽으면 크로스
+     인스턴스 전달이 프로세스 재시작까지 전멸한다 — 0.5s→30s 지수 백오프로 재연결하고,
+     리셋은 구독 성공이 아니라 **연결 5s 생존 후**에만 한다(구독만 통과하고 곧 죽는
+     플래핑이 0.5s 고정 재연결 루프를 만드는 것 방지). 기동도 부팅 핑 성공(`app.state.redis`)에
+     게이트하지 않는다 — 배포 중 Redis 순단이 리스너를 영구 비활성화하면 안 된다.
+   - **매니저 send 타임아웃(5s)**: 공용 리스너가 로컬 전달을 직접 await하므로, 수신 버퍼가
+     찬 죽은 소켓 하나가 인스턴스의 실시간 전달 전체를 볼모로 잡을 수 있다(head-of-line).
+     타임아웃 초과 소켓은 등록 해제 후 **실제로 닫는다**(닫아야 클라이언트 재연결 로직이
+     뜬다). 트레이드오프: 5s 이상 정체된 "느리지만 살아 있는" 클라이언트도 끊긴다 — 수용
+     (재접속·GET 재동기 경로 존재). 큐 기반 소켓별 전달(정체 격리 + 순서 보장)은 현
+     운영 봉투에서 미정당 복잡도로 보류(backlog #37).
 
 4. **오프라인 배송(SNS) 오프로드 = Celery**
    - 실시간 인앱(pub/sub)은 인라인으로 두고, **재시도·백오프가 필요한 외부 I/O인 SNS publish만**

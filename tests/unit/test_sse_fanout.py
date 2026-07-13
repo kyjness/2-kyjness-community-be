@@ -115,7 +115,7 @@ async def test_publish_after_commit_sends_single_channel_envelope_with_origin():
     assert channel == NOTIF_SSE_FANOUT_CHANNEL
     env = json.loads(raw)
     assert env["target_user_id"] == str(uid)
-    assert env["origin"] == pubsub_mod._INSTANCE_ID  # 리스너의 자기 발행분 스킵 근거
+    assert env["origin"] == pubsub_mod._instance_id()  # 리스너의 자기 발행분 스킵 근거
     assert json.loads(env["payload"])["kind"] == "LIKE_POST"
 
 
@@ -182,6 +182,15 @@ async def test_chat_fanout_sends_locally_regardless_of_publish_result(monkeypatc
 
 async def test_publish_user_envelope_returns_false_without_redis():
     assert await publish_user_envelope(None, "ch", target_user_id=uuid4(), payload="p") is False
+
+
+async def test_instance_id_regenerates_per_process(monkeypatch):
+    """preload-then-fork(gunicorn --preload)에서 전 워커가 같은 origin을 물려받으면
+    형제 워커 envelope가 전부 자기 발행분으로 오인·유실된다 — pid가 바뀌면 재생성."""
+    first = pubsub_mod._instance_id()
+    assert pubsub_mod._instance_id() == first  # 같은 프로세스에서는 안정
+    monkeypatch.setattr(pubsub_mod.os, "getpid", lambda: -12345)  # fork된 자식 흉내
+    assert pubsub_mod._instance_id() != first
 
 
 # --- 공용 리스너 채널 디스패치 ---
@@ -253,7 +262,7 @@ async def test_listener_dispatches_by_channel(monkeypatch):
             "channel": "ch:chat",
             "data": json.dumps(
                 {
-                    "origin": pubsub_mod._INSTANCE_ID,
+                    "origin": pubsub_mod._instance_id(),
                     "target_user_id": str(uid_chat),
                     "payload": "self-dup",
                 }

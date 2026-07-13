@@ -17,7 +17,9 @@ async def publish_chat_dm(
     target_user_id: UUID,
     payload: str,
 ) -> bool:
-    """다른 워커/프로세스로 DM 페이로드 전달. False면 호출부가 로컬 전달로 폴백해야 한다."""
+    """다른 인스턴스로 DM envelope 전달. 같은 인스턴스 수신자는 호출 전에 로컬 매니저로
+    이미 직접 전달돼 있어야 한다(리스너가 origin으로 자기 발행분을 스킵). 반환값은
+    크로스 인스턴스 발행 성공 여부 — 실패 시 다른 인스턴스 수신자만 유실(at-most-once)."""
     return await publish_user_envelope(
         redis,
         CHAT_DM_FANOUT_CHANNEL,

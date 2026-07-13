@@ -16,7 +16,7 @@ from app.common.exceptions import (
     UserNotFoundException,
 )
 from app.core.config import settings
-from app.core.middleware.rate_limit import check_fixed_window
+from app.core.middleware.rate_limit import check_fixed_window, count_rejection
 from app.db import AsyncSessionLocal
 from app.domain.chat.manager import chat_connection_manager
 from app.domain.chat.payload import parse_incoming_message, validation_error_to_ws_error
@@ -28,9 +28,31 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
-# 억제 창 안에서도 계속 밀어붙이는 클라이언트는 끊는다(1008) — 한도 초과 스팸이
-# 프레임당 응답 생성으로 남는 것조차 막는 마지막 단계.
+# 한도 초과 후에도 계속 밀어붙이는 클라이언트는 끊는다(1008) — 한도 초과 스팸이
+# 프레임당 응답 생성·Redis 왕복으로 남는 것조차 막는 마지막 단계.
 _REJECT_CLOSE_THRESHOLD = 30
+
+
+class _RejectionGate:
+    """연결 단위 거부 상태. 거부되면 retry_after 동안 Redis 왕복 없이 로컬에서 즉시
+    거부하고(스팸의 공유 Redis 부하 증폭 방지), 억제 창을 피해서 페이싱하든 말든
+    **연속 거부 누계**가 임계에 닿으면 종료를 지시한다."""
+
+    def __init__(self) -> None:
+        self.blocked_until = 0.0
+        self.consecutive_rejections = 0
+
+    def suppressed(self, now: float) -> bool:
+        return now < self.blocked_until
+
+    def register_rejection(self, now: float, retry_after: int) -> bool:
+        """거부 1건 기록. True면 연결을 끊어야 한다."""
+        self.blocked_until = max(self.blocked_until, now + max(retry_after, 1))
+        self.consecutive_rejections += 1
+        return self.consecutive_rejections >= _REJECT_CLOSE_THRESHOLD
+
+    def register_allowed(self) -> None:
+        self.consecutive_rejections = 0
 
 
 def _redis_from_websocket(websocket: WebSocket) -> Redis | None:
@@ -39,9 +61,18 @@ def _redis_from_websocket(websocket: WebSocket) -> Redis | None:
     return raw if isinstance(raw, Redis) else None
 
 
+async def _safe_send_text(websocket: WebSocket, text: str) -> None:
+    """끊긴/끊기는 중인 소켓에 에러 프레임을 보내다 나는 예외(RuntimeError 등)는
+    WebSocketDisconnect가 아니라서 루프 밖으로 새면 ASGI 예외 소음이 된다 — 삼킨다."""
+    try:
+        await websocket.send_text(text)
+    except Exception as e:
+        log.debug("chat ws error-frame send skip: %s", e)
+
+
 async def _send_ws_error(websocket: WebSocket, code: str, message: str) -> None:
     err = ChatWsErrorPayload(code=code, message=message).model_dump(mode="json", by_alias=True)
-    await websocket.send_text(json.dumps(err, ensure_ascii=False))
+    await _safe_send_text(websocket, json.dumps(err, ensure_ascii=False))
 
 
 @router.websocket("/ws/chat")
@@ -63,10 +94,7 @@ async def chat_dm_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     await chat_connection_manager.connect(user_id, websocket)
     redis = _redis_from_websocket(websocket)
-    # 유저 단위 한도 상태: 거부되면 retry_after 동안 Redis 왕복 없이 로컬에서 즉시 거부
-    # (한도 초과 스팸이 프레임당 공유 Redis 부하로 증폭되는 것 방지).
-    blocked_until = 0.0
-    consecutive_rejections = 0
+    gate = _RejectionGate()
     try:
         while True:
             raw = await websocket.receive_text()
@@ -74,15 +102,16 @@ async def chat_dm_websocket(websocket: WebSocket) -> None:
             # 가능하므로 유저 단위 한도를 수신 루프에서 직접 검사한다. parse보다 먼저:
             # 잘못된 프레임 스팸(검증 비용+에러 응답 루프)도 같은 한도에 잡혀야 한다.
             now = time.monotonic()
-            if now < blocked_until:
-                consecutive_rejections += 1
-                if consecutive_rejections >= _REJECT_CLOSE_THRESHOLD:
+            if gate.suppressed(now):
+                # 억제 창 안: Redis 왕복 없이 거부하되, 계측은 동일하게 남긴다.
+                count_rejection("chat")
+                if gate.register_rejection(now, int(gate.blocked_until - now)):
                     await websocket.close(code=1008, reason="Rate limit exceeded")
                     return
                 await _send_ws_error(
                     websocket,
                     "rate_limited",
-                    f"메시지 전송이 너무 잦습니다. {int(blocked_until - now) + 1}초 후 다시 시도하세요.",
+                    f"메시지 전송이 너무 잦습니다. {int(gate.blocked_until - now) + 1}초 후 다시 시도하세요.",
                 )
                 continue
             allowed, retry_after = await check_fixed_window(
@@ -92,20 +121,22 @@ async def chat_dm_websocket(websocket: WebSocket) -> None:
                 max_count=settings.CHAT_WS_RATE_LIMIT_MAX_MESSAGES,
             )
             if not allowed:
-                blocked_until = now + max(retry_after, 1)
-                consecutive_rejections += 1
+                # 억제 창을 피해 페이싱해도 연속 거부 누계로 같은 임계에 닿는다.
+                if gate.register_rejection(now, retry_after):
+                    await websocket.close(code=1008, reason="Rate limit exceeded")
+                    return
                 await _send_ws_error(
                     websocket,
                     "rate_limited",
                     f"메시지 전송이 너무 잦습니다. {retry_after}초 후 다시 시도하세요.",
                 )
                 continue
-            consecutive_rejections = 0
+            gate.register_allowed()
             try:
                 parsed = parse_incoming_message(raw)
             except ValidationError as e:
                 payload = validation_error_to_ws_error(e)
-                await websocket.send_text(json.dumps(payload, ensure_ascii=False))
+                await _safe_send_text(websocket, json.dumps(payload, ensure_ascii=False))
                 continue
             try:
                 async with AsyncSessionLocal() as db:

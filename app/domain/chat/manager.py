@@ -46,13 +46,23 @@ class ConnectionManager:
                     await asyncio.wait_for(ws.send_json(message), timeout=_SEND_TIMEOUT_SEC)
                 else:
                     await asyncio.wait_for(ws.send_text(message), timeout=_SEND_TIMEOUT_SEC)
-            # TimeoutError ⊂ OSError — 타임아웃 소켓도 아래에서 disconnect 처리된다.
+            # TimeoutError ⊂ OSError — 타임아웃 소켓도 아래에서 실제로 닫는다.
             except (WebSocketDisconnect, RuntimeError, OSError) as e:
                 log.debug("chat ws send skip disconnect user=%s: %s", user_id, e)
-                await self.disconnect(user_id, ws)
+                await self._drop(user_id, ws)
             except Exception:
                 log.exception("chat ws send error user=%s", user_id)
-                await self.disconnect(user_id, ws)
+                await self._drop(user_id, ws)
+
+    async def _drop(self, user_id: UUID, ws: WebSocket) -> None:
+        """등록 해제 + 연결 종료. 등록만 지우면 클라이언트는 살아 있는 줄 아는 소켓으로
+        계속 보내면서 수신만 조용히 잃는다(재연결 로직도 안 뜬다) — 반드시 닫아서
+        클라이언트 측 재연결을 유도한다. 닫기 자체도 정체될 수 있어 짧게 자른다."""
+        await self.disconnect(user_id, ws)
+        try:
+            await asyncio.wait_for(ws.close(code=1011), timeout=1.0)
+        except Exception as e:
+            log.debug("chat ws close skip user=%s: %s", user_id, e)
 
 
 chat_connection_manager = ConnectionManager()

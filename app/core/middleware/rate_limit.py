@@ -147,9 +147,15 @@ async def check_fixed_window(
     elif not fail_open:
         allowed, retry_after = _check_memory_fixed_window(key, window_sec, max_count)
     if not allowed:
-        # HTTP·WS 공통 계측 — 거부는 모두 이 한 곳에서 센다.
-        RATE_LIMIT_REJECTIONS.labels(limit=key.split(":", 1)[0]).inc()
+        count_rejection(key.split(":", 1)[0])
     return allowed, retry_after
+
+
+def count_rejection(limit: str) -> None:
+    """거부 계측 단일 창구. check_fixed_window를 거치지 않는 거부(WS 억제 창의 로컬
+    즉시 거부 등)도 반드시 이 함수로 센다 — 아니면 스팸 급증 구간에서 메트릭이
+    거부의 대부분을 놓쳐 대시보드가 '한도가 거의 안 걸린다'고 오판하게 된다."""
+    RATE_LIMIT_REJECTIONS.labels(limit=limit).inc()
 
 
 async def _send_429(send: Send, scope: Scope, code: ApiCode, retry_after_seconds: int) -> None:

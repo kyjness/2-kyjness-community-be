@@ -2,7 +2,7 @@
 
 - **상태**: 채택됨 (Accepted)
 - **관련 코드**: `app/core/middleware/rate_limit.py`(`RateLimitMiddleware`,
-  `_check_redis_fixed_window`, `_check_memory_fixed_window`)
+  `check_fixed_window`, `count_rejection`), `app/api/v1/chat/ws.py`(WS 유저 단위 한도)
 
 ## 맥락 (Context)
 
@@ -20,6 +20,13 @@ Rate limit이 필요하다: 로그인 brute-force, 회원가입 이미지 업로
 2. **Fixed-window** — IP+경로 기준 고정 창(로그인/업로드/전역 각기 다른 한도).
 3. **스마트 fail-open** — Redis 장애 시: **중요 경로(로그인·회원가입 업로드)만** 인메모리 fixed-window로
    폴백(OOM 방지 eviction 포함), 나머지 경로는 **통과**(가용성 우선).
+4. **WS DM = 네 번째 한도 클래스**(2차 감사 #32) — WS는 HTTP 미들웨어를 타지 않으므로
+   (`scope["type"] != "http"` 통과) 수신 루프에서 **유저 단위**(`chat:ws:{user_id}`) 한도를
+   직접 검사한다. 정책은 미들웨어와 같은 단일 진입점 `check_fixed_window`를 공유하되,
+   남용 방어 경로라 fail-open이 아니라 **메모리 폴백**(로그인·업로드와 동급). 추가 방어:
+   거부 후 retry_after 동안 Redis 왕복 없이 로컬 즉시 거부(스팸의 공유 Redis 부하 증폭
+   차단), 연속 거부 누계 30회면 1008 종료. 거부 계측은 억제 창 포함 전부
+   `count_rejection`으로 `RATE_LIMIT_REJECTIONS{limit="chat"}`에 잡힌다.
 
 ## 트레이드오프 (Consequences)
 

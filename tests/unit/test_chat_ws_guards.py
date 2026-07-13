@@ -173,13 +173,46 @@ async def test_send_personal_message_disconnects_stalled_socket(monkeypatch):
     uid = uuid.uuid4()
 
     class _StalledWs:
+        def __init__(self) -> None:
+            self.closed_with: int | None = None
+
         async def send_text(self, message: str) -> None:
             await asyncio.sleep(1)
 
         async def send_json(self, message) -> None:
             await asyncio.sleep(1)
 
-    ws = cast(Any, _StalledWs())
+        async def close(self, code: int = 1000) -> None:
+            self.closed_with = code
+
+    stalled = _StalledWs()
+    ws = cast(Any, stalled)
     await manager.connect(uid, ws)
-    await manager.send_personal_message(uid, "x")  # 예외 없이 타임아웃 → 소켓 해제
+    await manager.send_personal_message(uid, "x")  # 예외 없이 타임아웃 → 등록 해제 + 종료
     assert manager._by_user == {}
+    # 등록만 지우면 클라이언트가 수신만 조용히 잃는다 — 실제로 닫혀야 재연결이 뜬다
+    assert stalled.closed_with == 1011
+
+
+# --- WS 거부 게이트 (억제 창 + 연속 거부 종료) ---
+
+
+def test_rejection_gate_suppresses_and_escalates():
+    from app.api.v1.chat import ws as ws_mod
+
+    gate = ws_mod._RejectionGate()
+    assert not gate.suppressed(now=100.0)
+
+    # 거부 → 억제 창 형성
+    assert gate.register_rejection(now=100.0, retry_after=10) is False
+    assert gate.suppressed(now=105.0)
+    assert not gate.suppressed(now=111.0)
+
+    # 억제 창을 피해 페이싱해도 연속 거부 누계가 임계에 닿으면 종료 지시
+    for _ in range(ws_mod._REJECT_CLOSE_THRESHOLD - 2):
+        assert gate.register_rejection(now=200.0, retry_after=1) is False
+    assert gate.register_rejection(now=300.0, retry_after=1) is True
+
+    # 허용 프레임이 나오면 누계 리셋
+    gate.register_allowed()
+    assert gate.register_rejection(now=400.0, retry_after=1) is False
