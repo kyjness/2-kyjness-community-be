@@ -88,7 +88,8 @@ async def record_view(
     request: Request,
     post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     client_id: str = Depends(get_client_identifier),
-    db: AsyncSession = Depends(get_master_db),
+    db: AsyncSession = Depends(get_slave_db),
+    writer_db: AsyncSession = Depends(get_master_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
     viewer_key = f"u:{current_user.id}" if current_user else f"ip:{client_id}"
@@ -99,6 +100,7 @@ async def record_view(
         db=db,
         current_user_id=current_user.id if current_user else None,
         redis_client=redis,
+        writer_db=writer_db,
     )
     return api_response(request, code=ApiCode.OK, data=None)
 

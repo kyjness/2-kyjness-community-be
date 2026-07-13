@@ -456,6 +456,10 @@ ADR 0010이 "S3 단일 경로"를 선언했지만, direct 업로드(`/media/imag
 
 **수정 방향**: `post_is_visible`(EXISTS 1쿼리) + slave 세션으로 교체.
 
+> **수정 완료**: 가시성 확인을 `post_is_visible`(EXISTS)로 교체하고 라우터를 reader+writer
+> 이중 세션(get_post_detail과 동형)으로 전환 — 확인은 reader, Redis 버퍼 실패 폴백 increment만
+> writer. 커버리지 0이던 경로에 단위 테스트 3종(풀 로드 금지·불가시 404·폴백은 writer로) 추가.
+
 ---
 
 ### 30. chat pubsub 리스너 재연결 부재 — P1

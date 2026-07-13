@@ -180,18 +180,25 @@ class PostService:
         db: AsyncSession,
         current_user_id: UUID | None = None,
         redis_client: Any | None = None,
+        *,
+        writer_db: AsyncSession,
     ) -> None:
+        """조회수 기록 핫패스. 가시성은 EXISTS 1쿼리로 reader에서 확인한다 —
+        상세 eager-load(작성자·대표견·이미지·해시태그)를 여기서 끌어오면 초당 수백~수천
+        조회 전제에서 가장 무거운 읽기가 가장 뜨거운 쓰기 경로에 얹힌다.
+        writer는 Redis 버퍼 실패 시 직접 increment 폴백에만 쓴다(get_post_detail과 동형)."""
         async with db.begin():
-            post = await PostsModel.get_post_by_id(post_id, db=db, current_user_id=current_user_id)
-            if not post:
+            if not await PostsModel.post_is_visible(
+                post_id, db=db, current_user_id=current_user_id
+            ):
                 raise PostNotFoundException()
         if not await _consume_view_if_new_redis(post_id, viewer_key, redis_client):
             return
         if await _try_view_increment_in_buffer(post_id, redis_client):
             return
-        async with db.begin():
+        async with writer_db.begin():
             try:
-                await PostsModel.increment_view_count(post_id, db=db)
+                await PostsModel.increment_view_count(post_id, db=writer_db)
             except StaleDataError as e:
                 raise ConcurrentUpdateException() from e
 
