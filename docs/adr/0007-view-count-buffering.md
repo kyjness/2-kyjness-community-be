@@ -26,6 +26,10 @@
 
 1. **뷰어 dedup (SET NX)** — `view:post:{post_id}:viewer:{viewer_key}`에 `SET NX EX=TTL`.
    실패(이미 존재)면 증가하지 않는다. `viewer_key`는 로그인 시 `u:{user_id}`, 아니면 `ip:{client}`.
+   TTL은 `VIEW_CACHE_TTL_SECONDS`(기본 3600)이고, **0 이하 = dedup 끔**(같은 viewer도 매 조회
+   집계)이 유일한 예외 모드다 — 로컬/데모에서 증가를 즉시 확인하는 용도이며, 운영에서 켜면
+   새로고침 루프만으로 조회수·트렌딩 점수가 인플레이션되므로 배포 템플릿(.env.example)은
+   이 값을 설정하지 않는다(기본 3600).
 2. **버퍼 누적 (HINCRBY)** — 새 조회는 `HINCRBY views:{v}:buffer {post_id} 1`로 Redis 해시에
    쌓기만 한다. **읽기 경로에서 DB write가 사라진다.**
 3. **주기 flush (asyncio 루프 + 분산락)** — 각 인스턴스가 lifespan에서 `_view_buffer_flush_loop`를

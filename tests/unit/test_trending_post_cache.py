@@ -120,7 +120,7 @@ def test_lock_wait_timeout_falls_back_to_loader(monkeypatch):
 def test_redis_none_uses_loader(monkeypatch):
     items = [_TrendingCacheItem(id=uuid4(), title="폴백", author_id=None)]
 
-    async def _fake_pool(cls, *, db, window_hours, category_id):
+    async def _fake_pool(cls, *, db, category_id):
         return items
 
     monkeypatch.setattr(TrendingPostService, "_compute_pool", classmethod(_fake_pool))

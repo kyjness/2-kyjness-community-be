@@ -6,7 +6,6 @@ rate limit 미들웨어는 라우팅 전에 경로 문자열로 전용 한도를
 """
 
 from app.common.paths import (
-    HEALTH_PATH,
     LOGIN_PATH,
     SIGNUP_CONFIRM_PATH,
     SIGNUP_PRESIGN_PATH,
@@ -16,7 +15,7 @@ from app.main import app
 
 def test_middleware_path_constants_match_registered_routes():
     registered = {getattr(r, "path", None) for r in app.routes}
-    for const in (LOGIN_PATH, SIGNUP_PRESIGN_PATH, SIGNUP_CONFIRM_PATH, HEALTH_PATH):
+    for const in (LOGIN_PATH, SIGNUP_PRESIGN_PATH, SIGNUP_CONFIRM_PATH):
         assert const in registered, f"미들웨어 경로 상수가 등록 라우트에 없음: {const}"
 
 

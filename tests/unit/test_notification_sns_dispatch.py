@@ -5,6 +5,7 @@ CELERY_ENABLED=true → 태스크 enqueue(결정적 멱등키) · enqueue 실패
 워커 잡·인라인 폴백 모두 publish 성공 후에만 같은 멱등 스토어에 마킹(교차 경로 이중 배송 차단).
 """
 
+import asyncio
 import uuid
 
 import pytest
@@ -172,7 +173,7 @@ async def test_job_marks_idempotent_only_after_publish_success(monkeypatch):
     _patch_job_db(monkeypatch, _FakeRow(nid, uid))
 
     published: list[str] = []
-    _patch_publish(monkeypatch, job, published)
+    _patch_publish(monkeypatch, sns_mod, published)
 
     out = await job.deliver_notification_sns_async(
         notification_id=str(nid), user_id=str(uid), idempotency_key="sns:test-key"
@@ -190,7 +191,7 @@ async def test_job_does_not_mark_idempotent_when_publish_fails(monkeypatch):
     _patch_job_db(monkeypatch, _FakeRow(nid, uid))
 
     published: list[str] = []
-    _patch_publish(monkeypatch, job, published, fail=True)
+    _patch_publish(monkeypatch, sns_mod, published, fail=True)
 
     with pytest.raises(ConnectionError):
         await job.deliver_notification_sns_async(
@@ -205,9 +206,10 @@ async def test_job_skips_when_already_delivered(monkeypatch):
     client = FakeRedis(preloaded={f"{sns_mod.DELIVERED_KEY_PREFIX}sns:test-key": "1"})
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
     monkeypatch.setattr(job, "_redis_client", client)
+    _patch_job_db(monkeypatch, _FakeRow(nid, uid))
 
     published: list[str] = []
-    _patch_publish(monkeypatch, job, published)
+    _patch_publish(monkeypatch, sns_mod, published)
 
     out = await job.deliver_notification_sns_async(
         notification_id=str(nid), user_id=str(uid), idempotency_key="sns:test-key"
@@ -239,7 +241,7 @@ async def test_inline_fallback_skips_when_worker_already_delivered(monkeypatch):
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
 
     published: list[str] = []
-    _patch_publish(monkeypatch, notif_service, published)
+    _patch_publish(monkeypatch, sns_mod, published)
 
     await _inline_publish(client, nid, recipient)
     assert published == []
@@ -252,8 +254,40 @@ async def test_inline_fallback_marks_same_store_after_publish(monkeypatch):
     monkeypatch.setattr(settings, "SNS_TOPIC_ARN", "arn:aws:sns:test:topic")
 
     published: list[str] = []
-    _patch_publish(monkeypatch, notif_service, published)
+    _patch_publish(monkeypatch, sns_mod, published)
 
     await _inline_publish(client, nid, recipient)
     assert len(published) == 1
     assert client.set_calls == [f"{sns_mod.DELIVERED_KEY_PREFIX}sns:{uuid_to_base62(nid)}"]
+
+
+# ---- 인라인 태스크 셧다운 드레인 ----
+
+
+async def test_drain_waits_for_inline_tasks():
+    """셧다운이 인라인 태스크를 드레인해야 publish~마킹 사이 끊김(이중 배송 창)이 없다."""
+    done = asyncio.Event()
+
+    async def _slow():
+        await asyncio.sleep(0.05)
+        done.set()
+
+    task = asyncio.get_running_loop().create_task(_slow())
+    notif_service._sns_inline_tasks.add(task)
+    task.add_done_callback(notif_service._sns_inline_tasks.discard)
+
+    await notif_service.drain_sns_inline_tasks(timeout_seconds=1.0)
+    assert done.is_set()
+
+
+async def test_drain_cancels_tasks_exceeding_timeout():
+    async def _hang():
+        await asyncio.sleep(60)
+
+    task = asyncio.get_running_loop().create_task(_hang())
+    notif_service._sns_inline_tasks.add(task)
+    task.add_done_callback(notif_service._sns_inline_tasks.discard)
+
+    await notif_service.drain_sns_inline_tasks(timeout_seconds=0.05)
+    with pytest.raises(asyncio.CancelledError):
+        await task

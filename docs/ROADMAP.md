@@ -148,7 +148,9 @@
         non-goal(바이트 검증 안 함 근거), 인덱스 2곳 0008 범위 교정. 이연: 비원자 promote
         동시성·트레일링 슬래시 이중 카운트(#34), 멱등 코어 단순화·경로 리터럴 드리프트·
         테스트 그림자 헬퍼(#35)
-- [ ] **⑤ 마무리** (구현 완료 — 마감 /code-review 대기)
+- [x] **⑤ 마무리** (마감 /code-review 완료 — 8앵글 파인더+검증, 정확성 5·정리 5건 반영:
+      psycopg v3 sqlstate 교정·envelope 롤링 양방향 호환·view TTL 템플릿·/v1/health 한도
+      복원·SNS 셧다운 드레인·deliver_once 단일화 등. 기각·이연 근거는 backlog #34~#36 노트)
   - [x] #25 조회수 경로 단일화 — FE 미사용 `POST /view` 제거, dedup→버퍼→폴백 안무를
         `_apply_view_increment` 헬퍼로 통일, 테스트를 GET 증가 경로로 이전·확장
   - [x] #33 트렌딩 timeout — 락 대기 타임아웃을 빈 목록 대신 loader(DB) 폴백으로,

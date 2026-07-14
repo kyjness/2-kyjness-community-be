@@ -34,9 +34,6 @@ redis.call('RENAME', KEYS[1], KEYS[2])
 return 1
 """
 
-# 0 이하 = dedup 끔(같은 viewer도 매 조회 집계 — 로컬/데모에서 증가 즉시 확인용).
-_VIEW_REDIS_EX_SECONDS = settings.VIEW_CACHE_TTL_SECONDS
-
 _HASHTAG_ALLOWED_RE = re.compile(r"[^0-9a-z가-힣_]")
 
 
@@ -70,13 +67,16 @@ def _view_redis_key(post_id: UUID, viewer_key: str) -> str:
 async def _consume_view_if_new_redis(
     post_id: UUID, viewer_key: str, redis_client: Any | None
 ) -> bool:
-    if _VIEW_REDIS_EX_SECONDS <= 0:
-        return True
+    # settings를 직접 읽는다 — 모듈 상수로 스냅샷하면 설정의 진실이 두 곳이 돼
+    # 테스트·런타임 재설정이 조용히 무시된다.
+    ttl_seconds = settings.VIEW_CACHE_TTL_SECONDS
+    if ttl_seconds <= 0:
+        return True  # 0 이하 = dedup 끔(같은 viewer도 매 조회 집계 — 로컬/데모 전용)
     if redis_client is None:
         return True
     key = _view_redis_key(post_id, viewer_key)
     try:
-        created = await redis_client.set(key, "1", nx=True, ex=_VIEW_REDIS_EX_SECONDS)
+        created = await redis_client.set(key, "1", nx=True, ex=ttl_seconds)
         return bool(created)
     except Exception as e:
         log.warning("조회수 dedup Redis 오류(Fail-open, 증가 허용): %s", e)

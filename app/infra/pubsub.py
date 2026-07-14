@@ -68,6 +68,11 @@ async def publish_user_envelope(
         {
             "origin": _instance_id(),
             "target_user_ids": [str(u) for u in target_user_ids],
+            # 구버전 리스너는 스칼라 키만 파싱한다 — 병기하지 않으면 롤링 배포 창에서
+            # 신 인스턴스 발행분을 구 인스턴스가 통째로 드롭한다(파서의 구포맷 수용은
+            # 구→신 방향만 커버). 구 리스너에는 첫 수신자만 전달되는 부분 열화로 낮춘다.
+            # 롤링 창 전용 — 전 인스턴스가 목록 파서로 교체된 다음 릴리스에서 제거.
+            "target_user_id": str(target_user_ids[0]),
             "payload": payload,
         },
         ensure_ascii=False,

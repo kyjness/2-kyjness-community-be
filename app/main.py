@@ -130,6 +130,11 @@ async def lifespan(app: FastAPI):
             await fanout_listener_task
         except asyncio.CancelledError:
             pass
+    # 인라인 SNS 폴백 태스크를 redis close 전에 드레인 — publish와 멱등 마킹 사이에서
+    # 끊기면 워커 재시도 시 이중 배송 창이 다시 열린다.
+    from app.domain.notifications.service import drain_sns_inline_tasks
+
+    await drain_sns_inline_tasks()
     await close_redis(app)
     await close_database()
 

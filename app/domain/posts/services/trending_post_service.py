@@ -11,6 +11,9 @@ from app.infra.cache import get_or_compute_json
 
 log = logging.getLogger(__name__)
 
+# 집계 창은 서버 고정 24h(ADR 0004) — 매개변수로 남기면 캐시 키가 값별로 분화하는
+# 메커니즘이 살아남아, 파라미터를 제거한 결정이 코드 어느 층에서도 강제되지 않는다.
+_WINDOW_HOURS = 24
 # 24h time-decay 결과가 이보다 적으면 7일·좋아요순 fallback (데이터 부족 완화).
 _MIN_POSTS_FOR_TIME_DECAY = 3
 _FALLBACK_WINDOW_HOURS = 24 * 7
@@ -45,17 +48,14 @@ class TrendingPostService:
         db: AsyncSession,
         redis_client: Any | None = None,
         limit: int = 10,
-        window_hours: int = 24,
         category_id: int | None = None,
         current_user_id: UUID | None = None,
     ) -> list[TrendingPostResponse]:
-        # 캐시 키는 (창·카테고리)만 — limit·유저는 키에서 제외(풀을 공유하고 사후 슬라이스/필터).
-        cache_key = f"cache:trending_posts:{window_hours}:{category_id if category_id else 'all'}"
+        # 캐시 키는 카테고리만 — limit·유저는 키에서 제외(풀을 공유하고 사후 슬라이스/필터).
+        cache_key = f"cache:trending_posts:{category_id if category_id else 'all'}"
 
         async def loader() -> list[_TrendingCacheItem]:
-            return await cls._compute_pool(
-                db=db, window_hours=window_hours, category_id=category_id
-            )
+            return await cls._compute_pool(db=db, category_id=category_id)
 
         pool = await get_or_compute_json(
             redis=redis_client,
@@ -89,14 +89,14 @@ class TrendingPostService:
 
     @classmethod
     async def _compute_pool(
-        cls, *, db: AsyncSession, window_hours: int, category_id: int | None
+        cls, *, db: AsyncSession, category_id: int | None
     ) -> list[_TrendingCacheItem]:
         """차단 무관(current_user_id=None) 랭킹 풀을 3단 fallback으로 계산한다."""
         async with db.begin():
             posts = await PostsModel.get_trending_posts(
                 db=db,
                 limit=_POOL_SIZE,
-                window_hours=window_hours,
+                window_hours=_WINDOW_HOURS,
                 category_id=category_id,
                 current_user_id=None,
                 use_time_decay=True,
@@ -104,7 +104,7 @@ class TrendingPostService:
             if len(posts) < _MIN_POSTS_FOR_TIME_DECAY:
                 log.debug(
                     "trending_posts sparse in %sh (%s rows); fallback to %sh like-order",
-                    window_hours,
+                    _WINDOW_HOURS,
                     len(posts),
                     _FALLBACK_WINDOW_HOURS,
                 )

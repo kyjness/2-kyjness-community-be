@@ -12,4 +12,3 @@ _prefix = settings.API_PREFIX.rstrip("/")
 LOGIN_PATH = f"{_prefix}/auth/login"
 SIGNUP_PRESIGN_PATH = f"{_prefix}/media/images/signup/presign"
 SIGNUP_CONFIRM_PATH = f"{_prefix}/media/images/signup/confirm"
-HEALTH_PATH = f"{_prefix}/health"

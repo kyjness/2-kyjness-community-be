@@ -22,7 +22,7 @@ async def get_trending_posts(
     db: AsyncSession = Depends(get_slave_db),
     current_user: CurrentUser | None = Depends(get_current_user_optional),
 ):
-    # 집계 창은 서버 고정 24h(서비스 기본값) — 클라이언트 제어(1~48h)는 소비자 없이
+    # 집계 창은 서버 고정 24h(서비스 상수) — 클라이언트 제어(1~48h)는 소비자 없이
     # 캐시 키만 값별로 분화시키는 표면이라 제거했다(ADR 0004).
     redis = get_app_redis(request.app)
     result = await TrendingPostService.get_trending_posts(

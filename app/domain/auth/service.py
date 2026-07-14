@@ -242,8 +242,9 @@ class AuthService:
                     db=db,
                 )
             except IntegrityError as e:
+                # psycopg v3는 pgcode가 아니라 sqlstate를 노출한다(전역 핸들러와 동일 규약).
                 orig = getattr(e, "orig", None)
-                if getattr(orig, "pgcode", None) == "23505":
+                if getattr(orig, "sqlstate", None) == "23505":
                     constraint = getattr(getattr(orig, "diag", None), "constraint_name", "") or ""
                     if "email" in constraint:
                         raise EmailAlreadyExistsException() from e

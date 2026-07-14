@@ -55,15 +55,6 @@ def _normalize_idempotency_key(raw: str | None) -> str | None:
     return s
 
 
-def _coerce_idempotency_key(raw: str | None) -> str | None:
-    if raw is None:
-        return None
-    s = raw.strip()
-    if not s or len(s) < _IDEMP_KEY_MIN or len(s) > _IDEMP_KEY_MAX:
-        return None
-    return s
-
-
 def _idempotency_fingerprint(user_id: UUID, norm: str) -> str:
     # 유저 스코프 fingerprint: 다른 사용자의 같은 키와 충돌·열람되지 않는다(ADR 0008).
     return hashlib.sha256(f"{user_id}:{norm}".encode()).hexdigest()
@@ -85,19 +76,23 @@ def _merge_request_id_into_cached_body(body: dict[str, Any], request: Request) -
 
 async def post_create_idempotency_before(
     request: Request, user_id: UUID, raw_key: str | None
-) -> JSONResponse | None:
+) -> tuple[JSONResponse | None, str | None]:
     """결과 캐시 히트면 저장된 성공 응답 재생(requestId만 갱신), 미스면 in-flight 락 선점.
 
-    같은 키가 처리 중이면 409, Redis 오류는 멱등성 없이 진행(fail-open, ADR 0005)."""
+    같은 키가 처리 중이면 409, Redis 오류는 멱등성 없이 진행(fail-open, ADR 0005).
+    반환 (캐시된 응답, fingerprint) — after 훅은 이 fingerprint를 그대로 받는다.
+    훅마다 raw 헤더를 재검증·재해시하면 검증 규칙이 두 벌로 드리프트해, before는 락을
+    잡았는데 after가 키를 무효 판정해 해제를 건너뛰는(락 TTL 동안 재시도 전부 409)
+    표면이 생긴다 — 검증·해시는 여기 한 번뿐이다."""
     norm = _normalize_idempotency_key(raw_key)
     if norm is None:
-        return None
-
-    rcli = cast(Any, get_app_redis(request.app))
-    if rcli is None:
-        return None
+        return None, None
 
     fp = _idempotency_fingerprint(user_id, norm)
+    rcli = cast(Any, get_app_redis(request.app))
+    if rcli is None:
+        return None, fp
+
     try:
         cached = await rcli.get(_result_redis_key(fp))
         if cached:
@@ -119,7 +114,7 @@ async def post_create_idempotency_before(
                 return JSONResponse(
                     status_code=_IDEMP_SUCCESS_STATUS,
                     content=_merge_request_id_into_cached_body(body, request),
-                )
+                ), fp
 
         got_lock = await rcli.set(
             _lock_redis_key(fp),
@@ -140,26 +135,23 @@ async def post_create_idempotency_before(
         raise
     except Exception as e:
         log.warning("멱등성 Redis 오류(Fail-open): %s", e)
-        return None
+        return None, fp
 
-    return None
+    return None, fp
 
 
 async def post_create_idempotency_after_success(
     request: Request,
-    user_id: UUID,
-    raw_key: str | None,
+    fp: str | None,
     response_obj: Any,
 ) -> None:
-    norm = _coerce_idempotency_key(raw_key)
-    if norm is None:
+    if fp is None:
         return
 
     rcli = cast(Any, get_app_redis(request.app))
     if rcli is None:
         return
 
-    fp = _idempotency_fingerprint(user_id, norm)
     try:
         dumped = response_obj.model_dump(mode="json", by_alias=True)
         await rcli.set(
@@ -177,18 +169,15 @@ async def post_create_idempotency_after_success(
 
 async def post_create_idempotency_after_failure(
     request: Request,
-    user_id: UUID,
-    raw_key: str | None,
+    fp: str | None,
 ) -> None:
-    norm = _coerce_idempotency_key(raw_key)
-    if norm is None:
+    if fp is None:
         return
 
     rcli = cast(Any, get_app_redis(request.app))
     if rcli is None:
         return
 
-    fp = _idempotency_fingerprint(user_id, norm)
     try:
         await rcli.delete(_lock_redis_key(fp))
     except Exception as e:

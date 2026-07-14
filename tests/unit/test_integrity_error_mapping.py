@@ -1,7 +1,9 @@
 """IntegrityError 전역 핸들러의 PostgreSQL 매핑 단위 테스트.
 
-pgcode(23505 unique·23503 FK)와 psycopg diag의 제약명으로 응답 코드를 결정한다 —
-에러 메시지 문자열 파싱(과거 MySQL 잔재)은 로케일·드라이버 포맷에 취약해 쓰지 않는다.
+SQLSTATE(23505 unique·23503 FK)와 psycopg diag의 제약명으로 응답 코드를 결정한다 —
+psycopg v3 예외의 실제 속성은 sqlstate다(pgcode는 v2 잔재 — 가짜 예외도 실 드라이버와
+같은 속성을 써야 결함을 은폐하지 않는다). 에러 메시지 문자열 파싱은 로케일·드라이버
+포맷에 취약해 쓰지 않는다.
 """
 
 import json
@@ -17,8 +19,8 @@ from starlette.requests import Request
 pytestmark = pytest.mark.asyncio
 
 
-def _integrity_error(pgcode: str | None, constraint: str | None = None) -> IntegrityError:
-    orig = SimpleNamespace(pgcode=pgcode, diag=SimpleNamespace(constraint_name=constraint))
+def _integrity_error(sqlstate: str | None, constraint: str | None = None) -> IntegrityError:
+    orig = SimpleNamespace(sqlstate=sqlstate, diag=SimpleNamespace(constraint_name=constraint))
     return IntegrityError("stmt", {}, orig)  # type: ignore[arg-type]
 
 
@@ -51,6 +53,6 @@ async def test_fk_violation_maps_to_constraint_error():
 
 
 async def test_other_integrity_maps_to_invalid_request():
-    # pgcode 없음(드라이버 외 예외)·기타 코드는 400 일반 매핑
+    # sqlstate 없음(드라이버 외 예외)·기타 코드는 400 일반 매핑
     assert (await _handle(_integrity_error(None)))[0] == 400
     assert (await _handle(_integrity_error("23514")))[0] == 400  # check_violation

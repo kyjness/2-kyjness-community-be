@@ -17,13 +17,27 @@ from app.domain.notifications.model import Notification, NotificationsModel
 from app.domain.notifications.schema import NotificationItem
 from app.domain.notifications.stream import NOTIF_SSE_FANOUT_CHANNEL, notification_sse_manager
 from app.infra.pubsub import publish_user_envelope
-from app.infra.sns import already_delivered, mark_delivered, publish_sns
+from app.infra.sns import deliver_once
 
 log = logging.getLogger(__name__)
 
 # fire-and-forget SNS 태스크의 강참조 보관 — 이벤트 루프는 태스크를 약참조하므로
 # 참조를 안 잡아두면 완료 전 GC로 조용히 사라질 수 있다.
 _sns_inline_tasks: set[asyncio.Task[None]] = set()
+
+
+async def drain_sns_inline_tasks(timeout_seconds: float = 5.0) -> None:
+    """lifespan 셧다운용: 진행 중인 인라인 SNS 태스크를 짧게 기다린다.
+
+    publish와 멱등 마킹 사이에서 프로세스가 끊기면 미마킹으로 남아 워커 재시도 시
+    이중 배송 창이 다시 열린다 — close_redis 전에 호출해 창을 닫는다. 시간 내 못
+    끝나면 취소(fail-open — 인앱 전달·DB 행은 이미 확보된 상태)."""
+    if not _sns_inline_tasks:
+        return
+    tasks = tuple(_sns_inline_tasks)
+    _, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+    for task in pending:
+        task.cancel()
 
 
 def _sns_idempotency_key(notification_id: UUID) -> str:
@@ -188,13 +202,15 @@ class NotificationService:
         )
         message_json = json.dumps(payload, ensure_ascii=False)
         try:
-            # 워커 잡과 같은 멱등 스토어·키 — 브로커 ack 유실로 enqueue와 인라인 폴백이 둘 다
-            # 실행돼도(교차 경로) 한쪽만 배송된다. publish 성공 후에만 마킹(워커와 동일 순서).
-            idemp_key = _sns_idempotency_key(notification_id)
-            if await already_delivered(redis, idemp_key):
-                return
-            await publish_sns(topic, message_json)
-            await mark_delivered(redis, idemp_key, settings.CELERY_TASK_IDEMPOTENCY_TTL_SECONDS)
+            # 워커 잡과 같은 멱등 스토어·키·안무(deliver_once) — 브로커 ack 유실로
+            # enqueue와 인라인 폴백이 둘 다 실행돼도(교차 경로) 한쪽만 배송된다.
+            await deliver_once(
+                redis,
+                _sns_idempotency_key(notification_id),
+                topic,
+                message_json,
+                settings.CELERY_TASK_IDEMPOTENCY_TTL_SECONDS,
+            )
         except Exception:
             log.exception(
                 "알림 SNS publish 실패(인앱·DB는 유지). recipient=%s topic=%s",

@@ -651,6 +651,23 @@ rate limit 미들웨어는 `scope["type"] != "http"`를 그대로 통과시켜 W
 > 단일 세션(refresh 유저당 단일 키)·WS 토큰 쿼리스트링 트레이드오프·차단 시맨틱 비대칭(새 대화
 > 403, 과거 열람 허용 — FE의 direct-open 403 처리 계약 포함)은
 > [ADR 0013](adr/0013-product-behavior-decisions.md)으로 확정.
+
+> **⑤ 마감 리뷰(8앵글 파인더+검증) 반영 완료**: ① psycopg v3는 예외에 `pgcode`가 없어(실측:
+> `sqlstate`만 존재) IntegrityError 409 매핑·signup 중복 변환이 프로덕션 데드였다 —
+> `sqlstate` 기반으로 교정(전역 핸들러+auth, 테스트도 실 속성으로) ② envelope 신→구 롤링
+> 비호환 — 발행 시 구 스칼라 키 병기(다음 릴리스에서 제거) ③ `.env.example`의
+> `VIEW_CACHE_TTL_SECONDS=0`이 폴백 제거로 실효되는 문제 — 주석 처리+경고, ADR 0007에
+> dedup-끔 모드 기록 ④ `/v1/health`를 rate limit 스킵에서 제외(비인증 무한도 DB ping 표면 —
+> 프로브는 /livez·/readyz 전담) ⑤ 인라인 SNS 태스크 셧다운 드레인(publish~마킹 사이 끊김의
+> 이중 배송 창) ⑥ SNS 배송 안무 2벌 → `infra/sns.deliver_once` 단일 소스 ⑦ 트렌딩
+> `window_hours` 서비스 파라미터·캐시 키 세그먼트 잔존 제거(24h 상수화) ⑧ view TTL 모듈
+> 스냅샷 제거(settings 직접 참조) ⑨ 멱등 훅 검증기 2벌·fingerprint 3회 재계산 → before가
+> fingerprint를 반환해 단일화. 검증 기각 4건(워커 루프 재생성 도달 불가·멱등 fail-open과
+> loader 폴백은 문서화된 설계·DM 팬아웃 1건화는 at-most-once 수용 범위)은 수정 없음.
+> **이연(저가치 정리, 해당 파일 작업 시 처리)**: bytes→str 정규화 3벌(infra/cache._decode·
+> infra/redis.bulk_to_str·media 자체구현), 테스트 `_HitRedis` 2벌·경로 리터럴·통합테스트
+> bare getattr 잔존, 라우터 인라인 `get_app_redis` vs `Depends` 관용구 2벌, FakeRedis
+> 미구현 메서드 `__getattr__` 명시 실패 가드.
 ---
 
 ### 37. 실시간 전달 심화 (③ 마감 리뷰 이연) — P2

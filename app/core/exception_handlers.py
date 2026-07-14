@@ -131,13 +131,15 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def integrity_error_handler(request: Request, exc: IntegrityError):
-        # PostgreSQL 전용 매핑: pgcode(23505 unique·23503 FK) + psycopg diag의 제약명.
-        # 에러 메시지 문자열 파싱은 로케일·드라이버 포맷에 취약해 쓰지 않는다.
+        # PostgreSQL 전용 매핑: SQLSTATE(23505 unique·23503 FK) + psycopg diag의 제약명.
+        # psycopg v3 예외는 pgcode가 아니라 sqlstate 속성을 노출한다(pgcode는 v2 잔재 —
+        # 그걸 읽으면 매핑 전체가 프로덕션에서 죽는다). 에러 메시지 문자열 파싱은
+        # 로케일·드라이버 포맷에 취약해 쓰지 않는다.
         orig = getattr(exc, "orig", None)
-        pgcode = getattr(orig, "pgcode", None) if orig else None
+        sqlstate = getattr(orig, "sqlstate", None) if orig else None
         diag = getattr(orig, "diag", None) if orig else None
         constraint = (getattr(diag, "constraint_name", None) or "").lower()
-        if pgcode == "23505":
+        if sqlstate == "23505":
             logger.warning(
                 "%s",
                 json.dumps(
@@ -168,13 +170,13 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status_code=409,
                 content=_error_payload(ApiCode.CONFLICT.value, "", None, request=request),
             )
-        if pgcode == "23503":
+        if sqlstate == "23503":
             _log_error_structured(request, "db_integrity_fk", exc, constraint=constraint)
             return JSONResponse(
                 status_code=409,
                 content=_error_payload(ApiCode.CONSTRAINT_ERROR.value, "", None, request=request),
             )
-        _log_error_structured(request, "db_integrity_other", exc, pgcode=pgcode)
+        _log_error_structured(request, "db_integrity_other", exc, sqlstate=sqlstate)
         return JSONResponse(
             status_code=400,
             content=_error_payload(ApiCode.INVALID_REQUEST.value, "", None, request=request),

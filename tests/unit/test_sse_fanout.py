@@ -105,6 +105,8 @@ async def test_publish_after_commit_sends_single_channel_envelope_with_origin():
     assert channel == NOTIF_SSE_FANOUT_CHANNEL
     env = json.loads(raw)
     assert env["target_user_ids"] == [str(uid)]
+    # 롤링 배포 창 호환: 구버전 리스너가 읽는 스칼라 키를 첫 수신자로 병기한다.
+    assert env["target_user_id"] == str(uid)
     assert env["origin"] == pubsub_mod._instance_id()  # 리스너의 자기 발행분 스킵 근거
     assert json.loads(env["payload"])["kind"] == "LIKE_POST"
 

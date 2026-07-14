@@ -11,7 +11,6 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.common import ApiCode
 from app.common.paths import (
-    HEALTH_PATH,
     LOGIN_PATH,
     SIGNUP_CONFIRM_PATH,
     SIGNUP_PRESIGN_PATH,
@@ -22,8 +21,10 @@ from app.infra.redis import get_app_redis
 
 logger = logging.getLogger(__name__)
 
-# 프로브·계측 경로는 한도 제외. /livez·/readyz·/metrics는 앱 루트, health는 API prefix 아래.
-_SKIP_PATHS = frozenset({HEALTH_PATH, "/livez", "/readyz", "/metrics"})
+# 프로브·계측 경로(앱 루트, 인프라 전용)만 한도 제외. /v1/health는 비인증 + 요청마다
+# DB 왕복이라 글로벌 한도를 그대로 태운다 — 프로브는 /livez·/readyz가 전담하므로
+# 한도 제외로 열어둘 이유가 없다(무한도 DB ping 표면).
+_SKIP_PATHS = frozenset({"/livez", "/readyz", "/metrics"})
 _KEY_PREFIX = "rl"
 
 # In-memory Fallback: 최대 10,000키, OOM 방지 eviction.
