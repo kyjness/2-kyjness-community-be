@@ -5,6 +5,7 @@
 tests
 docs
 scripts
+dev.sh
 upload
 
 __pycache__

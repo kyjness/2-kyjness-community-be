@@ -230,11 +230,11 @@ Dockerfile             # uv 멀티스테이지 · 비루트 · Gunicorn+Uvicorn
 
 ```bash
 git clone https://github.com/kyjness/2-kyjness-community-be && cd 2-kyjness-community-be
-./scripts/dev.sh          # compose 기동 → /v1/health 대기 → 형제 폴더 프론트 pnpm dev
+./dev.sh                  # compose 기동 → /v1/health 대기 → 형제 폴더 프론트 pnpm dev
 ```
 
 - 뜨는 곳: API `localhost:8000`(Swagger `/v1/docs`) · 프론트 `localhost:5173` · MinIO 콘솔 `localhost:9001`.
-- `Ctrl+C`는 프론트만 멈춥니다(백엔드 스택은 유지 — 빠른 재시작용). 백엔드 종료는 `./scripts/dev.sh --down`.
+- `Ctrl+C`는 프론트만 멈춥니다(백엔드 스택은 유지 — 빠른 재시작용). 백엔드 종료는 `./dev.sh --down`.
 - 옵션: `--backend-only`(백엔드만) · `FE_DIR=`(프론트 경로 지정). poe 별칭 `stack`·`stack-backend`·`stack-down`도 동일.
 
 세부 경로(호스트 직접 실행·compose 단독)·검사/테스트·API 문서는 아래에 접어 두었습니다.
