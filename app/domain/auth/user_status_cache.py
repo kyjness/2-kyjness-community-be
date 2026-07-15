@@ -5,7 +5,7 @@ import logging
 from typing import Any, cast
 from uuid import UUID
 
-from redis.asyncio import Redis
+from app.infra.redis import RedisLike
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def set_user_status_cache_best_effort(
         logger.warning("user status cache SET failed user_id=%s err=%s", user_id, e)
 
 
-async def invalidate_user_status_cache(redis_client: Redis | None, user_id: UUID) -> None:
+async def invalidate_user_status_cache(redis_client: RedisLike | None, user_id: UUID) -> None:
     """``users.status`` 변경(정지·해제·탈퇴 등) 후 캐시를 제거한다.
 
     Redis 장애 시 로그만 남기고 무시해 본편 트랜잭션을 막지 않는다.

@@ -6,7 +6,6 @@ import time
 
 from fastapi import APIRouter, WebSocket
 from pydantic import ValidationError
-from redis.asyncio import Redis
 from starlette.websockets import WebSocketDisconnect
 
 from app.common.exceptions import (
@@ -23,7 +22,7 @@ from app.domain.chat.payload import parse_incoming_message, validation_error_to_
 from app.domain.chat.schema import ChatWsErrorPayload
 from app.domain.chat.service import DM_SAME_USER, ChatService
 from app.domain.chat.ws_auth import authenticate_chat_websocket
-from app.infra.redis import get_app_redis
+from app.infra.redis import RedisLike, get_app_redis
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +55,7 @@ class _RejectionGate:
         self.consecutive_rejections = 0
 
 
-def _redis_from_websocket(websocket: WebSocket) -> Redis | None:
+def _redis_from_websocket(websocket: WebSocket) -> RedisLike | None:
     return get_app_redis(websocket.scope.get("app"))
 
 
@@ -102,7 +101,7 @@ async def chat_dm_websocket(websocket: WebSocket) -> None:
             # 잘못된 프레임 스팸(검증 비용+에러 응답 루프)도 같은 한도에 잡혀야 한다.
             now = time.monotonic()
             if gate.suppressed(now):
-                # 억제 창 안: Redis 왕복 없이 거부하되, 계측은 동일하게 남긴다.
+                # 억제 창 안: RedisLike 왕복 없이 거부하되, 계측은 동일하게 남긴다.
                 count_rejection("chat")
                 if gate.register_rejection(now, int(gate.blocked_until - now)):
                     await websocket.close(code=1008, reason="Rate limit exceeded")

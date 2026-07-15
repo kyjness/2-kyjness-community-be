@@ -2,7 +2,6 @@
 
 from uuid import UUID
 
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -21,6 +20,7 @@ from app.domain.comments.schema import (
 from app.domain.notifications.model import NotificationsModel
 from app.domain.notifications.service import NotificationService
 from app.domain.posts.repository import PostsModel
+from app.infra.redis import RedisLike
 
 
 async def _increment_post_comment_count(post_id: UUID, db: AsyncSession) -> None:
@@ -90,7 +90,7 @@ class CommentService:
         user_id: UUID,
         data: CommentUpsertRequest,
         db: AsyncSession,
-        redis: Redis | None = None,
+        redis: RedisLike | None = None,
     ) -> CommentIdData:
         notify: (
             tuple[UUID, UUID, NotificationKind, UUID | None, UUID | None, UUID | None] | None

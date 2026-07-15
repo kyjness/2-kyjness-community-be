@@ -3,7 +3,6 @@
 
 from uuid import UUID
 
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -18,6 +17,7 @@ from app.domain.likes.model import PostLikesModel
 from app.domain.notifications.model import NotificationsModel
 from app.domain.notifications.service import NotificationService
 from app.domain.posts.repository import PostsModel
+from app.infra.redis import RedisLike
 
 
 class LikeService:
@@ -31,7 +31,7 @@ class LikeService:
         post_id: UUID,
         user_id: UUID,
         db: AsyncSession,
-        redis: Redis | None = None,
+        redis: RedisLike | None = None,
     ) -> tuple[bool, int, bool]:
         notify: (
             tuple[UUID, UUID, NotificationKind, UUID | None, UUID | None, UUID | None] | None
@@ -103,7 +103,7 @@ class LikeService:
         comment_id: UUID,
         user_id: UUID,
         db: AsyncSession,
-        redis: Redis | None = None,
+        redis: RedisLike | None = None,
     ) -> tuple[bool, int, bool]:
         notify: (
             tuple[UUID, UUID, NotificationKind, UUID | None, UUID | None, UUID | None] | None

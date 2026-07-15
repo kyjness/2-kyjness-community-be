@@ -2,7 +2,6 @@
 
 import json
 import logging
-from typing import Any, cast
 from uuid import UUID
 
 from redis.asyncio import Redis
@@ -15,23 +14,24 @@ from app.core.ids import parse_public_id_value
 from app.db import get_connection
 from app.domain.notifications.model import Notification
 from app.domain.notifications.service import NotificationService
+from app.infra.redis import RedisLike
 from app.infra.sns import deliver_once
 
 log = logging.getLogger(__name__)
 
 # 워커 프로세스당 Redis 클라이언트 1개 재사용 — async_bridge가 프로세스당 단일 이벤트 루프를
 # 유지하므로 안전하다(태스크마다 from_url→aclose는 커넥션 churn).
-_redis_client: Redis | None = None
+_redis_client: RedisLike | None = None
 
 
 class NotificationDeliverySkip(Exception):
     """재시도 불필요(미존재·멱등 스킵·SNS 비활성)."""
 
 
-def _get_redis() -> Redis | None:
+def _get_redis() -> RedisLike | None:
     global _redis_client
     if _redis_client is None and settings.REDIS_URL:
-        _redis_client = cast(Any, Redis).from_url(
+        _redis_client = Redis.from_url(
             settings.REDIS_URL,
             decode_responses=True,
             max_connections=4,

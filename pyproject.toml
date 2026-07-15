@@ -61,13 +61,14 @@ ignore = ["E501"]  # line length은 format에서 처리
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
 reportMissingImports = false  # app.* 등 런타임 경로는 IDE/CI에서 제외 가능
-stubPath = "typings"
 
 # 데드코드 스캔: min_confidence=100 은 vulture가 확신도 100%인 항목만 보고(오탐 줄임, 대신 놓칠 수 있음).
 [tool.vulture]
 min_confidence = 100
 paths = ["app"]
 exclude = ["**/migrations/versions/*.py"]
+# RedisLike Protocol(app/infra/redis.py)의 파라미터 — 본문이 ...뿐이라 미사용으로 오탐.
+ignore_names = ["nx", "ex", "seconds", "script", "numkeys", "field", "amount"]
 
 [tool.uv]
 constraint-dependencies = [

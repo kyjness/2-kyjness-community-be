@@ -3,16 +3,15 @@
 import asyncio
 import logging
 
-from redis.asyncio import Redis
-
 from app.core.config import settings
 from app.core.ids import new_ulid_str
 from app.db import get_connection
+from app.infra.redis import RedisLike
 
 log = logging.getLogger(__name__)
 
 
-async def run_once(redis: Redis | None = None) -> None:
+async def run_once(redis: RedisLike | None = None) -> None:
     task_id = new_ulid_str()
     log.info("cleanup_start task_id=%s", task_id)
 
@@ -80,7 +79,7 @@ async def run_once(redis: Redis | None = None) -> None:
         log.warning("notification_purge_failed task_id=%s error=%s", task_id, e)
 
 
-async def run_loop_async(stop_event: asyncio.Event, redis: Redis | None = None) -> None:
+async def run_loop_async(stop_event: asyncio.Event, redis: RedisLike | None = None) -> None:
     interval = max(60, settings.SIGNUP_IMAGE_CLEANUP_INTERVAL)
     while not stop_event.is_set():
         await run_once(redis=redis)

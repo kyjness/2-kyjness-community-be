@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
-from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,7 +45,7 @@ from app.domain.auth.user_status_cache import (
 from app.domain.media.model import MediaModel
 from app.domain.media.service import MediaService
 from app.domain.users.model import UsersModel
-from app.infra.redis import bulk_to_str
+from app.infra.redis import RedisLike, bulk_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +207,7 @@ def _remaining_ttl_seconds_from_access_payload(payload: dict) -> int:
 class AuthService:
     @classmethod
     async def signup(
-        cls, data: SignUpRequest, db: AsyncSession, redis: Redis | None = None
+        cls, data: SignUpRequest, db: AsyncSession, redis: RedisLike | None = None
     ) -> None:
         has_token = bool(data.signup_token)
         if data.profile_image_id is not None and not has_token:
@@ -264,7 +263,7 @@ class AuthService:
         cls,
         data: LoginRequest,
         db: AsyncSession,
-        redis: Redis | None = None,
+        redis: RedisLike | None = None,
         refresh_ttl_seconds: int = 0,
     ) -> tuple[LoginSuccessData, str]:
         async with db.begin():
@@ -304,7 +303,7 @@ class AuthService:
         user_id: UUID,
         refresh_token: str | None,
         access_payload: dict,
-        redis: Redis | None = None,
+        redis: RedisLike | None = None,
     ) -> None:
         # 운영 관점: 로그아웃은 블랙리스트/refresh 폐기가 핵심이므로 Redis 없이는 실패시키는 편이 안전.
         if redis is None:
@@ -324,12 +323,12 @@ class AuthService:
         await cast(Any, redis).delete(_user_refresh_key(user_id))
 
     @classmethod
-    async def revoke_refresh_for_user(cls, user_id: UUID, redis: Redis | None = None) -> None:
+    async def revoke_refresh_for_user(cls, user_id: UUID, redis: RedisLike | None = None) -> None:
         if redis:
             await cast(Any, redis).delete(_user_refresh_key(user_id))
 
     @classmethod
-    async def invalidate_user_status_cache(cls, redis: Redis | None, user_id: UUID) -> None:
+    async def invalidate_user_status_cache(cls, redis: RedisLike | None, user_id: UUID) -> None:
         """도메인·라우터에서 status 변경 직후 호출. 모듈 함수 ``invalidate_user_status_cache`` 위임."""
         await invalidate_user_status_cache(redis, user_id)
 
@@ -337,7 +336,7 @@ class AuthService:
     async def refresh_tokens(
         cls,
         refresh_token: str | None,
-        redis: Redis | None,
+        redis: RedisLike | None,
         db: AsyncSession,
         refresh_ttl_seconds: int,
     ) -> tuple[AccessTokenData, str]:

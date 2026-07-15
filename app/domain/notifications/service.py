@@ -7,7 +7,6 @@ from collections.abc import AsyncGenerator
 from typing import Any, cast
 from uuid import UUID
 
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import NotificationKind
@@ -17,6 +16,7 @@ from app.domain.notifications.model import Notification, NotificationsModel
 from app.domain.notifications.schema import NotificationItem
 from app.domain.notifications.stream import NOTIF_SSE_FANOUT_CHANNEL, notification_sse_manager
 from app.infra.pubsub import publish_user_envelope
+from app.infra.redis import RedisLike
 from app.infra.sns import deliver_once
 
 log = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class NotificationService:
     @classmethod
     async def _dispatch_sns_publish(
         cls,
-        redis: Redis | None,
+        redis: RedisLike | None,
         *,
         recipient_user_id: UUID,
         notification_id: UUID,
@@ -151,7 +151,7 @@ class NotificationService:
     @classmethod
     def _schedule_sns_publish(
         cls,
-        redis: Redis | None,
+        redis: RedisLike | None,
         *,
         recipient_user_id: UUID,
         notification_id: UUID,
@@ -182,7 +182,7 @@ class NotificationService:
     @classmethod
     async def _publish_sns_task(
         cls,
-        redis: Redis | None,
+        redis: RedisLike | None,
         *,
         recipient_user_id: UUID,
         notification_id: UUID,
@@ -221,7 +221,7 @@ class NotificationService:
     @classmethod
     async def publish_after_commit(
         cls,
-        redis: Redis | None,
+        redis: RedisLike | None,
         *,
         recipient_user_id: UUID,
         notification_id: UUID,

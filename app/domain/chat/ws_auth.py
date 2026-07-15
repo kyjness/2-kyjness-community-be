@@ -1,11 +1,10 @@
 # WebSocket 쿼리 ?token= Access JWT 검증. HTTP Depends와 동일한 sub·jti 블랙리스트 규칙.
 
 import logging
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 import jwt
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocket
 
@@ -14,18 +13,17 @@ from app.common.exceptions import ForbiddenException, UnauthorizedException
 from app.core.ids import jwt_sub_to_uuid
 from app.core.security import access_jti_blacklist_redis_key, verify_access_token
 from app.domain.users.model import UsersModel
-from app.infra.redis import get_app_redis
+from app.infra.redis import RedisLike, get_app_redis
 
 log = logging.getLogger(__name__)
 
 
 async def _jti_blacklisted(redis_raw: Any, jti: str) -> bool:
-    if not isinstance(redis_raw, Redis):
+    if not isinstance(redis_raw, RedisLike):
         return False
     key = access_jti_blacklist_redis_key(jti)
     try:
-        r = cast(Any, redis_raw)
-        return await r.get(key) is not None
+        return await redis_raw.get(key) is not None
     except Exception:
         log.warning("chat ws jti redis 조회 실패(Fail-open)", exc_info=True)
         return False

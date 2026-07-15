@@ -1,20 +1,20 @@
 """단위 테스트 공용 인메모리 가짜.
 
 파일마다 FakeRedis·FakeDB류를 각자 구현해 드리프트하던 것을 한 곳으로 모은다.
-FakeRedis는 get_app_redis의 isinstance(Redis) 가드를 통과하도록 실제 Redis를
-상속하되, __init__을 덮어써 실연결(커넥션 풀)은 만들지 않는다. eval 의미론이
-다른 테스트(rate limit 고정 창 등)는 FakeRedis를 상속해 eval만 교체한다.
+FakeRedis는 실제 Redis를 상속하지 않는다 — get_app_redis 가드가 RedisLike
+Protocol(능력 검사)이라 멤버만 갖추면 통과하고, 상속이 없으니 업스트림 시그니처와의
+충돌(이를 가리던 로컬 스텁)도 없다. eval 의미론이 다른 테스트(rate limit 고정 창 등)는
+FakeRedis를 상속해 eval만 교체한다.
 """
 
 from typing import Any, cast
 
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-class FakeRedis(Redis):
-    """kv(get/set NX·EX/delete)·hash(hincrby/hget/hgetall)·publish 기록과
-    조회수 버퍼 Lua 2종(RENAME 스왑·CAS 해제)을 흉내내는 수퍼셋 가짜."""
+class FakeRedis:
+    """RedisLike 계약 전체를 갖춘 수퍼셋 가짜 — kv(get/set NX·EX/setex/delete)·
+    hash(hincrby/hget/hgetall)·publish 기록과 조회수 버퍼 Lua 2종(RENAME 스왑·CAS 해제)."""
 
     def __init__(
         self,
@@ -41,13 +41,31 @@ class FakeRedis(Redis):
         self.set_calls.append(key)
         return True
 
-    async def delete(self, key):  # pyright: ignore[reportIncompatibleMethodOverride]
-        if self._fail_delete_substr is not None and self._fail_delete_substr in key:
+    async def ping(self):
+        return True
+
+    async def aclose(self):
+        return None
+
+    async def setex(self, key, seconds, value):
+        self.kv[key] = value
+        return True
+
+    def pubsub(self):
+        raise NotImplementedError("FakeRedis는 pubsub 컨슈머를 흉내내지 않는다")
+
+    async def delete(self, *keys):
+        if self._fail_delete_substr is not None and any(
+            self._fail_delete_substr in k for k in keys
+        ):
             raise ConnectionError("redis del failed")
-        existed = key in self.kv or key in self.hashes
-        self.kv.pop(key, None)
-        self.hashes.pop(key, None)
-        return 1 if existed else 0
+        removed = 0
+        for key in keys:
+            existed = key in self.kv or key in self.hashes
+            self.kv.pop(key, None)
+            self.hashes.pop(key, None)
+            removed += 1 if existed else 0
+        return removed
 
     @staticmethod
     def _field(field):
@@ -74,7 +92,7 @@ class FakeRedis(Redis):
         self.published.append((channel, message))
         return 1
 
-    async def eval(self, script, numkeys, *args):  # pyright: ignore[reportIncompatibleMethodOverride]
+    async def eval(self, script, numkeys, *args):
         keys = args[:numkeys]
         argv = args[numkeys:]
         if "RENAME" in script:  # view buffer -> drain (원자 스왑)

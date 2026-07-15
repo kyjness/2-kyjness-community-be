@@ -6,9 +6,8 @@ import asyncio
 import logging
 from typing import Any, cast
 
-from redis.asyncio import Redis
-
 from app.core.config import settings
+from app.infra.redis import RedisLike
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ async def publish_sns(topic_arn: str, message_json: str) -> None:
     await asyncio.to_thread(_publish_sync, topic_arn, message_json)
 
 
-async def already_delivered(redis: Redis | None, key: str) -> bool:
+async def already_delivered(redis: RedisLike | None, key: str) -> bool:
     """멱등 검사. Redis 부재·오류는 fail-open(미배송 취급) — 중복 publish는 구독자가 흡수."""
     if redis is None:
         return False
@@ -47,7 +46,7 @@ async def already_delivered(redis: Redis | None, key: str) -> bool:
         return False
 
 
-async def mark_delivered(redis: Redis | None, key: str, ttl_seconds: int) -> None:
+async def mark_delivered(redis: RedisLike | None, key: str, ttl_seconds: int) -> None:
     """publish 성공 후에만 마킹 — 실패 재시도가 멱등 skip으로 유실되지 않게 한다."""
     if redis is None:
         return
@@ -59,7 +58,7 @@ async def mark_delivered(redis: Redis | None, key: str, ttl_seconds: int) -> Non
 
 
 async def deliver_once(
-    redis: Redis | None,
+    redis: RedisLike | None,
     idempotency_key: str,
     topic_arn: str,
     message_json: str,

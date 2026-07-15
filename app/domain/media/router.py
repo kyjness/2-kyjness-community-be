@@ -4,7 +4,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -25,7 +24,7 @@ from app.domain.media.schema import (
     SignupImageUploadData,
 )
 from app.domain.media.service import MediaService
-from app.infra.redis import get_app_redis
+from app.infra.redis import RedisLike, get_app_redis
 
 router = APIRouter(prefix="/media", tags=["media"])
 
@@ -43,7 +42,7 @@ async def presign_image_upload(
     # 인증 presign은 IP 미들웨어(글로벌 100/분)만으로는 pending/ 대량 적재를 못 막는다 —
     # WS DM과 동형으로 유저 단위 한도(Redis 공유, 장애 시 메모리 폴백). confirm은 유효한
     # 1회성 pending 키가 선행돼야 하므로 비용 원점인 presign만 조인다.
-    redis: Redis | None = get_app_redis(request.app)
+    redis: RedisLike | None = get_app_redis(request.app)
     allowed, retry_after = await check_fixed_window(
         redis,
         f"media_presign:{user.id}",
@@ -94,7 +93,7 @@ async def confirm_signup_image_upload(
     body: ConfirmSignupUploadRequest,
     db: AsyncSession = Depends(get_master_db),
 ):
-    redis: Redis | None = get_app_redis(request.app)
+    redis: RedisLike | None = get_app_redis(request.app)
     data = await MediaService.confirm_presigned_signup_upload(body, db=db, redis=redis)
     return api_response(request, code=ApiCode.OK, data=data)
 

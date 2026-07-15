@@ -4,7 +4,6 @@ import json
 import logging
 from uuid import UUID
 
-from redis.asyncio import Redis
 from sqlalchemy import case, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +28,7 @@ from app.domain.dogs.model import DogProfile
 from app.domain.media.model import Image
 from app.domain.users.model import User, UsersModel
 from app.infra.pubsub import publish_user_envelope
+from app.infra.redis import RedisLike
 
 from .manager import CHAT_DM_FANOUT_CHANNEL, chat_connection_manager
 
@@ -110,7 +110,7 @@ class ChatService:
         *,
         sender_id: UUID,
         payload: ChatMessageSend,
-        redis: Redis | None,
+        redis: RedisLike | None,
     ) -> None:
         peer_id = payload.peer_user_id
         if peer_id == sender_id:
@@ -148,7 +148,7 @@ class ChatService:
     @classmethod
     async def _fanout_dm(
         cls,
-        redis: Redis | None,
+        redis: RedisLike | None,
         *,
         peer_id: UUID,
         sender_id: UUID,

@@ -6,7 +6,6 @@ import logging
 import time
 from typing import Any
 
-from redis.asyncio import Redis
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.common import ApiCode
@@ -17,7 +16,7 @@ from app.common.paths import (
 )
 from app.core.config import settings
 from app.core.metrics import RATE_LIMIT_REJECTIONS
-from app.infra.redis import get_app_redis
+from app.infra.redis import RedisLike, get_app_redis
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,7 @@ return {c, ttl}
 """
 
 
-def _redis_from_scope(scope: Scope) -> Redis | None:
+def _redis_from_scope(scope: Scope) -> RedisLike | None:
     """Starlette가 매 요청 scope["app"]에 심는 앱 인스턴스에서 redis를 얻는다.
 
     미들웨어 체인 객체를 .app으로 거슬러 올라가는 방식은 어떤 노드도 .state를
@@ -106,7 +105,7 @@ def _check_memory_fixed_window(key: str, window_sec: int, max_count: int) -> tup
 
 
 async def _check_redis_fixed_window(
-    redis: Redis,
+    redis: RedisLike,
     key: str,
     window_sec: int,
     max_count: int,
@@ -125,7 +124,7 @@ async def _check_redis_fixed_window(
 
 
 async def check_fixed_window(
-    redis: Redis | None,
+    redis: RedisLike | None,
     key: str,
     *,
     window_sec: int,
@@ -210,7 +209,7 @@ class RateLimitMiddleware:
             return
 
         ip = get_client_ip_from_scope(scope)
-        redis: Redis | None = _redis_from_scope(scope)
+        redis: RedisLike | None = _redis_from_scope(scope)
 
         if _path_is_login(path):
             key = f"login:{ip}"

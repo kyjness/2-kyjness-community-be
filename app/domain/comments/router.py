@@ -3,7 +3,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Request
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import (
@@ -27,6 +26,7 @@ from app.common import (
 )
 from app.domain.comments.schema import CommentIdData, CommentResponse, CommentUpsertRequest
 from app.domain.comments.service import CommentService
+from app.infra.redis import RedisLike
 
 router = APIRouter(prefix="/posts/{post_id}/comments", tags=["comments"])
 
@@ -38,7 +38,7 @@ async def create_comment(
     post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
-    redis: Redis | None = Depends(get_optional_redis),
+    redis: RedisLike | None = Depends(get_optional_redis),
 ):
     data = await CommentService.create_comment(post_id, user.id, comment_data, db=db, redis=redis)
     return api_response(request, code=ApiCode.OK, data=data)

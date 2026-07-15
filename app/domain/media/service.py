@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from uuid import UUID
 
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.exceptions import (
@@ -32,6 +31,7 @@ from app.domain.media.schema import (
     PresignUploadResponse,
     SignupImageUploadData,
 )
+from app.infra.redis import RedisLike
 from app.infra.storage import (
     build_url,
     head_pending_object,
@@ -65,7 +65,7 @@ async def _release_job_lock(redis: Any, *, lock_key: str, lock_value: str) -> No
 
 
 async def _try_acquire_job_lock(
-    redis: Redis | None,
+    redis: RedisLike | None,
     *,
     lock_key: str,
     ttl_seconds: int,
@@ -80,7 +80,7 @@ async def _try_acquire_job_lock(
         acquired = bool(await r.set(lock_key, lock_value, nx=True, ex=ttl_seconds))
         return acquired, (lock_value if acquired else None)
     except Exception as e:
-        # 스케줄러 작업의 보수적 가용성: Redis 장애 시 락 없이 진행.
+        # 스케줄러 작업의 보수적 가용성: RedisLike 장애 시 락 없이 진행.
         logger.warning("job lock unavailable key=%s fallback_without_lock err=%s", lock_key, e)
         return True, None
 
@@ -216,7 +216,7 @@ class MediaService:
         cls,
         body: ConfirmSignupUploadRequest,
         db: AsyncSession,
-        redis: Redis | None,
+        redis: RedisLike | None,
     ) -> SignupImageUploadData:
         dest_key, file_url, content_type, size = await cls._confirm_pending_key(
             body.file_key,
@@ -255,7 +255,7 @@ class MediaService:
             raise
 
     @classmethod
-    async def issue_upload_token(cls, image_id: UUID, redis: Redis | None) -> str:
+    async def issue_upload_token(cls, image_id: UUID, redis: RedisLike | None) -> str:
         if redis is None:
             raise InternalServerErrorException("Redis unavailable for upload token issuance.")
         token = secrets.token_urlsafe(32)
@@ -266,7 +266,7 @@ class MediaService:
         return token
 
     @classmethod
-    async def verify_upload_token(cls, token: str, redis: Redis | None) -> UUID | None:
+    async def verify_upload_token(cls, token: str, redis: RedisLike | None) -> UUID | None:
         if not token or redis is None:
             return None
         key = f"{_UPLOAD_TOKEN_KEY_PREFIX}{token}"
@@ -308,7 +308,7 @@ class MediaService:
             await asyncio.to_thread(storage_delete, file_key)
 
     @classmethod
-    async def sweep_unused_images(cls, db: AsyncSession, redis: Redis | None = None) -> int:
+    async def sweep_unused_images(cls, db: AsyncSession, redis: RedisLike | None = None) -> int:
         """24시간 이상 경과 + users/dog_profiles/post_images 어디에도 연결되지 않은 이미지 정리."""
         acquired, lock_value = await _try_acquire_job_lock(
             redis,
@@ -345,7 +345,7 @@ class MediaService:
 
     @classmethod
     async def cleanup_expired_signup_images(
-        cls, db: AsyncSession, *, task_id: str, redis: Redis | None = None
+        cls, db: AsyncSession, *, task_id: str, redis: RedisLike | None = None
     ) -> tuple[int, list[str]]:
         acquired, lock_value = await _try_acquire_job_lock(
             redis,

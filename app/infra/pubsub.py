@@ -15,10 +15,12 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, cast
+from typing import Any
 from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
+
+from app.infra.redis import RedisLike
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ UserEnvelopeHandler = Callable[[UUID, str], Awaitable[None]]
 
 
 async def publish_user_envelope(
-    redis: Redis | None,
+    redis: RedisLike | None,
     channel: str,
     *,
     target_user_ids: Sequence[UUID],
@@ -78,8 +80,7 @@ async def publish_user_envelope(
         ensure_ascii=False,
     )
     try:
-        r = cast(Any, redis)
-        await r.publish(channel, env)
+        await redis.publish(channel, env)
         return True
     except Exception:
         log.exception("pubsub publish 실패 channel=%s", channel)
@@ -148,8 +149,7 @@ async def _listen_once(
     client: Any = None
     pubsub: Any = None
     try:
-        # redis.asyncio 타입 스텁에 from_url 미정의 → 런타임 팩토리만 사용.
-        client = cast(Any, Redis).from_url(redis_url, decode_responses=True)
+        client = Redis.from_url(redis_url, decode_responses=True)
         await client.ping()
         pubsub = client.pubsub()
         await pubsub.subscribe(*handlers)

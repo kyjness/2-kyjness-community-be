@@ -2,13 +2,13 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Request
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import CurrentUser, get_current_user, get_master_db, get_optional_redis
 from app.common import ApiCode, ApiResponse, PublicId, api_response
 from app.domain.likes.schema import LikeResponseData
 from app.domain.likes.service import LikeService
+from app.infra.redis import RedisLike
 
 router = APIRouter(prefix="/likes", tags=["likes"])
 
@@ -19,7 +19,7 @@ async def like_post(
     post_id: Annotated[PublicId, Path(..., description="게시글 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
-    redis: Redis | None = Depends(get_optional_redis),
+    redis: RedisLike | None = Depends(get_optional_redis),
 ):
     is_liked, like_count, inserted = await LikeService.like_post(
         post_id, user.id, db=db, redis=redis
@@ -55,7 +55,7 @@ async def like_comment(
     comment_id: Annotated[PublicId, Path(..., description="댓글 공개 ID (Base62)")],
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_master_db),
-    redis: Redis | None = Depends(get_optional_redis),
+    redis: RedisLike | None = Depends(get_optional_redis),
 ):
     is_liked, like_count, inserted = await LikeService.like_comment(
         comment_id, user.id, db=db, redis=redis
