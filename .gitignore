@@ -97,10 +97,6 @@ dmypy.json
 # Jupyter 노트북 체크포인트
 .ipynb_checkpoints
 
-# pyenv
-# Python 버전 관리
-.python-version
-
 # Backup files
 # 백업 파일
 *.bak
